@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/SubMuxBatch.Core/SubMuxBatch.Core.csproj" />
+  <Project Path="src/SubMuxBatch.App/SubMuxBatch.App.csproj" />
+  <Project Path="tests/SubMuxBatch.Core.Tests/SubMuxBatch.Core.Tests.csproj" />
+</Solution>

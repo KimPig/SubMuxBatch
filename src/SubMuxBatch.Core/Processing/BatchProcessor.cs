@@ -1,0 +1,348 @@
+using System.Text;
+using SubMuxBatch.Core.Configuration;
+using SubMuxBatch.Core.Dependencies;
+using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.External;
+
+namespace SubMuxBatch.Core.Processing;
+
+public sealed class BatchProcessor(IProcessRunner processRunner)
+{
+    public async Task<JobResult> ProcessAsync(
+        MediaSet media,
+        ConversionPlan plan,
+        AppSettings settings,
+        DependencyReport dependencies,
+        IProgress<JobProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!plan.IsValid || media.VideoPath is null)
+        {
+            return new JobResult(JobState.Failed, null, plan.Warnings, plan.Error ?? "처리 계획이 유효하지 않습니다.");
+        }
+
+        if (!dependencies.IsReady || dependencies.MkvMerge.Path is null || dependencies.SeConv.Path is null)
+        {
+            return new JobResult(JobState.Failed, null, plan.Warnings, "mkvmerge 또는 seconv dependency를 찾지 못했습니다.");
+        }
+
+        var warnings = plan.Warnings.ToList();
+        var currentState = JobState.Ready;
+        var currentPercent = 0;
+
+        void LogToolOutput(string line)
+        {
+            var trimmedLine = line.TrimStart();
+            if (!string.IsNullOrWhiteSpace(line)
+                && !trimmedLine.StartsWith("#GUI#progress", StringComparison.Ordinal)
+                && !trimmedLine.StartsWith("#GUI#warning", StringComparison.Ordinal))
+            {
+                progress?.Report(new JobProgress(currentState, currentPercent, line));
+            }
+        }
+
+        void Report(JobState state, int percent, string message)
+        {
+            currentState = state;
+            currentPercent = Math.Clamp(percent, 0, 100);
+            progress?.Report(new JobProgress(state, currentPercent, message));
+        }
+
+        try
+        {
+            settings.Validate();
+            ValidateInputs(media, plan);
+
+            var preferredOutputPath = Path.Combine(
+                media.Key.DirectoryPath,
+                OutputFileNaming.Create(media.VideoPath, settings.OutputPrefix));
+
+            await using var workspace = JobWorkspace.Create(media.Key.DirectoryPath);
+            var seConv = new SeConvClient(dependencies.SeConv.Path, processRunner);
+            var mkvMerge = new MkvMergeClient(dependencies.MkvMerge.Path, processRunner);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string finalSrt;
+            switch (plan.SrtSource)
+            {
+                case SrtSourceKind.Existing:
+                    finalSrt = media.SrtPath!;
+                    break;
+
+                case SrtSourceKind.ConvertFromAss:
+                    Report(JobState.ConvertingAssToSrt, 8, "ASS를 SRT로 변환합니다.");
+                    finalSrt = Path.Combine(workspace.Path, "secondary.srt");
+                    var assToSrtResult = await seConv.ConvertAsync(
+                        media.AssPath!,
+                        finalSrt,
+                        SubtitleOutputFormat.SubRip,
+                        null,
+                        settings.PlayResX,
+                        settings.PlayResY,
+                        LogToolOutput,
+                        cancellationToken).ConfigureAwait(false);
+                    AddSeConvWarnings(warnings, assToSrtResult);
+                    break;
+
+                case SrtSourceKind.ConvertFromSmi:
+                    Report(JobState.ConvertingSmiToSrt, 8, "SMI를 SRT로 변환합니다.");
+                    finalSrt = Path.Combine(workspace.Path, "secondary.srt");
+                    var smiToSrtResult = await seConv.ConvertAsync(
+                        media.SmiPath!,
+                        finalSrt,
+                        SubtitleOutputFormat.SubRip,
+                        null,
+                        settings.PlayResX,
+                        settings.PlayResY,
+                        LogToolOutput,
+                        cancellationToken).ConfigureAwait(false);
+                    AddSeConvWarnings(warnings, smiToSrtResult);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(plan.SrtSource));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string finalAss;
+            switch (plan.AssSource)
+            {
+                case AssSourceKind.Existing:
+                    finalAss = media.AssPath!;
+                    break;
+
+                case AssSourceKind.ConvertFromSrt:
+                    Report(JobState.ConvertingSrtToAss, 24, "SRT를 기본 스타일의 ASS로 변환합니다.");
+                    finalAss = Path.Combine(workspace.Path, "primary.ass");
+                    var compatibleSrt = Path.Combine(workspace.Path, "ass-compatible.srt");
+                    await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
+                        finalSrt,
+                        compatibleSrt,
+                        cancellationToken).ConfigureAwait(false);
+                    string? stylePath = null;
+                    if (settings.UseCustomAssStyle)
+                    {
+                        stylePath = Path.Combine(workspace.Path, "default-style.ass");
+                        await File.WriteAllTextAsync(
+                            stylePath,
+                            AssStyleTemplateWriter.Create(settings),
+                            new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var srtToAssResult = await seConv.ConvertAsync(
+                        compatibleSrt,
+                        finalAss,
+                        SubtitleOutputFormat.AdvancedSubStationAlpha,
+                        stylePath,
+                        settings.PlayResX,
+                        settings.PlayResY,
+                        LogToolOutput,
+                        cancellationToken).ConfigureAwait(false);
+                    AddSeConvWarnings(warnings, srtToAssResult);
+
+                    // Subtitle Edit keeps most inline formatting, but it can drop ASS
+                    // position/move overrides carried inside SRT. Restore those tags
+                    // without changing their values.
+                    var convertedAss = await File.ReadAllTextAsync(finalAss, cancellationToken)
+                        .ConfigureAwait(false);
+                    var sourceSrt = await File.ReadAllTextAsync(compatibleSrt, cancellationToken)
+                        .ConfigureAwait(false);
+                    var adjustedAss = AssInlineStylePostProcessor.Apply(
+                        convertedAss,
+                        sourceSrt);
+                    await File.WriteAllTextAsync(
+                        finalAss,
+                        adjustedAss,
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                        cancellationToken).ConfigureAwait(false);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(plan.AssSource));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Report(JobState.Verifying, 34, "원본 영상 구조를 확인합니다.");
+            var sourceInspection = await mkvMerge.InspectAsync(media.VideoPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            var partialPath = Path.Combine(workspace.Path, "output.partial.mkv");
+            Report(JobState.Muxing, 38, "ASS와 SRT를 MKV에 병합합니다.");
+            var muxResult = await mkvMerge.MuxAsync(
+                media.VideoPath,
+                finalAss,
+                finalSrt,
+                partialPath,
+                muxPercent =>
+                {
+                    var totalPercent = 38 + (int)Math.Round(muxPercent * 0.54);
+                    Report(JobState.Muxing, totalPercent, $"MKV 병합 중 {muxPercent}%");
+                },
+                LogToolOutput,
+                cancellationToken,
+                removeExistingSubtitles: settings.RemoveExistingSubtitles,
+                removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
+                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                    ? settings.SelectedAudioLanguage
+                    : null).ConfigureAwait(false);
+
+            Report(JobState.Verifying, 94, "결과 트랙과 첨부 파일을 검증합니다.");
+            var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var validationErrors = MkvMergeClient.ValidateOutput(
+                sourceInspection,
+                outputInspection,
+                removeExistingSubtitles: settings.RemoveExistingSubtitles,
+                removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
+                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                    ? settings.SelectedAudioLanguage
+                    : null);
+            if (validationErrors.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "결과 MKV 검증에 실패했습니다." + Environment.NewLine + string.Join(Environment.NewLine, validationErrors));
+            }
+
+            foreach (var warning in muxResult.Warnings)
+            {
+                warnings.Add($"mkvmerge: {warning}");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            // Commit with an atomic, non-overwriting move. Selecting the candidate
+            // here keeps concurrent jobs from silently replacing one another.
+            var outputPath = CommitToAvailableOutput(partialPath, preferredOutputPath);
+
+            var finalState = warnings.Count > 0 ? JobState.SucceededWithWarnings : JobState.Succeeded;
+            Report(finalState, 100, $"완료: {outputPath}");
+            return new JobResult(finalState, outputPath, warnings);
+        }
+        catch (OperationCanceledException)
+        {
+            Report(JobState.Cancelled, currentPercent, "작업을 취소했습니다.");
+            throw;
+        }
+        catch (JobSkippedException exception)
+        {
+            Report(JobState.Skipped, currentPercent, exception.Message);
+            return new JobResult(JobState.Skipped, null, warnings, exception.Message);
+        }
+        catch (Exception exception)
+        {
+            Report(JobState.Failed, currentPercent, exception.Message);
+            return new JobResult(JobState.Failed, null, warnings, exception.Message);
+        }
+    }
+
+    private static void ValidateInputs(MediaSet media, ConversionPlan plan)
+    {
+        var required = new List<string?> { media.VideoPath };
+        if (plan.AssSource == AssSourceKind.Existing)
+        {
+            required.Add(media.AssPath);
+        }
+
+        switch (plan.SrtSource)
+        {
+            case SrtSourceKind.Existing:
+                required.Add(media.SrtPath);
+                break;
+            case SrtSourceKind.ConvertFromAss:
+                required.Add(media.AssPath);
+                break;
+            case SrtSourceKind.ConvertFromSmi:
+                required.Add(media.SmiPath);
+                break;
+        }
+
+        var missing = required.FirstOrDefault(static path => string.IsNullOrWhiteSpace(path) || !File.Exists(path));
+        if (missing is not null || required.Any(static path => path is null))
+        {
+            throw new FileNotFoundException("작업 시작 후 입력 파일이 이동되거나 삭제되었습니다.", missing);
+        }
+    }
+
+    private static void AddSeConvWarnings(ICollection<string> warnings, SeConvResult result)
+    {
+        foreach (var warning in result.Warnings)
+        {
+            warnings.Add($"Subtitle Edit: {warning}");
+        }
+    }
+
+    private static string CommitToAvailableOutput(string partialPath, string preferredOutputPath)
+    {
+        var directory = System.IO.Path.GetDirectoryName(preferredOutputPath)
+            ?? throw new ArgumentException("The output path must include a directory.", nameof(preferredOutputPath));
+        var fileNameWithoutExtension = System.IO.Path.GetFileNameWithoutExtension(preferredOutputPath);
+        var extension = System.IO.Path.GetExtension(preferredOutputPath);
+
+        for (var suffix = 0; suffix < int.MaxValue; suffix++)
+        {
+            var candidate = suffix == 0
+                ? preferredOutputPath
+                : System.IO.Path.Combine(directory, $"{fileNameWithoutExtension} ({suffix}){extension}");
+
+            try
+            {
+                File.Move(partialPath, candidate, overwrite: false);
+                return candidate;
+            }
+            catch (IOException) when (File.Exists(candidate))
+            {
+                // The existing candidate belongs to the user or another concurrent
+                // job. Keep the partial file and try the next suffix.
+            }
+        }
+
+        throw new IOException("No available output filename could be allocated.");
+    }
+
+    private sealed class JobWorkspace : IAsyncDisposable
+    {
+        private readonly string _parent;
+
+        private JobWorkspace(string parent, string path)
+        {
+            _parent = parent;
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static JobWorkspace Create(string outputDirectory)
+        {
+            var parent = System.IO.Path.GetFullPath(outputDirectory);
+            var path = System.IO.Path.Combine(parent, $"{WorkspaceNaming.CurrentPrefix}{Guid.NewGuid():N}");
+            Directory.CreateDirectory(path);
+            return new JobWorkspace(parent, path);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            try
+            {
+                var resolved = System.IO.Path.GetFullPath(Path);
+                var expectedParent = System.IO.Path.GetFullPath(_parent)
+                    .TrimEnd(System.IO.Path.DirectorySeparatorChar)
+                    + System.IO.Path.DirectorySeparatorChar;
+                var leaf = System.IO.Path.GetFileName(resolved);
+                if (resolved.StartsWith(expectedParent, StringComparison.OrdinalIgnoreCase)
+                    && leaf.StartsWith(WorkspaceNaming.CurrentPrefix, StringComparison.Ordinal)
+                    && Directory.Exists(resolved))
+                {
+                    Directory.Delete(resolved, recursive: true);
+                }
+            }
+            catch
+            {
+                // A locked temporary file is harmless and can be removed on the next cleanup pass.
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+}
