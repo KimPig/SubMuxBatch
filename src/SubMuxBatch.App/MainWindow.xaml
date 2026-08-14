@@ -325,12 +325,6 @@
                         <Button x:Name="AddFolderButton" Content="폴더 추가" Click="AddFolderButton_Click" />
                         <Button x:Name="RemoveButton" Content="선택 제거" Click="RemoveButton_Click" />
                         <Button x:Name="ClearButton" Content="전체 비우기" Click="ClearButton_Click" />
-                        <CheckBox x:Name="RecursiveCheckBox"
-                                  Margin="9,8,4,7"
-                                  VerticalAlignment="Center"
-                                  Content="하위 폴더 포함"
-                                  Checked="RecursiveCheckBox_Changed"
-                                  Unchecked="RecursiveCheckBox_Changed" />
                         <TextBlock Margin="12,8,4,7"
                                    VerticalAlignment="Center"
                                    Foreground="{StaticResource SecondaryTextBrush}"

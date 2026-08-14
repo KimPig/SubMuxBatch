@@ -117,7 +117,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         WindowPlacementHelper.FitToCurrentWorkingArea(this);
         _settings = AppSettings.Load();
         RefreshQueueColumnPresentation();
-        RecursiveCheckBox.IsChecked = _settings.IncludeSubdirectories;
         _logger = new SessionLogger();
         AppendLog("SubMux Batch를 시작했습니다.");
         RefreshDependencies();
@@ -181,7 +180,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _settings.AllowSubtitleSuffixMatch);
             var discovered = await discovery.DiscoverAsync(
                 snapshot,
-                RecursiveCheckBox.IsChecked == true,
+                _settings.IncludeSubdirectories,
                 scanCancellation.Token);
 
             if (replaceQueue)
@@ -1005,15 +1004,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             : LogicalTreeHelper.GetParent(child);
     }
 
-    private void RecursiveCheckBox_Changed(object sender, RoutedEventArgs e)
-    {
-        _settings.IncludeSubdirectories = RecursiveCheckBox.IsChecked == true;
-        if (IsLoaded)
-        {
-            _settings.Save();
-        }
-    }
-
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (IsInteractionLocked)
@@ -1027,7 +1017,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var matchingChanged = _settings.AllowSubtitleSuffixMatch != dialog.Settings.AllowSubtitleSuffixMatch;
             _settings = dialog.Settings;
             RefreshQueueColumnPresentation();
-            RecursiveCheckBox.IsChecked = _settings.IncludeSubdirectories;
             foreach (var job in Jobs)
             {
                 job.RefreshPresentation(_settings);
@@ -1633,7 +1622,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         QueueHeader.IsEnabled = !locked;
         RemoveButton.IsEnabled = !locked && JobsList.SelectedItems.Count > 0;
         ClearButton.IsEnabled = !locked && Jobs.Count > 0;
-        RecursiveCheckBox.IsEnabled = !locked;
         CancelButton.IsEnabled = _isBusy && _processingCancellation?.IsCancellationRequested == false;
     }
 
