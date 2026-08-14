@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -12,6 +14,7 @@ using System.Windows.Media.Media3D;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
 using SubMuxBatch.App.ViewModels;
 using SubMuxBatch.Core.Configuration;
@@ -36,6 +39,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private SessionLogger? _logger;
     private readonly StringBuilder _sessionLog = new();
     private LogWindow? _logWindow;
+    private readonly Dictionary<QueueItemViewModel, StringBuilder> _jobLogs = [];
+    private readonly Dictionary<QueueItemViewModel, LogWindow> _jobLogWindows = [];
     private CompletionNotificationWindow? _completionNotificationWindow;
     private bool _isBusy;
     private bool _isScanning;
@@ -47,12 +52,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string? _queueSortProperty;
     private ListSortDirection? _queueSortDirection;
     private long _queueRevealVersion;
+    private long _queueUserScrollInputVersion;
+    private bool _queueAutoFollowEnabled = true;
+    private bool _queueUserScrollInputActive;
+    private bool _queueScrollBarPointerDown;
     private bool _queueColumnWidthsDirty;
+    private ScrollViewer? _queueScrollViewer;
+    private bool _queueEndSpacerVisible;
+    private readonly QueueEndSpacerViewModel _queueEndSpacer = new();
+    private GridLength[] _queueRowColumnWidths = [];
+    private double _queueRowHorizontalOffset;
+    private double _queueViewportWidth = double.NaN;
     private static readonly string[] QueueColumnProperties =
     [
         nameof(QueueItemViewModel.Name),
         nameof(QueueItemViewModel.DetectedFiles),
         nameof(QueueItemViewModel.MediaFormatText),
+        nameof(QueueItemViewModel.DurationText),
         nameof(QueueItemViewModel.VideoCodecText),
         nameof(QueueItemViewModel.PlanDescription),
         nameof(QueueItemViewModel.StatusText)
@@ -73,6 +89,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public MainWindow()
     {
         InitializeComponent();
+        Jobs.CollectionChanged += Jobs_CollectionChanged;
         VersionText.Text = GetDisplayVersion();
         DataContext = this;
     }
@@ -85,29 +102,110 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     public ObservableCollection<QueueItemViewModel> Jobs { get; } = [];
+    public ObservableCollection<object> QueueRows { get; } = [];
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void Jobs_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (Jobs.Count == 0)
+        {
+            _queueEndSpacerVisible = false;
+        }
+
+        RefreshQueueRows();
+    }
+
+    private void RefreshQueueRows()
+    {
+        QueueRows.Clear();
+        foreach (var job in Jobs)
+        {
+            QueueRows.Add(job);
+        }
+
+        if (_queueEndSpacerVisible && Jobs.Count > 0)
+        {
+            QueueRows.Add(_queueEndSpacer);
+        }
+    }
 
     public GridLength FileColumnWidth => CreateQueueColumnWidth(_settings.ShowFileColumn, _settings.FileColumnWeight);
     public GridLength CompositionColumnWidth => CreateQueueColumnWidth(_settings.ShowCompositionColumn, _settings.CompositionColumnWeight);
     public GridLength MediaFormatColumnWidth => CreateQueueColumnWidth(_settings.ShowMediaFormatColumn, _settings.MediaFormatColumnWeight);
+    public GridLength DurationColumnWidth => CreateQueueColumnWidth(_settings.ShowDurationColumn, _settings.DurationColumnWeight);
     public GridLength VideoCodecColumnWidth => CreateQueueColumnWidth(_settings.ShowVideoCodecColumn, _settings.VideoCodecColumnWeight);
     public GridLength WorkColumnWidth => CreateQueueColumnWidth(_settings.ShowWorkColumn, _settings.WorkColumnWeight);
     public GridLength StatusColumnWidth => CreateQueueColumnWidth(_settings.ShowStatusColumn, _settings.StatusColumnWeight);
+    public GridLength QueueRowFileColumnWidth => GetQueueRowColumnWidth(0, FileColumnWidth);
+    public GridLength QueueRowCompositionColumnWidth => GetQueueRowColumnWidth(1, CompositionColumnWidth);
+    public GridLength QueueRowMediaFormatColumnWidth => GetQueueRowColumnWidth(2, MediaFormatColumnWidth);
+    public GridLength QueueRowDurationColumnWidth => GetQueueRowColumnWidth(3, DurationColumnWidth);
+    public GridLength QueueRowVideoCodecColumnWidth => GetQueueRowColumnWidth(4, VideoCodecColumnWidth);
+    public GridLength QueueRowWorkColumnWidth => GetQueueRowColumnWidth(5, WorkColumnWidth);
+    public GridLength QueueRowStatusColumnWidth => GetQueueRowColumnWidth(6, StatusColumnWidth);
+    public Thickness QueueRowContentMargin => new(
+        _queueRowHorizontalOffset,
+        0,
+        -_queueRowHorizontalOffset,
+        0);
 
     public Visibility FileColumnVisibility => ToVisibility(_settings.ShowFileColumn);
     public Visibility CompositionColumnVisibility => ToVisibility(_settings.ShowCompositionColumn);
     public Visibility MediaFormatColumnVisibility => ToVisibility(_settings.ShowMediaFormatColumn);
+    public Visibility DurationColumnVisibility => ToVisibility(_settings.ShowDurationColumn);
     public Visibility VideoCodecColumnVisibility => ToVisibility(_settings.ShowVideoCodecColumn);
     public Visibility WorkColumnVisibility => ToVisibility(_settings.ShowWorkColumn);
     public Visibility StatusColumnVisibility => ToVisibility(_settings.ShowStatusColumn);
     public Visibility FileColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.Name)));
     public Visibility CompositionColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.DetectedFiles)));
     public Visibility MediaFormatColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.MediaFormatText)));
+    public Visibility DurationColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.DurationText)));
     public Visibility VideoCodecColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.VideoCodecText)));
     public Visibility WorkColumnResizeVisibility => ToVisibility(CanResizeQueueColumn(nameof(QueueItemViewModel.PlanDescription)));
 
-    private static GridLength CreateQueueColumnWidth(bool visible, double starWeight) =>
-        visible ? new GridLength(starWeight, GridUnitType.Star) : new GridLength(0);
+    public double QueueHeaderContentWidth => GetQueueContentWidth();
+    public Thickness QueueHeaderContentMargin => new(0);
+
+    private GridLength CreateQueueColumnWidth(bool visible, double weight)
+    {
+        if (!visible)
+        {
+            return new GridLength(0);
+        }
+
+        var contentWidth = GetQueueContentWidth();
+        if (double.IsFinite(contentWidth) && contentWidth > 0)
+        {
+            var totalWeight = QueueColumnProperties
+                .Where(IsQueueColumnVisible)
+                .Sum(GetQueueColumnWeight);
+            return totalWeight > 0
+                ? new GridLength(contentWidth * weight / totalWeight, GridUnitType.Pixel)
+                : new GridLength(0);
+        }
+
+        return new GridLength(weight, GridUnitType.Star);
+    }
+
+    private double GetQueueContentWidth()
+    {
+        if (double.IsFinite(_queueViewportWidth) && _queueViewportWidth > 0)
+        {
+            return _queueViewportWidth;
+        }
+
+        if (_queueScrollViewer?.ViewportWidth > 0)
+        {
+            return _queueScrollViewer.ViewportWidth;
+        }
+
+        return QueueHeader?.ActualWidth > 0
+            ? Math.Max(0, QueueHeader.ActualWidth - SystemParameters.VerticalScrollBarWidth)
+            : double.NaN;
+    }
+
+    private GridLength GetQueueRowColumnWidth(int columnIndex, GridLength fallback) =>
+        columnIndex < _queueRowColumnWidths.Length ? _queueRowColumnWidths[columnIndex] : fallback;
 
     private static Visibility ToVisibility(bool visible) =>
         visible ? Visibility.Visible : Visibility.Collapsed;
@@ -118,8 +216,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings = AppSettings.Load();
         RefreshQueueColumnPresentation();
         _logger = new SessionLogger();
-        AppendLog("SubMux Batch를 시작했습니다.");
-        RefreshDependencies();
+        AppendLog(AppText.Get("Log_AppStarted"));
+        RefreshDependencies(persistResolvedPaths: true);
         UpdateControls();
     }
 
@@ -127,8 +225,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var dialog = new OpenFileDialog
         {
-            Title = "영상 또는 자막 파일 추가",
-            Filter = $"지원 파일|{MediaInputFormats.SupportedDialogPattern}|영상|{MediaInputFormats.VideoDialogPattern}|자막|{MediaInputFormats.SubtitleDialogPattern}|모든 파일|*.*",
+            Title = AppText.Get("Dialog_AddFilesTitle"),
+            Filter = AppText.Get(
+                "Dialog_FileFilter",
+                MediaInputFormats.SupportedDialogPattern,
+                MediaInputFormats.VideoDialogPattern,
+                MediaInputFormats.SubtitleDialogPattern),
             Multiselect = true,
             CheckFileExists = true
         };
@@ -143,7 +245,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "영상과 자막이 있는 폴더 선택",
+            Title = AppText.Get("Dialog_AddFolderTitle"),
             Multiselect = true
         };
 
@@ -174,7 +276,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            OverallStatusText.Text = "파일을 확인하고 있습니다…";
+            OverallStatusText.Text = AppText.Get("Main_ScanningFiles");
             var discovery = new MediaSetDiscovery(
                 _settings.OutputPrefix,
                 _settings.AllowSubtitleSuffixMatch);
@@ -211,28 +313,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var mediaInfoTargets = Jobs.Where(static job => job.NeedsMediaInspection).ToArray();
             if (mediaInfoTargets.Length > 0)
             {
-                OverallStatusText.Text = $"영상 정보를 읽고 있습니다… (0/{mediaInfoTargets.Length})";
+                OverallStatusText.Text = AppText.Get("Main_ReadingMediaInfo", 0, mediaInfoTargets.Length);
                 await LoadMediaDetailsAsync(mediaInfoTargets, scanCancellation.Token);
             }
 
-            AppendLog($"입력 {snapshot.Length}개에서 미디어 작업 {discovered.Count}개를 확인했습니다.");
+            AppendLog(AppText.Get("Log_DiscoveryResult", snapshot.Length, discovered.Count));
             if (JobsList.SelectedItem is null && Jobs.Count > 0)
             {
                 JobsList.SelectedIndex = 0;
             }
 
             OverallStatusText.Text = Jobs.Count == 0
-                ? "지원하는 파일을 찾지 못했습니다."
-                : $"{Jobs.Count}개 작업, {Jobs.Count(static job => job.IsValid)}개 처리 가능";
+                ? AppText.Get("Main_NoSupportedFiles")
+                : AppText.Get("Main_JobCount", Jobs.Count, Jobs.Count(static job => job.IsValid));
         }
         catch (OperationCanceledException)
         {
-            AppendLog("파일 탐색을 취소했습니다.");
+            AppendLog(AppText.Get("Log_DiscoveryCancelled"));
         }
         catch (Exception exception)
         {
-            AppendLog($"파일 탐색 실패: {exception.Message}");
-            MessageBox.Show(this, exception.Message, "파일 탐색 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppendLog(AppText.Get("Log_DiscoveryFailed", exception.Message));
+            MessageBox.Show(this, exception.Message, AppText.Get("Dialog_DiscoveryFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -258,7 +360,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             foreach (var target in targets)
             {
-                target.SetMediaInspectionError("mkvmerge 경로를 설정하면 표시됩니다.");
+                target.SetMediaInspectionError(AppText.Get("MediaInfo_SetMkvMergePath"));
             }
 
             return;
@@ -291,27 +393,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             catch (Exception exception)
             {
                 Interlocked.Increment(ref failed);
-                await Dispatcher.InvokeAsync(() => target.SetMediaInspectionError(exception.Message));
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    target.SetMediaInspectionError(exception.Message);
+                    AppendJobLog(target, AppText.Get("Log_MediaInspectionFailed", exception.Message));
+                });
             }
             finally
             {
                 concurrency.Release();
                 var current = Interlocked.Increment(ref completed);
                 await Dispatcher.InvokeAsync(() =>
-                    OverallStatusText.Text = $"영상 정보를 읽고 있습니다… ({current}/{targets.Count})");
+                    OverallStatusText.Text = AppText.Get("Main_ReadingMediaInfo", current, targets.Count));
             }
         });
 
         await Task.WhenAll(tasks);
         if (failed > 0)
         {
-            AppendLog($"영상 정보 {targets.Count}개 중 {failed}개를 읽지 못했습니다.");
+            AppendLog(AppText.Get("Log_MediaInspectionSummary", targets.Count, failed));
         }
     }
 
     private void RemoveButton_Click(object sender, RoutedEventArgs e)
     {
-        var selected = JobsList.SelectedItems.Cast<QueueItemViewModel>().ToArray();
+        var selected = JobsList.SelectedItems.OfType<QueueItemViewModel>().ToArray();
         foreach (var item in selected)
         {
             Jobs.Remove(item);
@@ -320,8 +426,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClearQueueSortIndicators();
         ClearOverallProgress();
         OverallStatusText.Text = Jobs.Count == 0
-            ? "파일을 추가해 주세요."
-            : $"{Jobs.Count}개 작업, {Jobs.Count(static job => job.IsValid)}개 처리 가능";
+            ? AppText.Get("Main_AddFilesPrompt")
+            : AppText.Get("Main_JobCount", Jobs.Count, Jobs.Count(static job => job.IsValid));
 
         UpdateControls();
     }
@@ -331,7 +437,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Jobs.Clear();
         ClearQueueSortIndicators();
         JobsList.SelectedItem = null;
-        OverallStatusText.Text = "파일을 추가해 주세요.";
+        OverallStatusText.Text = AppText.Get("Main_AddFilesPrompt");
         ClearOverallProgress();
         UpdateControls();
     }
@@ -345,11 +451,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        SortQueue(propertyName);
+    }
+
+    private void SortQueue(string propertyName)
+    {
+
         var direction = string.Equals(propertyName, _queueSortProperty, StringComparison.Ordinal)
             && _queueSortDirection == ListSortDirection.Ascending
                 ? ListSortDirection.Descending
                 : ListSortDirection.Ascending;
-        var selectedItems = JobsList.SelectedItems.Cast<QueueItemViewModel>().ToArray();
+        var selectedItems = JobsList.SelectedItems.OfType<QueueItemViewModel>().ToArray();
         var currentItem = JobsList.SelectedItem as QueueItemViewModel;
         var ordered = SortJobs(propertyName, direction).ToArray();
 
@@ -470,8 +582,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             menuItem.IsChecked = previousValue;
             MessageBox.Show(
                 this,
-                $"큐 열 설정을 저장하지 못했습니다.{Environment.NewLine}{exception.Message}",
-                "설정 저장 실패",
+                AppText.Get("Settings_SaveQueueColumnsFailed", exception.Message),
+                AppText.Get("Settings_SaveFailedTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -488,6 +600,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             nameof(QueueItemViewModel.Name) => static job => job.Name,
             nameof(QueueItemViewModel.DetectedFiles) => static job => job.DetectedFiles,
             nameof(QueueItemViewModel.MediaFormatText) => static job => job.MediaFormatText,
+            nameof(QueueItemViewModel.DurationText) => static job => job.DurationText,
             nameof(QueueItemViewModel.VideoCodecText) => static job => job.VideoCodecText,
             nameof(QueueItemViewModel.PlanDescription) => static job => job.PlanDescription,
             nameof(QueueItemViewModel.StatusText) => static job => job.StatusText,
@@ -520,9 +633,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var source = e.OriginalSource as DependencyObject;
-        if (source is null
-            || FindVisualParent<ScrollBar>(source) is not null
-            || FindVisualParent<ButtonBase>(source) is not null)
+        if (source is null)
+        {
+            return;
+        }
+
+        if (FindVisualParent<ScrollBar>(source) is not null)
+        {
+            BeginQueueScrollBarInteraction();
+            return;
+        }
+
+        if (FindVisualParent<ButtonBase>(source) is not null)
         {
             return;
         }
@@ -531,6 +653,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (container is null)
         {
             JobsList.UnselectAll();
+            return;
+        }
+
+        if (container.DataContext is QueueEndSpacerViewModel)
+        {
+            JobsList.UnselectAll();
+            e.Handled = true;
             return;
         }
 
@@ -543,7 +672,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _queueDragItem = item;
         _queueDragItemWasSelected = container.IsSelected;
         _queueSelectionBeforeMouseDown = JobsList.SelectedItems
-            .Cast<QueueItemViewModel>()
+            .OfType<QueueItemViewModel>()
             .ToArray();
     }
 
@@ -551,8 +680,68 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (e.ChangedButton == MouseButton.Left)
         {
+            EndQueueScrollBarInteraction();
             ResetQueueDragCandidate();
         }
+    }
+
+    private void JobsList_PreviewMouseWheel(object sender, MouseWheelEventArgs e) =>
+        BeginTransientQueueUserScrollInput();
+
+    private void JobsList_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End)
+        {
+            BeginTransientQueueUserScrollInput();
+        }
+    }
+
+    private void BeginQueueScrollBarInteraction()
+    {
+        if (!_isBusy)
+        {
+            return;
+        }
+
+        _queueScrollBarPointerDown = true;
+        _queueUserScrollInputActive = true;
+        _queueUserScrollInputVersion++;
+    }
+
+    private void EndQueueScrollBarInteraction()
+    {
+        if (!_queueScrollBarPointerDown)
+        {
+            return;
+        }
+
+        _queueScrollBarPointerDown = false;
+        ScheduleQueueUserScrollInputReset();
+    }
+
+    private void BeginTransientQueueUserScrollInput()
+    {
+        if (!_isBusy)
+        {
+            return;
+        }
+
+        _queueUserScrollInputActive = true;
+        ScheduleQueueUserScrollInputReset();
+    }
+
+    private void ScheduleQueueUserScrollInputReset()
+    {
+        var version = ++_queueUserScrollInputVersion;
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            () =>
+            {
+                if (version == _queueUserScrollInputVersion && !_queueScrollBarPointerDown)
+                {
+                    _queueUserScrollInputActive = false;
+                }
+            });
     }
 
     private void JobsList_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -585,7 +774,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var selectedItems = _queueDragItemWasSelected
                             && _queueSelectionBeforeMouseDown.Contains(draggedItem)
             ? _queueSelectionBeforeMouseDown
-            : JobsList.SelectedItems.Cast<QueueItemViewModel>().ToArray();
+            : JobsList.SelectedItems.OfType<QueueItemViewModel>().ToArray();
         if (!selectedItems.Contains(draggedItem))
         {
             selectedItems = [draggedItem];
@@ -856,6 +1045,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             case nameof(QueueItemViewModel.MediaFormatText):
                 MediaFormatSortGlyph.Text = glyph;
                 break;
+            case nameof(QueueItemViewModel.DurationText):
+                DurationSortGlyph.Text = glyph;
+                break;
             case nameof(QueueItemViewModel.VideoCodecText):
                 VideoCodecSortGlyph.Text = glyph;
                 break;
@@ -873,10 +1065,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         NameSortGlyph.Text = string.Empty;
         DetectedFilesSortGlyph.Text = string.Empty;
         MediaFormatSortGlyph.Text = string.Empty;
+        DurationSortGlyph.Text = string.Empty;
         VideoCodecSortGlyph.Text = string.Empty;
         PlanDescriptionSortGlyph.Text = string.Empty;
         StatusTextSortGlyph.Text = string.Empty;
     }
+
 
     private void RestoreQueueSelection(
         IEnumerable<QueueItemViewModel> selectedItems,
@@ -963,6 +1157,183 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             HideQueueSortGlyphs();
             ClearQueueHeaderFocus();
         }
+
+    }
+
+    private void JobsList_LayoutUpdated(object? sender, EventArgs e)
+    {
+        EnsureQueueScrollViewer();
+        UpdateQueueViewportWidth();
+        UpdateQueueEndSpacer();
+        UpdateQueueRowAlignment();
+    }
+
+    private void UpdateQueueRowAlignment()
+    {
+        if (Jobs.Count == 0)
+        {
+            return;
+        }
+
+        var realizedRow = FindVisualChild<ListBoxItem>(JobsList);
+        if (realizedRow is null)
+        {
+            return;
+        }
+
+        var headerX = QueueHeaderGrid.TransformToAncestor(this).Transform(new Point()).X;
+        var rowX = realizedRow.TransformToAncestor(this).Transform(new Point()).X;
+        var nextOffset = headerX - rowX;
+        if (Math.Abs(nextOffset - _queueRowHorizontalOffset) < 0.01)
+        {
+            return;
+        }
+
+        _queueRowHorizontalOffset = nextOffset;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowContentMargin)));
+    }
+
+    private void QueueHeader_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateQueueViewportWidth();
+    }
+
+    private void QueueHeaderGrid_LayoutUpdated(object? sender, EventArgs e)
+    {
+        if (QueueHeaderGrid.ColumnDefinitions.Count != QueueColumnProperties.Length)
+        {
+            return;
+        }
+
+        var widths = QueueHeaderGrid.ColumnDefinitions
+            .Select(static column => column.ActualWidth)
+            .ToArray();
+        if (widths.All(static width => width <= 0)
+            || (_queueRowColumnWidths.Length == widths.Length
+                && widths.Select((width, index) => Math.Abs(width - _queueRowColumnWidths[index].Value) < 0.01).All(static equal => equal)))
+        {
+            return;
+        }
+
+        _queueRowColumnWidths = widths
+            .Select(static width => new GridLength(width, GridUnitType.Pixel))
+            .ToArray();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowFileColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowCompositionColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowMediaFormatColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowDurationColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowVideoCodecColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowWorkColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowStatusColumnWidth)));
+    }
+
+    private void EnsureQueueScrollViewer()
+    {
+        var scrollViewer = FindVisualChild<ScrollViewer>(JobsList);
+        if (ReferenceEquals(_queueScrollViewer, scrollViewer))
+        {
+            return;
+        }
+
+        if (_queueScrollViewer is not null)
+        {
+            _queueScrollViewer.SizeChanged -= QueueScrollViewer_SizeChanged;
+            _queueScrollViewer.ScrollChanged -= QueueScrollViewer_ScrollChanged;
+        }
+
+        _queueScrollViewer = scrollViewer;
+        if (_queueScrollViewer is not null)
+        {
+            _queueScrollViewer.SizeChanged += QueueScrollViewer_SizeChanged;
+            _queueScrollViewer.ScrollChanged += QueueScrollViewer_ScrollChanged;
+        }
+
+        UpdateQueueViewportWidth(force: true);
+    }
+
+    private void QueueScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            () => UpdateQueueViewportWidth());
+
+    private void QueueScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (Math.Abs(e.ViewportWidthChange) >= 0.01)
+        {
+            UpdateQueueViewportWidth();
+        }
+
+        if (_isBusy
+            && _queueUserScrollInputActive
+            && Math.Abs(e.VerticalChange) >= 0.01)
+        {
+            _queueAutoFollowEnabled = IsQueueScrolledToBottom();
+        }
+    }
+
+    private bool IsQueueScrolledToBottom() =>
+        _queueScrollViewer is null
+        || _queueScrollViewer.ScrollableHeight - _queueScrollViewer.VerticalOffset <= 1;
+
+    private void UpdateQueueViewportWidth(bool force = false)
+    {
+        var viewportWidth = _queueScrollViewer?.ViewportWidth ?? 0;
+        if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)
+        {
+            return;
+        }
+
+        if (!force
+            && double.IsFinite(_queueViewportWidth)
+            && Math.Abs(viewportWidth - _queueViewportWidth) < 0.01)
+        {
+            return;
+        }
+
+        _queueViewportWidth = viewportWidth;
+        RefreshQueueViewportLayout();
+    }
+
+    private void RefreshQueueViewportLayout()
+    {
+        RefreshQueueColumnWidths();
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueHeaderContentWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueHeaderContentMargin)));
+    }
+
+    private void UpdateQueueEndSpacer()
+    {
+        if (_queueScrollViewer is null)
+        {
+            return;
+        }
+
+        var spacerHeight = _queueEndSpacerVisible
+            && JobsList.ItemContainerGenerator.ContainerFromItem(_queueEndSpacer) is FrameworkElement spacerContainer
+            ? spacerContainer.ActualHeight
+            : 0;
+        var itemExtentHeight = Math.Max(0, _queueScrollViewer.ExtentHeight - spacerHeight);
+        var shouldShowSpacer = Jobs.Count > 0
+            && itemExtentHeight > _queueScrollViewer.ViewportHeight + 0.1;
+        if (shouldShowSpacer == _queueEndSpacerVisible)
+        {
+            return;
+        }
+
+        var selectedItems = JobsList.SelectedItems.OfType<QueueItemViewModel>().ToArray();
+        var currentItem = JobsList.SelectedItem as QueueItemViewModel;
+        _queueEndSpacerVisible = shouldShowSpacer;
+        RefreshQueueRows();
+        JobsList.SelectedItems.Clear();
+        foreach (var item in selectedItems.Where(Jobs.Contains))
+        {
+            JobsList.SelectedItems.Add(item);
+        }
+
+        if (currentItem is not null && Jobs.Contains(currentItem))
+        {
+            JobsList.SelectedItem = currentItem;
+        }
     }
 
     private void ClearQueueHeaderFocus()
@@ -1011,10 +1382,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var dialog = new SettingsWindow(_settings.Copy()) { Owner = this };
+        var dialog = new SettingsWindow(_settings.Copy(), _dependencies) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
             var matchingChanged = _settings.AllowSubtitleSuffixMatch != dialog.Settings.AllowSubtitleSuffixMatch;
+            var languageChanged = App.RequiresLanguageRestart(dialog.Settings.Language);
             _settings = dialog.Settings;
             RefreshQueueColumnPresentation();
             foreach (var job in Jobs)
@@ -1022,7 +1394,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 job.RefreshPresentation(_settings);
             }
 
-            AppendLog("설정을 저장했습니다.");
+            AppendLog(AppText.Get("Log_SettingsSaved"));
             if (matchingChanged && Jobs.Count > 0)
             {
                 var inputs = Jobs
@@ -1035,11 +1407,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
                 await AddPathsAsync(inputs, replaceQueue: true);
-                AppendLog("자막 파일명 매칭 방식에 맞춰 현재 큐를 다시 구성했습니다.");
+                AppendLog(AppText.Get("Log_QueueRebuilt"));
             }
 
-            RefreshDependencies();
+            RefreshDependencies(persistResolvedPaths: true);
             UpdateControls();
+
+            if (languageChanged)
+            {
+                var restartDialog = new LanguageRestartWindow { Owner = this };
+                if (restartDialog.ShowDialog() == true)
+                {
+                    RestartApplication();
+                }
+            }
+        }
+    }
+
+    private void RestartApplication()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                throw new InvalidOperationException(AppText.Get("Dialog_RestartPathMissing"));
+            }
+
+            Process.Start(new ProcessStartInfo(executablePath)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+            Application.Current.Shutdown();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                AppText.Get("Dialog_RestartFailed", exception.Message),
+                AppText.Get("Dialog_RestartFailedTitle"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -1050,13 +1459,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        RefreshDependencies();
+        RefreshDependencies(persistResolvedPaths: true);
         if (_dependencies is null || !_dependencies.IsReady)
         {
             MessageBox.Show(
                 this,
-                "mkvmerge와 seconv 경로를 먼저 설정해 주세요.",
-                "Dependency 없음",
+                AppText.Get("Dialog_MissingDependencies"),
+                AppText.Get("Dialog_MissingDependenciesTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -1069,7 +1478,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, exception.Message, "설정 확인", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, exception.Message, AppText.Get("Settings_ValidationTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -1086,7 +1495,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CloseCompletionNotification();
         _processingCancellation = processingCancellation;
         SetBusy(true);
-        AppendLog($"배치 작업을 시작합니다. 대상: {targets.Length}개 · 동시 작업: {workerCount}개");
+        _queueAutoFollowEnabled = true;
+        _queueUserScrollInputActive = false;
+        _queueScrollBarPointerDown = false;
+        AppendLog(AppText.Get("Log_BatchStarted", targets.Length, workerCount));
 
         foreach (var target in targets)
         {
@@ -1123,7 +1535,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var waitingCount = Math.Max(0, targets.Length - Math.Min(nextTargetIndex, targets.Length));
             OverallStatusText.Text =
-                $"완료 {finishedCount}/{targets.Length} · 실행 {activeCount} · 대기 {waitingCount}";
+                AppText.Get("Main_BatchProgress", finishedCount, targets.Length, activeCount, waitingCount);
         }
 
         async Task ProcessTargetAsync(int index)
@@ -1131,7 +1543,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var target = targets[index];
             RevealStartedTarget(target);
             activeCount++;
-            AppendLog($"[{target.Name}] {target.PlanDescription}");
+            AppendJobLog(target, target.PlanDescription);
             RefreshBatchStatus();
 
             var lastMessage = string.Empty;
@@ -1146,11 +1558,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 target.ApplyProgress(update);
                 progressByJob[index] = Math.Max(progressByJob[index], Math.Clamp(update.Percent, 0, 100));
                 RefreshBatchProgress();
-                if (!string.IsNullOrWhiteSpace(update.Message)
+                if (update.State is not (JobState.Skipped or JobState.Failed)
+                    && !string.IsNullOrWhiteSpace(update.Message)
                     && !string.Equals(lastMessage, update.Message, StringComparison.Ordinal))
                 {
                     lastMessage = update.Message;
-                    AppendLog($"[{target.Name}] {update.Message}");
+                    AppendJobLog(target, update.Message);
                 }
             });
 
@@ -1177,20 +1590,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 progressByJob[index] = 100;
                 foreach (var warning in result.Warnings)
                 {
-                    AppendLog($"[{target.Name}] 경고: {warning}");
+                    if (result.State != JobState.Skipped
+                        || result.Error?.Contains(warning, StringComparison.Ordinal) != true)
+                    {
+                        AppendJobLog(target, AppText.Get("Common_WarningValue", warning));
+                    }
                 }
 
                 if (result.Error is not null)
                 {
-                    var resultLabel = result.State == JobState.Skipped ? "건너뜀" : "실패";
-                    AppendLog($"[{target.Name}] {resultLabel}: {result.Error}");
+                    var resultLabel = AppText.Get(
+                        result.State == JobState.Skipped ? "Status_Skipped" : "Status_Failed");
+                    AppendJobLog(target, $"{resultLabel}: {result.Error}");
                 }
             }
             catch (OperationCanceledException)
             {
                 terminal[index] = true;
                 target.State = JobState.Cancelled;
-                AppendLog($"[{target.Name}] 작업이 취소되었습니다.");
+                AppendJobLog(target, AppText.Get("Log_JobCancelled"));
             }
             catch (Exception exception)
             {
@@ -1198,7 +1616,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 target.State = JobState.Failed;
                 target.Error = exception.Message;
                 progressByJob[index] = 100;
-                AppendLog($"[{target.Name}] 예기치 않은 실패: {exception.Message}");
+                AppendJobLog(target, AppText.Get("Log_UnexpectedFailure", exception.Message));
             }
             finally
             {
@@ -1241,7 +1659,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     }
                 }
 
-                OverallStatusText.Text = "배치 작업을 취소했습니다.";
+                OverallStatusText.Text = AppText.Get("Main_BatchCancelled");
                 ClearOverallProgress();
                 AppendLog(OverallStatusText.Text);
             }
@@ -1251,7 +1669,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 var warnings = targets.Count(static job => job.State == JobState.SucceededWithWarnings);
                 var failed = targets.Count(static job => job.State == JobState.Failed);
                 var skipped = targets.Count(static job => job.State == JobState.Skipped);
-                OverallStatusText.Text = $"완료 {succeeded + warnings} · 실패 {failed} · 건너뜀 {skipped}";
+                OverallStatusText.Text = AppText.Get("Main_BatchCompleted", succeeded + warnings, failed, skipped);
                 SetOverallProgress(
                     100,
                     failed > 0 ? TaskbarItemProgressState.Error : TaskbarItemProgressState.Normal);
@@ -1261,10 +1679,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception exception)
         {
-            AppendLog($"배치 실행 실패: {exception.Message}");
-            OverallStatusText.Text = "배치 실행 중 오류가 발생했습니다.";
+            AppendLog(AppText.Get("Log_BatchFailed", exception.Message));
+            OverallStatusText.Text = AppText.Get("Main_BatchError");
             SetOverallProgress(100, TaskbarItemProgressState.Error);
-            MessageBox.Show(this, exception.Message, "배치 실행 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, exception.Message, AppText.Get("Dialog_BatchFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -1285,7 +1703,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
-        RequestProcessingCancellation("현재 외부 프로세스를 종료하고 있습니다…", "사용자가 배치 취소를 요청했습니다.");
+        RequestProcessingCancellation(AppText.Get("Main_StoppingProcesses"), AppText.Get("Log_UserCancelledBatch"));
     }
 
     private void RefreshQueueColumnWidths()
@@ -1293,12 +1711,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FileColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompositionColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFormatColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DurationColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoCodecColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FileColumnResizeVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompositionColumnResizeVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFormatColumnResizeVisibility)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DurationColumnResizeVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoCodecColumnResizeVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkColumnResizeVisibility)));
     }
@@ -1310,6 +1730,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompositionColumnVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFormatColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MediaFormatColumnVisibility)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DurationColumnWidth)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DurationColumnVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoCodecColumnWidth)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoCodecColumnVisibility)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(WorkColumnWidth)));
@@ -1345,6 +1767,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         nameof(QueueItemViewModel.Name) => _settings.FileColumnWeight,
         nameof(QueueItemViewModel.DetectedFiles) => _settings.CompositionColumnWeight,
         nameof(QueueItemViewModel.MediaFormatText) => _settings.MediaFormatColumnWeight,
+        nameof(QueueItemViewModel.DurationText) => _settings.DurationColumnWeight,
         nameof(QueueItemViewModel.VideoCodecText) => _settings.VideoCodecColumnWeight,
         nameof(QueueItemViewModel.PlanDescription) => _settings.WorkColumnWeight,
         nameof(QueueItemViewModel.StatusText) => _settings.StatusColumnWeight,
@@ -1358,6 +1781,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             case nameof(QueueItemViewModel.Name): _settings.FileColumnWeight = weight; break;
             case nameof(QueueItemViewModel.DetectedFiles): _settings.CompositionColumnWeight = weight; break;
             case nameof(QueueItemViewModel.MediaFormatText): _settings.MediaFormatColumnWeight = weight; break;
+            case nameof(QueueItemViewModel.DurationText): _settings.DurationColumnWeight = weight; break;
             case nameof(QueueItemViewModel.VideoCodecText): _settings.VideoCodecColumnWeight = weight; break;
             case nameof(QueueItemViewModel.PlanDescription): _settings.WorkColumnWeight = weight; break;
             case nameof(QueueItemViewModel.StatusText): _settings.StatusColumnWeight = weight; break;
@@ -1369,6 +1793,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         nameof(QueueItemViewModel.Name) => _settings.ShowFileColumn,
         nameof(QueueItemViewModel.DetectedFiles) => _settings.ShowCompositionColumn,
         nameof(QueueItemViewModel.MediaFormatText) => _settings.ShowMediaFormatColumn,
+        nameof(QueueItemViewModel.DurationText) => _settings.ShowDurationColumn,
         nameof(QueueItemViewModel.VideoCodecText) => _settings.ShowVideoCodecColumn,
         nameof(QueueItemViewModel.PlanDescription) => _settings.ShowWorkColumn,
         nameof(QueueItemViewModel.StatusText) => _settings.ShowStatusColumn,
@@ -1379,6 +1804,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         (_settings.ShowFileColumn ? 1 : 0)
         + (_settings.ShowCompositionColumn ? 1 : 0)
         + (_settings.ShowMediaFormatColumn ? 1 : 0)
+        + (_settings.ShowDurationColumn ? 1 : 0)
         + (_settings.ShowVideoCodecColumn ? 1 : 0)
         + (_settings.ShowWorkColumn ? 1 : 0)
         + (_settings.ShowStatusColumn ? 1 : 0);
@@ -1396,6 +1822,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             case nameof(QueueItemViewModel.MediaFormatText):
                 _settings.ShowMediaFormatColumn = visible;
                 return true;
+            case nameof(QueueItemViewModel.DurationText):
+                _settings.ShowDurationColumn = visible;
+                return true;
             case nameof(QueueItemViewModel.VideoCodecText):
                 _settings.ShowVideoCodecColumn = visible;
                 return true;
@@ -1410,11 +1839,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void RefreshDependencies()
+    private void RefreshDependencies(bool persistResolvedPaths = false)
     {
         _dependencies = _dependencyLocator.Locate(_settings.MkvMergePath, _settings.SeConvPath);
+        if (persistResolvedPaths)
+        {
+            PersistResolvedDependencyPaths(_dependencies);
+        }
+
         SetDependencyStatus(MkvStatusDot, MkvStatusText, _dependencies.MkvMerge);
         SetDependencyStatus(SeConvStatusDot, SeConvStatusText, _dependencies.SeConv);
+    }
+
+    private void PersistResolvedDependencyPaths(DependencyReport dependencies)
+    {
+        var mkvMergeChanged = !string.Equals(
+            _settings.MkvMergePath,
+            dependencies.MkvMerge.Path,
+            StringComparison.OrdinalIgnoreCase);
+        var seConvChanged = !string.Equals(
+            _settings.SeConvPath,
+            dependencies.SeConv.Path,
+            StringComparison.OrdinalIgnoreCase);
+        if (!mkvMergeChanged && !seConvChanged)
+        {
+            return;
+        }
+
+        _settings.MkvMergePath = dependencies.MkvMerge.Path;
+        _settings.SeConvPath = dependencies.SeConv.Path;
+        try
+        {
+            _settings.Save();
+            AppendLog(AppText.Get("Log_ToolPathsUpdated"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppendLog(AppText.Get("Log_ToolPathSaveFailed", exception.Message));
+        }
     }
 
     private static void SetDependencyStatus(
@@ -1425,8 +1887,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         dot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
             dependency.IsAvailable ? "#22C55E" : "#EF4444"));
         text.Text = dependency.IsAvailable
-            ? $"사용 가능 · {FormatVersion(dependency.Version)}"
-            : "찾지 못함 — 설정에서 경로를 지정하세요";
+            ? AppText.Get("Tool_Available", FormatVersion(dependency.Version))
+            : AppText.Get("Tool_NotFound");
         text.ToolTip = dependency.Path;
     }
 
@@ -1434,7 +1896,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(version))
         {
-            return "버전 미상";
+            return AppText.Get("Tool_UnknownVersion");
         }
 
         var separator = version.IndexOfAny(['+', ' ', '-']);
@@ -1469,7 +1931,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RevealStartedTarget(QueueItemViewModel target)
     {
-        if (!Jobs.Contains(target))
+        if (!_queueAutoFollowEnabled || !Jobs.Contains(target))
         {
             return;
         }
@@ -1549,7 +2011,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             catch (Exception exception)
             {
-                AppendLog($"완료 알림음 재생 실패: {exception.Message}");
+                AppendLog(AppText.Get("Log_NotificationSoundFailed", exception.Message));
             }
         }
 
@@ -1565,13 +2027,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var noSuccessfulJobs = feedback.Succeeded == 0 && feedback.Warnings == 0;
             var title = hasFailures
                 ? noSuccessfulJobs
-                    ? "배치 작업 실패"
-                    : "일부 작업 실패"
+                    ? AppText.Get("Notification_BatchFailed")
+                    : AppText.Get("Notification_SomeFailed")
                 : hasWarnings
-                    ? "경고와 함께 완료"
-                    : "배치 작업 완료";
-            var summary =
-                $"정상 완료 {feedback.Succeeded} · 경고 완료 {feedback.Warnings} · 실패 {feedback.Failed} · 건너뜀 {feedback.Skipped}";
+                    ? AppText.Get("Notification_CompletedWithWarnings")
+                    : AppText.Get("Notification_Completed");
+            var summary = AppText.Get(
+                "Notification_Summary",
+                feedback.Succeeded,
+                feedback.Warnings,
+                feedback.Failed,
+                feedback.Skipped);
             var kind = hasFailures
                 ? CompletionNotificationKind.Failure
                 : hasWarnings
@@ -1593,7 +2059,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception exception)
         {
             CloseCompletionNotification();
-            AppendLog($"완료 알림 표시 실패: {exception.Message}");
+            AppendLog(AppText.Get("Log_NotificationFailed", exception.Message));
         }
     }
 
@@ -1641,7 +2107,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var logDirectory = _logger?.LogDirectory
                            ?? Path.Combine(AppSettings.SettingsDirectory, "logs");
         var logPath = _logger?.LogPath
-                      ?? Path.Combine(logDirectory, "현재 세션 로그");
+                      ?? Path.Combine(logDirectory, AppText.Get("Log_CurrentSession"));
         var window = new LogWindow(_sessionLog.ToString(), logPath, logDirectory)
         {
             Owner = this
@@ -1654,6 +2120,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         };
         _logWindow = window;
+        window.Show();
+    }
+
+    private void OpenSelectedJobLogButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobsList.SelectedItem is not QueueItemViewModel target)
+        {
+            return;
+        }
+
+        if (_jobLogWindows.TryGetValue(target, out var existingWindow))
+        {
+            if (existingWindow.WindowState == WindowState.Minimized)
+            {
+                existingWindow.WindowState = WindowState.Normal;
+            }
+
+            existingWindow.Activate();
+            return;
+        }
+
+        var logDirectory = _logger?.LogDirectory
+                           ?? Path.Combine(AppSettings.SettingsDirectory, "logs");
+        var logPath = _logger?.LogPath
+                      ?? Path.Combine(logDirectory, AppText.Get("Log_CurrentSession"));
+        var initialText = _jobLogs.TryGetValue(target, out var jobLog)
+            ? jobLog.ToString()
+            : string.Empty;
+        var window = new LogWindow(
+            initialText,
+            logPath,
+            logDirectory,
+            AppText.Get("Log_JobHeading", target.Name),
+            AppText.Get("Log_JobDescription"))
+        {
+            Owner = this
+        };
+        window.Closed += (_, _) => _jobLogWindows.Remove(target);
+        _jobLogWindows[target] = window;
         window.Show();
     }
 
@@ -1716,7 +2221,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 var answer = MessageBox.Show(
                     this,
-                    "진행 중인 작업을 취소한 뒤 창을 닫을까요?",
+                    AppText.Get("Dialog_CloseWhileRunning"),
                     "SubMux Batch",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
@@ -1724,13 +2229,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 {
                     _closeWhenIdle = true;
                     RequestProcessingCancellation(
-                        "작업을 취소한 뒤 창을 닫습니다…",
-                        "창을 닫기 위해 배치 취소를 요청했습니다.");
+                        AppText.Get("Main_CancellingBeforeClose"),
+                        AppText.Get("Log_CancelForClose"));
                     _scanCancellation?.Cancel();
                     if (_scanCancellation is not null)
                     {
                         TaskbarProgressInfo.ProgressState = TaskbarItemProgressState.Indeterminate;
-                        OverallStatusText.Text = "작업을 취소한 뒤 창을 닫습니다…";
+                        OverallStatusText.Text = AppText.Get("Main_CancellingBeforeClose");
                     }
                 }
             }
@@ -1771,7 +2276,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(Close);
     }
 
-    private void AppendLog(string message)
+    private string AppendLog(string message)
     {
         var line = _logger?.Write(message) ?? $"[{DateTime.Now:HH:mm:ss}] {message}";
         _sessionLog.AppendLine(line);
@@ -1781,6 +2286,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _logWindow?.AppendLine(line);
+        return line;
+    }
+
+    private void AppendJobLog(QueueItemViewModel target, string message)
+    {
+        var line = AppendLog($"[{target.Name}] {message}");
+        if (!_jobLogs.TryGetValue(target, out var jobLog))
+        {
+            jobLog = new StringBuilder();
+            _jobLogs[target] = jobLog;
+        }
+
+        jobLog.AppendLine(line);
+        if (jobLog.Length > 100_000)
+        {
+            jobLog.Remove(0, jobLog.Length - 75_000);
+        }
+
+        if (_jobLogWindows.TryGetValue(target, out var window))
+        {
+            window.AppendLine(line);
+        }
     }
 
 }

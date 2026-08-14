@@ -1,5 +1,6 @@
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Fonts;
 
 namespace SubMuxBatch.Core.Tests;
 
@@ -336,6 +337,90 @@ public sealed class MkvValidationTests
             Assert.Contains("--no-attachments", runner.MuxArguments!);
             Assert.DoesNotContain("--attachments", runner.MuxArguments!);
             Assert.True(runner.MuxArguments.IndexOf("--no-attachments") < runner.MuxArguments.IndexOf(source));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MuxAddsNewFontWithExplicitNameAndMimeType()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-new-font-args-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var font = Path.Combine(root, "family-bold.otf");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Family,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+            await File.WriteAllBytesAsync(font, [1, 2, 3, 4]);
+
+            var runner = new MuxArgumentRunner(output);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                fontAttachments: [new FontAttachmentFile(font, "font/otf")]);
+
+            Assert.NotNull(runner.MuxArguments);
+            Assert.Contains("--attachment-mime-type", runner.MuxArguments!);
+            Assert.Contains("font/otf", runner.MuxArguments!);
+            Assert.Contains("--attachment-name", runner.MuxArguments!);
+            Assert.Contains("family-bold.otf", runner.MuxArguments!);
+            Assert.Contains("--attach-file", runner.MuxArguments!);
+            Assert.Contains(font, runner.MuxArguments!);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MuxCanRemoveOldFontsAndAttachCurrentStyleFontTogether()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-replace-font-args-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var font = Path.Combine(root, "current.ttf");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Family,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+            await File.WriteAllBytesAsync(font, [1, 2, 3]);
+
+            const string inspection = """
+                {"tracks":[{"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC"}}],
+                 "attachments":[
+                   {"id":3,"file_name":"old.ttf","content_type":"font/ttf","size":1,"properties":{"uid":10}},
+                   {"id":7,"file_name":"cover.jpg","content_type":"image/jpeg","size":2,"properties":{"uid":11}}
+                 ],"chapters":[]}
+                """;
+            var runner = new MuxArgumentRunner(output, inspection);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                removeExistingFontAttachments: true,
+                fontAttachments: [new FontAttachmentFile(font, "font/ttf")]);
+
+            Assert.NotNull(runner.MuxArguments);
+            Assert.Contains("--attachments", runner.MuxArguments!);
+            Assert.Contains("7", runner.MuxArguments!);
+            Assert.Contains("--attach-file", runner.MuxArguments!);
+            Assert.Contains(font, runner.MuxArguments!);
         }
         finally
         {

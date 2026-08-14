@@ -3,11 +3,18 @@ using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.Processing;
 
-public sealed class BatchProcessor(IProcessRunner processRunner)
+public sealed class BatchProcessor(
+    IProcessRunner processRunner,
+    IInstalledFontResolver? installedFontResolver = null)
 {
+    private readonly IInstalledFontResolver _installedFontResolver =
+        installedFontResolver ?? InstalledFontResolver.System;
+
     public async Task<JobResult> ProcessAsync(
         MediaSet media,
         ConversionPlan plan,
@@ -18,12 +25,12 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
     {
         if (!plan.IsValid || media.VideoPath is null)
         {
-            return new JobResult(JobState.Failed, null, plan.Warnings, plan.Error ?? "처리 계획이 유효하지 않습니다.");
+            return new JobResult(JobState.Failed, null, plan.Warnings, plan.Error ?? CoreText.Get("Batch_InvalidPlan"));
         }
 
         if (!dependencies.IsReady || dependencies.MkvMerge.Path is null || dependencies.SeConv.Path is null)
         {
-            return new JobResult(JobState.Failed, null, plan.Warnings, "mkvmerge 또는 seconv dependency를 찾지 못했습니다.");
+            return new JobResult(JobState.Failed, null, plan.Warnings, CoreText.Get("Batch_DependenciesMissing"));
         }
 
         var warnings = plan.Warnings.ToList();
@@ -71,7 +78,7 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                     break;
 
                 case SrtSourceKind.ConvertFromAss:
-                    Report(JobState.ConvertingAssToSrt, 8, "ASS를 SRT로 변환합니다.");
+                    Report(JobState.ConvertingAssToSrt, 8, CoreText.Get("Batch_ConvertAssToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
                     var assToSrtResult = await seConv.ConvertAsync(
                         media.AssPath!,
@@ -86,7 +93,7 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                     break;
 
                 case SrtSourceKind.ConvertFromSmi:
-                    Report(JobState.ConvertingSmiToSrt, 8, "SMI를 SRT로 변환합니다.");
+                    Report(JobState.ConvertingSmiToSrt, 8, CoreText.Get("Batch_ConvertSmiToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
                     var smiToSrtResult = await seConv.ConvertAsync(
                         media.SmiPath!,
@@ -114,7 +121,7 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                     break;
 
                 case AssSourceKind.ConvertFromSrt:
-                    Report(JobState.ConvertingSrtToAss, 24, "SRT를 기본 스타일의 ASS로 변환합니다.");
+                    Report(JobState.ConvertingSrtToAss, 24, CoreText.Get("Batch_ConvertSrtToAss"));
                     finalAss = Path.Combine(workspace.Path, "primary.ass");
                     var compatibleSrt = Path.Combine(workspace.Path, "ass-compatible.srt");
                     await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
@@ -165,12 +172,24 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            Report(JobState.Verifying, 34, "원본 영상 구조를 확인합니다.");
+            IReadOnlyList<FontAttachmentFile> fontAttachments = [];
+            if (settings.AttachAssStyleFonts)
+            {
+                Report(JobState.Verifying, 32, CoreText.Get("Batch_FindFonts"));
+                fontAttachments = await ResolveAssFontAttachmentsAsync(
+                    finalAss,
+                    plan,
+                    settings,
+                    warnings,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            Report(JobState.Verifying, 34, CoreText.Get("Batch_InspectSource"));
             var sourceInspection = await mkvMerge.InspectAsync(media.VideoPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             var partialPath = Path.Combine(workspace.Path, "output.partial.mkv");
-            Report(JobState.Muxing, 38, "ASS와 SRT를 MKV에 병합합니다.");
+            Report(JobState.Muxing, 38, CoreText.Get("Batch_MuxSubtitles"));
             var muxResult = await mkvMerge.MuxAsync(
                 media.VideoPath,
                 finalAss,
@@ -179,7 +198,7 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                 muxPercent =>
                 {
                     var totalPercent = 38 + (int)Math.Round(muxPercent * 0.54);
-                    Report(JobState.Muxing, totalPercent, $"MKV 병합 중 {muxPercent}%");
+                    Report(JobState.Muxing, totalPercent, CoreText.Get("Batch_MuxProgress", muxPercent));
                 },
                 LogToolOutput,
                 cancellationToken,
@@ -187,9 +206,10 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
-                    : null).ConfigureAwait(false);
+                    : null,
+                fontAttachments: fontAttachments).ConfigureAwait(false);
 
-            Report(JobState.Verifying, 94, "결과 트랙과 첨부 파일을 검증합니다.");
+            Report(JobState.Verifying, 94, CoreText.Get("Batch_VerifyOutput"));
             var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var validationErrors = MkvMergeClient.ValidateOutput(
@@ -199,11 +219,12 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
-                    : null);
+                    : null,
+                addedFontAttachments: fontAttachments);
             if (validationErrors.Count > 0)
             {
                 throw new InvalidOperationException(
-                    "결과 MKV 검증에 실패했습니다." + Environment.NewLine + string.Join(Environment.NewLine, validationErrors));
+                    CoreText.Get("Batch_OutputValidationFailed") + Environment.NewLine + string.Join(Environment.NewLine, validationErrors));
             }
 
             foreach (var warning in muxResult.Warnings)
@@ -217,12 +238,12 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
             var outputPath = CommitToAvailableOutput(partialPath, preferredOutputPath);
 
             var finalState = warnings.Count > 0 ? JobState.SucceededWithWarnings : JobState.Succeeded;
-            Report(finalState, 100, $"완료: {outputPath}");
+            Report(finalState, 100, CoreText.Get("Batch_Completed", outputPath));
             return new JobResult(finalState, outputPath, warnings);
         }
         catch (OperationCanceledException)
         {
-            Report(JobState.Cancelled, currentPercent, "작업을 취소했습니다.");
+            Report(JobState.Cancelled, currentPercent, CoreText.Get("Batch_Cancelled"));
             throw;
         }
         catch (JobSkippedException exception)
@@ -261,7 +282,7 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
         var missing = required.FirstOrDefault(static path => string.IsNullOrWhiteSpace(path) || !File.Exists(path));
         if (missing is not null || required.Any(static path => path is null))
         {
-            throw new FileNotFoundException("작업 시작 후 입력 파일이 이동되거나 삭제되었습니다.", missing);
+            throw new FileNotFoundException(CoreText.Get("Batch_InputMovedOrDeleted"), missing);
         }
     }
 
@@ -270,6 +291,93 @@ public sealed class BatchProcessor(IProcessRunner processRunner)
         foreach (var warning in result.Warnings)
         {
             warnings.Add($"Subtitle Edit: {warning}");
+        }
+    }
+
+    private async Task<IReadOnlyList<FontAttachmentFile>> ResolveAssFontAttachmentsAsync(
+        string assPath,
+        ConversionPlan plan,
+        AppSettings settings,
+        ICollection<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var assText = await ReadSubtitleTextAsync(assPath, cancellationToken).ConfigureAwait(false);
+        var fontNames = AssFontNameExtractor.Extract(assText).ToList();
+        if (fontNames.Count == 0
+            && plan.AssSource == AssSourceKind.ConvertFromSrt
+            && settings.UseCustomAssStyle
+            && AssStyleDefinition.TryParse(settings.AssStyleLine, out var configuredStyle))
+        {
+            fontNames.Add(configuredStyle!.FontName);
+        }
+
+        if (fontNames.Count == 0)
+        {
+            var warning = CoreText.Get("Batch_FontNameMissing");
+            warnings.Add(warning);
+            throw new JobSkippedException(CoreText.Get("Batch_SkipFontAttachmentRequired", warning));
+        }
+
+        var attachments = new List<FontAttachmentFile>();
+        foreach (var fontName in fontNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyList<FontAttachmentFile> matches;
+            try
+            {
+                matches = _installedFontResolver.FindByFamilyName(fontName);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                var warning = CoreText.Get("Batch_FontSearchError", fontName, exception.Message);
+                warnings.Add(warning);
+                throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+            }
+
+            if (matches.Count == 0)
+            {
+                var warning = CoreText.Get("Batch_FontNotFound", fontName);
+                warnings.Add(warning);
+                throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+            }
+
+            attachments.AddRange(matches);
+        }
+
+        return attachments
+            .DistinctBy(static attachment => attachment.FileName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static attachment => attachment.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static async Task<string> ReadSubtitleTextAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }))
+        {
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        }
+
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xFF, 0xFE }))
+        {
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xFE, 0xFF }))
+        {
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        try
+        {
+            return new UTF8Encoding(false, true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(949).GetString(bytes);
         }
     }
 

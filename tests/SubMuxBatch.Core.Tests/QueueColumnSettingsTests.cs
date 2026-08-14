@@ -22,6 +22,7 @@ public sealed class QueueColumnSettingsTests
               "ShowFileColumn": false,
               "ShowCompositionColumn": false,
               "ShowMediaFormatColumn": false,
+              "ShowDurationColumn": false,
               "ShowVideoCodecColumn": false,
               "ShowWorkColumn": false,
               "ShowStatusColumn": false
@@ -31,6 +32,7 @@ public sealed class QueueColumnSettingsTests
         Assert.True(settings.ShowFileColumn);
         Assert.False(settings.ShowCompositionColumn);
         Assert.False(settings.ShowMediaFormatColumn);
+        Assert.False(settings.ShowDurationColumn);
         Assert.False(settings.ShowVideoCodecColumn);
         Assert.False(settings.ShowWorkColumn);
         Assert.False(settings.ShowStatusColumn);
@@ -62,6 +64,7 @@ public sealed class QueueColumnSettingsTests
             ShowFileColumn = false,
             ShowCompositionColumn = true,
             ShowMediaFormatColumn = false,
+            ShowDurationColumn = true,
             ShowVideoCodecColumn = true,
             ShowWorkColumn = false,
             ShowStatusColumn = true
@@ -70,6 +73,7 @@ public sealed class QueueColumnSettingsTests
         Assert.False(copy.ShowFileColumn);
         Assert.True(copy.ShowCompositionColumn);
         Assert.False(copy.ShowMediaFormatColumn);
+        Assert.True(copy.ShowDurationColumn);
         Assert.True(copy.ShowVideoCodecColumn);
         Assert.False(copy.ShowWorkColumn);
         Assert.True(copy.ShowStatusColumn);
@@ -84,6 +88,7 @@ public sealed class QueueColumnSettingsTests
               "FileColumnWeight": 0,
               "CompositionColumnWeight": -1,
               "MediaFormatColumnWeight": 2.5,
+              "DurationColumnWeight": 0,
               "VideoCodecColumnWeight": 0,
               "WorkColumnWeight": 0,
               "StatusColumnWeight": 0
@@ -94,6 +99,7 @@ public sealed class QueueColumnSettingsTests
         Assert.Equal(AppSettings.DefaultCompositionColumnWeight, restored.CompositionColumnWeight);
         Assert.Equal(AppSettings.DefaultMediaFormatColumnWeight, defaults.MediaFormatColumnWeight);
         Assert.Equal(2.5, restored.MediaFormatColumnWeight);
+        Assert.Equal(AppSettings.DefaultDurationColumnWeight, restored.DurationColumnWeight);
         Assert.Equal(AppSettings.DefaultVideoCodecColumnWeight, restored.VideoCodecColumnWeight);
         Assert.Equal(AppSettings.DefaultWorkColumnWeight, restored.WorkColumnWeight);
         Assert.Equal(AppSettings.DefaultStatusColumnWeight, restored.StatusColumnWeight);
@@ -107,6 +113,7 @@ public sealed class QueueColumnSettingsTests
             FileColumnWeight = 3,
             CompositionColumnWeight = 1.2,
             MediaFormatColumnWeight = 0.6,
+            DurationColumnWeight = 0.8,
             VideoCodecColumnWeight = 1.5,
             WorkColumnWeight = 2.7,
             StatusColumnWeight = 0.9
@@ -115,6 +122,7 @@ public sealed class QueueColumnSettingsTests
         Assert.Equal(3, copy.FileColumnWeight);
         Assert.Equal(1.2, copy.CompositionColumnWeight);
         Assert.Equal(0.6, copy.MediaFormatColumnWeight);
+        Assert.Equal(0.8, copy.DurationColumnWeight);
         Assert.Equal(1.5, copy.VideoCodecColumnWeight);
         Assert.Equal(2.7, copy.WorkColumnWeight);
         Assert.Equal(0.9, copy.StatusColumnWeight);
@@ -124,6 +132,7 @@ public sealed class QueueColumnSettingsTests
         Assert.True(settings.ShowFileColumn);
         Assert.True(settings.ShowCompositionColumn);
         Assert.True(settings.ShowMediaFormatColumn);
+        Assert.True(settings.ShowDurationColumn);
         Assert.True(settings.ShowVideoCodecColumn);
         Assert.True(settings.ShowWorkColumn);
         Assert.True(settings.ShowStatusColumn);

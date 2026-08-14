@@ -1,3 +1,5 @@
+using SubMuxBatch.Core.Localization;
+
 namespace SubMuxBatch.Core.Domain;
 
 public readonly record struct MediaKey(string DirectoryPath, string Stem)
@@ -8,7 +10,7 @@ public readonly record struct MediaKey(string DirectoryPath, string Stem)
     {
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath)
-            ?? throw new ArgumentException("파일의 상위 폴더를 확인할 수 없습니다.", nameof(path));
+            ?? throw new ArgumentException(CoreText.Get("Media_NoParentFolder"), nameof(path));
         return new MediaKey(directory, Path.GetFileNameWithoutExtension(fullPath));
     }
 }
@@ -30,7 +32,7 @@ public sealed record MediaSet(
     {
         if (!string.Equals(Key.Canonical, other.Key.Canonical, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("서로 다른 미디어 묶음은 합칠 수 없습니다.");
+            throw new InvalidOperationException(CoreText.Get("Media_CannotMergeDifferentSets"));
         }
 
         var mergedVideoPaths = (other.VideoCandidates is not null

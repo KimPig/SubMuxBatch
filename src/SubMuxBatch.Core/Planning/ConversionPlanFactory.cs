@@ -1,4 +1,5 @@
 using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.Planning;
 
@@ -9,23 +10,23 @@ public static class ConversionPlanFactory
         if (media.HasVideoConflict)
         {
             var candidates = string.Join(", ", media.CandidateVideoPaths.Select(Path.GetFileName));
-            return Invalid($"같은 기준 이름의 영상이 여러 개 있습니다: {candidates}");
+            return Invalid(CoreText.Get("Plan_VideoConflict", candidates));
         }
 
         if (media.VideoPath is null)
         {
-            return Invalid("동일한 파일명의 영상이 없습니다.");
+            return Invalid(CoreText.Get("Plan_NoVideo"));
         }
 
         if (!media.HasAnySubtitle)
         {
-            return Invalid("동일한 파일명의 자막(ASS, SRT 또는 SMI)이 없습니다.");
+            return Invalid(CoreText.Get("Plan_NoSubtitle"));
         }
 
         var warnings = new List<string>();
         if (media.SmiPath is not null && media.SrtPath is not null)
         {
-            warnings.Add("SRT가 이미 있으므로 SMI는 사용하지 않습니다.");
+            warnings.Add(CoreText.Get("Plan_IgnoreSmi"));
         }
 
         if (media.AssPath is not null && media.SrtPath is not null)
@@ -34,7 +35,7 @@ public static class ConversionPlanFactory
                 true,
                 AssSourceKind.Existing,
                 SrtSourceKind.Existing,
-                "기존 ASS + 기존 SRT",
+                CoreText.Get("Plan_ExistingAssSrt"),
                 warnings);
         }
 
@@ -46,7 +47,7 @@ public static class ConversionPlanFactory
                     true,
                     AssSourceKind.Existing,
                     SrtSourceKind.ConvertFromSmi,
-                    "기존 ASS + SMI → SRT",
+                    CoreText.Get("Plan_ExistingAssSmiToSrt"),
                     warnings);
             }
 
@@ -54,7 +55,7 @@ public static class ConversionPlanFactory
                 true,
                 AssSourceKind.Existing,
                 SrtSourceKind.ConvertFromAss,
-                "기존 ASS + ASS → SRT",
+                CoreText.Get("Plan_ExistingAssToSrt"),
                 warnings);
         }
 
@@ -64,7 +65,7 @@ public static class ConversionPlanFactory
                 true,
                 AssSourceKind.ConvertFromSrt,
                 SrtSourceKind.Existing,
-                "SRT → ASS + 기존 SRT",
+                CoreText.Get("Plan_SrtToAss"),
                 warnings);
         }
 
@@ -72,7 +73,7 @@ public static class ConversionPlanFactory
             true,
             AssSourceKind.ConvertFromSrt,
             SrtSourceKind.ConvertFromSmi,
-            "SMI → SRT → ASS",
+            CoreText.Get("Plan_SmiToSrtToAss"),
             warnings);
     }
 
@@ -80,7 +81,7 @@ public static class ConversionPlanFactory
         false,
         AssSourceKind.Existing,
         SrtSourceKind.Existing,
-        "처리 불가",
+        CoreText.Get("Plan_Invalid"),
         Array.Empty<string>(),
         error);
 }

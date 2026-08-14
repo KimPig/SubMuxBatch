@@ -2,6 +2,7 @@ using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Fonts;
 using SubMuxBatch.Core.Planning;
 using SubMuxBatch.Core.Processing;
 using System.Text.Json;
@@ -32,7 +33,7 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(runner).ProcessAsync(
             media,
             plan,
-            new AppSettings(),
+            new AppSettings { AttachAssStyleFonts = false },
             dependencies);
 
         Assert.Equal(JobState.Succeeded, result.State);
@@ -60,7 +61,7 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
-            new AppSettings { OutputPrefix = string.Empty },
+            new AppSettings { OutputPrefix = string.Empty, AttachAssStyleFonts = false },
             dependencies);
 
         Assert.Equal(JobState.Failed, result.State);
@@ -81,7 +82,7 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(new SkipProcessRunner()).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
-            new AppSettings(),
+            new AppSettings { AttachAssStyleFonts = false },
             CreateDependencies());
 
         Assert.Equal(JobState.Skipped, result.State);
@@ -111,7 +112,8 @@ public sealed class BatchProcessorTests : IDisposable
             new AppSettings
             {
                 PlayResX = 1920,
-                PlayResY = 1080
+                PlayResY = 1080,
+                AttachAssStyleFonts = false
             },
             dependencies);
 
@@ -139,7 +141,8 @@ public sealed class BatchProcessorTests : IDisposable
             {
                 UseCustomAssStyle = useCustomAssStyle,
                 PlayResX = 1920,
-                PlayResY = 1080
+                PlayResY = 1080,
+                AttachAssStyleFonts = false
             },
             CreateDependencies());
 
@@ -167,7 +170,7 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
-            new AppSettings { OutputPrefix = "result_" },
+            new AppSettings { OutputPrefix = "result_", AttachAssStyleFonts = false },
             CreateDependencies());
 
         Assert.Equal(JobState.Succeeded, result.State);
@@ -200,7 +203,7 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(runner).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
-            new AppSettings { OutputPrefix = "result_" },
+            new AppSettings { OutputPrefix = "result_", AttachAssStyleFonts = false },
             CreateDependencies());
 
         Assert.Equal(JobState.Succeeded, result.State);
@@ -218,7 +221,7 @@ public sealed class BatchProcessorTests : IDisposable
 
         var media = new MediaSet(new MediaKey(_root, "Concurrent"), mkv, null, srt, null);
         var plan = ConversionPlanFactory.Create(media);
-        var settings = new AppSettings { OutputPrefix = "result_" };
+        var settings = new AppSettings { OutputPrefix = "result_", AttachAssStyleFonts = false };
 
         var results = await Task.WhenAll(
             new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
@@ -237,6 +240,63 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(Path.Combine(_root, "result_Concurrent.mkv"), results.Select(static result => result.OutputPath));
         Assert.Contains(Path.Combine(_root, "result_Concurrent (1).mkv"), results.Select(static result => result.OutputPath));
         Assert.All(results, result => Assert.True(File.Exists(result.OutputPath)));
+    }
+
+    [Fact]
+    public async Task MatchingAssFontIsAttachedAndJobSucceeds()
+    {
+        var mkv = Path.Combine(_root, "FontMatch.mkv");
+        var srt = Path.Combine(_root, "FontMatch.srt");
+        var font = Path.Combine(_root, "test-family-bold.otf");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        await File.WriteAllBytesAsync(font, [10, 20, 30, 40]);
+        var media = new MediaSet(new MediaKey(_root, "FontMatch"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+        var resolver = new StaticFontResolver([new FontAttachmentFile(font, "font/otf")]);
+
+        var result = await new BatchProcessor(runner, resolver).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                OutputPrefix = "result_",
+                AssStyleLine = AppSettings.DefaultAssStyleLine.Replace(
+                    "맑은 고딕",
+                    "Test Family",
+                    StringComparison.Ordinal)
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Empty(result.Warnings);
+        var muxArguments = Assert.Single(runner.MuxCalls);
+        Assert.Contains("--attach-file", muxArguments);
+        Assert.Contains(font, muxArguments);
+        Assert.Contains("font/otf", muxArguments);
+    }
+
+    [Fact]
+    public async Task MissingAssFontAddsWarningAndSkipsJobWithoutOutput()
+    {
+        var mkv = Path.Combine(_root, "FontMissing.mkv");
+        var srt = Path.Combine(_root, "FontMissing.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "FontMissing"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner, new StaticFontResolver([])).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { OutputPrefix = "result_" },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Skipped, result.State);
+        Assert.Contains(result.Warnings, static warning => warning.Contains("Test Family") && warning.Contains("찾지 못했습니다"));
+        Assert.Empty(runner.MuxCalls);
+        Assert.Null(result.OutputPath);
+        Assert.Contains("건너뜁니다", result.Error);
     }
 
     public void Dispose()
@@ -258,6 +318,11 @@ public sealed class BatchProcessorTests : IDisposable
             Action<string>? onOutput = null,
             CancellationToken cancellationToken = default) =>
             throw new JobSkippedException("해당 작업은 건너뜁니다.");
+    }
+
+    private sealed class StaticFontResolver(IReadOnlyList<FontAttachmentFile> files) : IInstalledFontResolver
+    {
+        public IReadOnlyList<FontAttachmentFile> FindByFamilyName(string familyName) => files;
     }
 
     private sealed class FakeProcessRunner : IProcessRunner
@@ -285,7 +350,9 @@ public sealed class BatchProcessorTests : IDisposable
                 }
                 else
                 {
-                    File.WriteAllText(output, "[Script Info]\n[V4+ Styles]\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
+                    File.WriteAllText(
+                        output,
+                        "[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Test Family,40\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
                 }
 
                 var json = JsonSerializer.Serialize(new
@@ -314,10 +381,11 @@ public sealed class BatchProcessorTests : IDisposable
             if (request.Arguments[0] == "-J")
             {
                 var isOutput = request.Arguments[1].Contains("output.partial", StringComparison.OrdinalIgnoreCase);
-                return Task.FromResult(new ProcessResult(0, isOutput ? OutputJson : SourceJson, string.Empty));
+                return Task.FromResult(new ProcessResult(0, isOutput ? CreateOutputJson() : SourceJson, string.Empty));
             }
 
             MuxCalls.Add(request.Arguments);
+            _muxAttachments = ReadMuxAttachments(request.Arguments);
             var outputIndex = request.Arguments.ToList().IndexOf("-o") + 1;
             var assInput = request.Arguments.FirstOrDefault(static argument =>
                 Path.GetExtension(argument).Equals(".ass", StringComparison.OrdinalIgnoreCase));
@@ -333,6 +401,42 @@ public sealed class BatchProcessorTests : IDisposable
 
         private static string ValueOf(IReadOnlyList<string> arguments, string prefix) =>
             arguments.First(argument => argument.StartsWith(prefix, StringComparison.Ordinal))[prefix.Length..];
+
+        private List<AttachedFont> _muxAttachments = [];
+
+        private static List<AttachedFont> ReadMuxAttachments(IReadOnlyList<string> arguments)
+        {
+            var attachments = new List<AttachedFont>();
+            for (var index = 0; index < arguments.Count; index++)
+            {
+                if (arguments[index] != "--attach-file" || index < 4)
+                {
+                    continue;
+                }
+
+                var path = arguments[index + 1];
+                attachments.Add(new AttachedFont(
+                    Path.GetFileName(path),
+                    arguments[index - 3],
+                    path));
+            }
+
+            return attachments;
+        }
+
+        private string CreateOutputJson()
+        {
+            var attachments = JsonSerializer.Serialize(_muxAttachments.Select(static font => new
+            {
+                file_name = font.FileName,
+                content_type = font.MimeType,
+                size = new FileInfo(font.Path).Length,
+                properties = new { uid = font.FileName.GetHashCode(StringComparison.Ordinal) }
+            }));
+            return OutputJson.Replace("\"attachments\":[]", $"\"attachments\":{attachments}", StringComparison.Ordinal);
+        }
+
+        private sealed record AttachedFont(string FileName, string MimeType, string Path);
 
         private const string SourceJson = """
         {"tracks":[

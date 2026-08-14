@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.Configuration;
 
@@ -13,6 +14,14 @@ public enum AudioTrackLanguage
     Korean
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<AppLanguage>))]
+public enum AppLanguage
+{
+    System,
+    Korean,
+    English
+}
+
 public sealed class AppSettings
 {
     public const int MinConcurrentJobCount = 1;
@@ -20,6 +29,7 @@ public sealed class AppSettings
     public const double DefaultFileColumnWeight = 2.1;
     public const double DefaultCompositionColumnWeight = 0.75;
     public const double DefaultMediaFormatColumnWeight = 0.8;
+    public const double DefaultDurationColumnWeight = 0.8;
     public const double DefaultVideoCodecColumnWeight = 1.1;
     public const double DefaultWorkColumnWeight = 1.9;
     public const double DefaultStatusColumnWeight = 1;
@@ -29,23 +39,27 @@ public sealed class AppSettings
 
     public string? MkvMergePath { get; set; }
     public string? SeConvPath { get; set; }
+    public AppLanguage Language { get; set; } = AppLanguage.System;
     public string OutputPrefix { get; set; } = OutputFileNaming.DefaultPrefix;
     public bool IncludeSubdirectories { get; set; }
     public bool AllowSubtitleSuffixMatch { get; set; }
     public bool RemoveExistingSubtitles { get; set; } = true;
     public bool RemoveExistingFontAttachments { get; set; } = false;
+    public bool AttachAssStyleFonts { get; set; } = true;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
     public int ConcurrentJobCount { get; set; } = MinConcurrentJobCount;
     public bool ShowFileColumn { get; set; } = true;
     public bool ShowCompositionColumn { get; set; } = true;
     public bool ShowMediaFormatColumn { get; set; } = true;
+    public bool ShowDurationColumn { get; set; } = true;
     public bool ShowVideoCodecColumn { get; set; } = true;
     public bool ShowWorkColumn { get; set; } = true;
     public bool ShowStatusColumn { get; set; } = true;
     public double FileColumnWeight { get; set; } = DefaultFileColumnWeight;
     public double CompositionColumnWeight { get; set; } = DefaultCompositionColumnWeight;
     public double MediaFormatColumnWeight { get; set; } = DefaultMediaFormatColumnWeight;
+    public double DurationColumnWeight { get; set; } = DefaultDurationColumnWeight;
     public double VideoCodecColumnWeight { get; set; } = DefaultVideoCodecColumnWeight;
     public double WorkColumnWeight { get; set; } = DefaultWorkColumnWeight;
     public double StatusColumnWeight { get; set; } = DefaultStatusColumnWeight;
@@ -97,7 +111,7 @@ public sealed class AppSettings
     internal static AppSettings Deserialize(string json)
     {
         var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-        if (!settings.ShowFileColumn && !settings.ShowCompositionColumn && !settings.ShowMediaFormatColumn
+        if (!settings.ShowFileColumn && !settings.ShowCompositionColumn && !settings.ShowMediaFormatColumn && !settings.ShowDurationColumn
             && !settings.ShowVideoCodecColumn && !settings.ShowWorkColumn && !settings.ShowStatusColumn)
         {
             settings.ShowFileColumn = true;
@@ -105,9 +119,14 @@ public sealed class AppSettings
         settings.FileColumnWeight = NormalizeQueueColumnWeight(settings.FileColumnWeight, DefaultFileColumnWeight);
         settings.CompositionColumnWeight = NormalizeQueueColumnWeight(settings.CompositionColumnWeight, DefaultCompositionColumnWeight);
         settings.MediaFormatColumnWeight = NormalizeQueueColumnWeight(settings.MediaFormatColumnWeight, DefaultMediaFormatColumnWeight);
+        settings.DurationColumnWeight = NormalizeQueueColumnWeight(settings.DurationColumnWeight, DefaultDurationColumnWeight);
         settings.VideoCodecColumnWeight = NormalizeQueueColumnWeight(settings.VideoCodecColumnWeight, DefaultVideoCodecColumnWeight);
         settings.WorkColumnWeight = NormalizeQueueColumnWeight(settings.WorkColumnWeight, DefaultWorkColumnWeight);
         settings.StatusColumnWeight = NormalizeQueueColumnWeight(settings.StatusColumnWeight, DefaultStatusColumnWeight);
+        if (!Enum.IsDefined(settings.Language))
+        {
+            settings.Language = AppLanguage.System;
+        }
         return settings;
     }
 
@@ -119,7 +138,7 @@ public sealed class AppSettings
     private static void SaveToPath(AppSettings settings, string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)
-            ?? throw new ArgumentException("?ㅼ젙 寃쎈줈?먮뒗 ?대뜑媛 ?ы븿?섏뼱???⑸땲??", nameof(path)));
+            ?? throw new ArgumentException(CoreText.Get("Settings_PathNeedsDirectory"), nameof(path)));
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(path, json, new UTF8Encoding(false));
     }
@@ -144,23 +163,27 @@ public sealed class AppSettings
     {
         MkvMergePath = MkvMergePath,
         SeConvPath = SeConvPath,
+        Language = Language,
         OutputPrefix = OutputPrefix,
         IncludeSubdirectories = IncludeSubdirectories,
         AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatch,
         RemoveExistingSubtitles = RemoveExistingSubtitles,
         RemoveExistingFontAttachments = RemoveExistingFontAttachments,
+        AttachAssStyleFonts = AttachAssStyleFonts,
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,
         ConcurrentJobCount = ConcurrentJobCount,
         ShowFileColumn = ShowFileColumn,
         ShowCompositionColumn = ShowCompositionColumn,
         ShowMediaFormatColumn = ShowMediaFormatColumn,
+        ShowDurationColumn = ShowDurationColumn,
         ShowVideoCodecColumn = ShowVideoCodecColumn,
         ShowWorkColumn = ShowWorkColumn,
         ShowStatusColumn = ShowStatusColumn,
         FileColumnWeight = FileColumnWeight,
         CompositionColumnWeight = CompositionColumnWeight,
         MediaFormatColumnWeight = MediaFormatColumnWeight,
+        DurationColumnWeight = DurationColumnWeight,
         VideoCodecColumnWeight = VideoCodecColumnWeight,
         WorkColumnWeight = WorkColumnWeight,
         StatusColumnWeight = StatusColumnWeight,
@@ -177,24 +200,25 @@ public sealed class AppSettings
         if (string.IsNullOrWhiteSpace(OutputPrefix)
             || OutputPrefix.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
-            throw new InvalidOperationException("\uCD9C\uB825 \uC811\uB450\uC0AC\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidOutputPrefix"));
         }
 
         if (FilterAudioTracksByLanguage && !Enum.IsDefined(SelectedAudioLanguage))
         {
-            throw new InvalidOperationException(
-                "?ㅻ뵒???몄뼱 ?꾪꽣???ъ슜???몄뼱瑜??곸뼱, ?쇰낯???먮뒗 ?쒓뎅??以묒뿉???좏깮??二쇱꽭??");
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioLanguage"));
         }
 
         if (ConcurrentJobCount is < MinConcurrentJobCount or > MaxConcurrentJobCount)
         {
-            throw new InvalidOperationException(
-                $"?숈떆 ?묒뾽 ?섎뒗 {MinConcurrentJobCount}~{MaxConcurrentJobCount} ?ъ씠濡??ㅼ젙??二쇱꽭??");
+            throw new InvalidOperationException(CoreText.Get(
+                "Settings_InvalidConcurrentJobs",
+                MinConcurrentJobCount,
+                MaxConcurrentJobCount));
         }
 
         if (PlayResX is < 16 or > 16384 || PlayResY is < 16 or > 16384)
         {
-            throw new InvalidOperationException("ASS PlayRes ?댁긽?꾨? ?뺤씤??二쇱꽭??");
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidPlayRes"));
         }
 
         if (UseCustomAssStyle)
@@ -206,7 +230,7 @@ public sealed class AppSettings
 
             if (!string.Equals(style!.Name, "Default", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("蹂?섏뿉 ?ъ슜??ASS ?ㅽ????대쫫? 'Default'?ъ빞 ?⑸땲??");
+                throw new InvalidOperationException(CoreText.Get("Settings_AssStyleMustBeDefault"));
             }
         }
     }

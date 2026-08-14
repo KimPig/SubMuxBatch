@@ -1,7 +1,8 @@
 <Window x:Class="SubMuxBatch.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SubMux Batch 설정"
+        xmlns:loc="clr-namespace:SubMuxBatch.App.Localization"
+        Title="{loc:Loc Settings_Title}"
         Width="720"
         Height="680"
         MinWidth="540"
@@ -39,6 +40,18 @@
             <Setter Property="Padding" Value="8,5" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+        <Style x:Key="AssFieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+        </Style>
+        <Style x:Key="AssFieldTextBoxStyle"
+               TargetType="TextBox"
+               BasedOn="{StaticResource FieldTextBoxStyle}">
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style x:Key="AssFieldContainerStyle" TargetType="StackPanel">
+            <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
         <Style x:Key="SettingsComboBoxItemStyle" TargetType="ComboBoxItem">
             <Setter Property="Padding" Value="10,6" />
@@ -155,6 +168,11 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="AssFieldComboBoxStyle"
+               TargetType="ComboBox"
+               BasedOn="{StaticResource SettingsComboBoxStyle}">
+            <Setter Property="MinHeight" Value="34" />
+        </Style>
         <Style TargetType="TabControl">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -257,39 +275,67 @@
 
         <Border Grid.Row="0" Background="White" BorderBrush="#D1D1D1" BorderThickness="0,0,0,1" Padding="22,18">
             <StackPanel>
-                <TextBlock Text="설정" FontSize="24" FontWeight="SemiBold" />
+                <TextBlock Text="{loc:Loc Common_Settings}" FontSize="24" FontWeight="SemiBold" />
                 <TextBlock Margin="0,4,0,0"
                            Foreground="{StaticResource SecondaryTextBrush}"
                            TextWrapping="Wrap"
-                           Text="파일 매칭, MKV 출력 방식과 SRT→ASS 기본 스타일을 조정합니다." />
+                           Text="{loc:Loc Settings_Description}" />
             </StackPanel>
         </Border>
 
         <TabControl Grid.Row="1" Margin="18,12,18,0">
-            <TabItem Header="일반">
+            <TabItem Header="{loc:Loc Settings_TabGeneral}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,12,4,0">
                     <StackPanel>
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
-                                <TextBlock Text="파일 탐색과 매칭" FontSize="18" FontWeight="SemiBold" />
-                                <CheckBox x:Name="IncludeSubdirectoriesCheckBox"
-                                          Margin="0,16,0,0">
-                                    <TextBlock Text="폴더 추가 시 하위 폴더도 탐색" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <CheckBox x:Name="AllowSubtitleSuffixMatchCheckBox"
-                                          Margin="0,12,0,0">
-                                    <TextBlock Text="자막 파일명의 점 접미사 허용" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
+                                <TextBlock Text="{loc:Loc Settings_Interface}" FontSize="18" FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="170" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_Language}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,14,0" />
+                                    <ComboBox Grid.Column="1"
+                                              x:Name="LanguageComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                              SelectedValuePath="Tag">
+                                        <ComboBoxItem Content="{loc:Loc Settings_LanguageSystem}" Tag="System" />
+                                        <ComboBoxItem Content="한국어" Tag="Korean" />
+                                        <ComboBoxItem Content="English" Tag="English" />
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock Margin="0,8,0,0"
                                            Foreground="{StaticResource SecondaryTextBrush}"
+                                           FontSize="11"
                                            TextWrapping="Wrap"
-                                           Text="켜면 Movie.mp4에 Movie.kor.srt, Movie.ko.ass처럼 점 뒤에 태그가 붙은 자막도 연결합니다. 정확히 같은 이름의 자막이 항상 우선합니다." />
+                                           Text="{loc:Loc Settings_LanguageHelp}" />
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
-                                <TextBlock Text="작업 실행" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="{loc:Loc Settings_FileDiscovery}" FontSize="18" FontWeight="SemiBold" />
+                                <CheckBox x:Name="IncludeSubdirectoriesCheckBox"
+                                          Margin="0,16,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_IncludeSubfolders}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <CheckBox x:Name="AllowSubtitleSuffixMatchCheckBox"
+                                          Margin="0,12,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_AllowSubtitleSuffix}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AllowSubtitleSuffixHelp}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_Execution}" FontSize="18" FontWeight="SemiBold" />
                                 <Grid Margin="0,14,0,0"
                                       MaxWidth="360"
                                       HorizontalAlignment="Left">
@@ -297,7 +343,7 @@
                                         <ColumnDefinition Width="130" />
                                         <ColumnDefinition Width="190" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="동시 작업 수"
+                                    <TextBlock Text="{loc:Loc Settings_ConcurrentJobs}"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center"
                                                Margin="0,0,14,0" />
@@ -305,14 +351,14 @@
                                               x:Name="ConcurrentJobCountComboBox"
                                               Style="{StaticResource SettingsComboBoxStyle}"
                                               SelectedValuePath="Tag">
-                                        <ComboBoxItem Content="1개" Tag="1" />
-                                        <ComboBoxItem Content="2개" Tag="2" />
-                                        <ComboBoxItem Content="3개" Tag="3" />
-                                        <ComboBoxItem Content="4개" Tag="4" />
-                                        <ComboBoxItem Content="5개" Tag="5" />
-                                        <ComboBoxItem Content="6개" Tag="6" />
-                                        <ComboBoxItem Content="7개" Tag="7" />
-                                        <ComboBoxItem Content="8개" Tag="8" />
+                                        <ComboBoxItem Content="1" Tag="1" />
+                                        <ComboBoxItem Content="2" Tag="2" />
+                                        <ComboBoxItem Content="3" Tag="3" />
+                                        <ComboBoxItem Content="4" Tag="4" />
+                                        <ComboBoxItem Content="5" Tag="5" />
+                                        <ComboBoxItem Content="6" Tag="6" />
+                                        <ComboBoxItem Content="7" Tag="7" />
+                                        <ComboBoxItem Content="8" Tag="8" />
                                     </ComboBox>
                                 </Grid>
                                 <TextBlock Margin="0,8,0,0"
@@ -320,10 +366,10 @@
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="동시에 실행할 자막 변환·MKV 병합 작업 수입니다. 같은 드라이브에서는 1개를 권장합니다." />
+                                           Text="{loc:Loc Settings_ConcurrentJobsHelp}" />
                                 <CheckBox x:Name="ShowCompletionNotificationCheckBox"
                                           Margin="0,16,0,0">
-                                    <TextBlock Text="배치 작업이 끝나면 알림 표시"
+                                    <TextBlock Text="{loc:Loc Settings_ShowNotification}"
                                                TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
@@ -331,10 +377,10 @@
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="프로그램이 있는 모니터 오른쪽 아래에 완료 결과 카드를 표시합니다." />
+                                           Text="{loc:Loc Settings_ShowNotificationHelp}" />
                                 <CheckBox x:Name="PlayCompletionSoundCheckBox"
                                           Margin="0,14,0,0">
-                                    <TextBlock Text="배치 작업이 끝나면 시스템 알림음 재생"
+                                    <TextBlock Text="{loc:Loc Settings_PlaySound}"
                                                TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
@@ -342,13 +388,13 @@
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="사용자가 취소한 작업에는 알림과 소리를 사용하지 않습니다." />
+                                           Text="{loc:Loc Settings_PlaySoundHelp}" />
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
-                                <TextBlock Text="MKV 출력" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="{loc:Loc Settings_MkvOutput}" FontSize="18" FontWeight="SemiBold" />
                                 <Grid Margin="0,14,0,0"
                                       MaxWidth="520"
                                       HorizontalAlignment="Left">
@@ -356,7 +402,7 @@
                                         <ColumnDefinition Width="130" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="출력 파일 접두사"
+                                    <TextBlock Text="{loc:Loc Settings_OutputPrefix}"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center"
                                                Margin="0,0,14,0" />
@@ -368,23 +414,36 @@
                                 </Grid>
                                 <CheckBox x:Name="RemoveExistingSubtitlesCheckBox"
                                           Margin="0,16,0,0">
-                                    <TextBlock Text="원본 영상의 내장 자막을 모두 제거" TextWrapping="Wrap" />
+                                    <TextBlock Text="{loc:Loc Settings_RemoveSubtitles}" TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="해제하면 기존 자막 형식과 트랙은 그대로 보존하고, 새 ASS와 SRT를 마지막에 추가합니다. 새 ASS가 기본 자막이 되도록 기존 자막의 기본 플래그만 해제합니다." />
+                                           Text="{loc:Loc Settings_RemoveSubtitlesHelp}" />
                                 <CheckBox x:Name="RemoveExistingFontAttachmentsCheckBox"
                                           Margin="0,14,0,0">
-                                    <TextBlock Text="원본 영상에 첨부된 폰트 파일 제거" TextWrapping="Wrap" />
+                                    <TextBlock Text="{loc:Loc Settings_RemoveFonts}" TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="켜면 원본 영상의 첨부파일 중 폰트만 제거합니다. 폰트가 아닌 다른 첨부파일은 보존합니다." />
+                                           Text="{loc:Loc Settings_RemoveFontsHelp}" />
+                                <CheckBox x:Name="AttachAssStyleFontsCheckBox"
+                                          Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_AttachFonts}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AttachFontsHelp}" />
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="#9A5B13"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_FontLicense}" />
                                 <CheckBox x:Name="FilterAudioTracksByLanguageCheckBox"
                                           Margin="0,14,0,0">
-                                    <TextBlock Text="선택한 언어의 오디오 트랙만 유지"
+                                    <TextBlock Text="{loc:Loc Settings_FilterAudio}"
                                                TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
@@ -392,7 +451,7 @@
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="여러 오디오 트랙이 있을 때 선택한 언어만 결과 MKV에 포함합니다." />
+                                           Text="{loc:Loc Settings_FilterAudioHelp}" />
                                 <Grid Margin="24,10,0,0"
                                       MaxWidth="360"
                                       HorizontalAlignment="Left"
@@ -401,7 +460,7 @@
                                         <ColumnDefinition Width="130" />
                                         <ColumnDefinition Width="190" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="유지할 언어"
+                                    <TextBlock Text="{loc:Loc Settings_AudioLanguage}"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center"
                                                Margin="0,0,14,0" />
@@ -410,9 +469,9 @@
                                               Style="{StaticResource SettingsComboBoxStyle}"
                                               SelectedValuePath="Tag"
                                               VerticalAlignment="Center">
-                                        <ComboBoxItem Content="영어" Tag="English" />
-                                        <ComboBoxItem Content="일본어" Tag="Japanese" />
-                                        <ComboBoxItem Content="한국어" Tag="Korean" />
+                                        <ComboBoxItem Content="{loc:Loc Language_English}" Tag="English" />
+                                        <ComboBoxItem Content="{loc:Loc Language_Japanese}" Tag="Japanese" />
+                                        <ComboBoxItem Content="{loc:Loc Language_Korean}" Tag="Korean" />
                                     </ComboBox>
                                 </Grid>
                                 <TextBlock Margin="24,7,0,0"
@@ -421,7 +480,7 @@
                                            Foreground="#9A5B13"
                                            FontSize="11"
                                            TextWrapping="NoWrap"
-                                           Text="선택한 언어 트랙이 없으면 해당 작업은 건너뜁니다."
+                                           Text="{loc:Loc Settings_AudioLanguageMissing}"
                                            IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}" />
                             </StackPanel>
                         </Border>
@@ -429,28 +488,172 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="ASS 스타일">
-                <Border Style="{StaticResource SectionCardStyle}"
-                        Margin="0,14"
-                        VerticalAlignment="Top">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
+            <TabItem Header="{loc:Loc Settings_TabAssStyle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <Border Style="{StaticResource SectionCardStyle}"
+                            VerticalAlignment="Top">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                        <CheckBox x:Name="UseCustomAssStyleCheckBox"
-                                  VerticalAlignment="Center"
-                                  Content="SRT → ASS 변환 시 지정한 스타일 사용" />
-                        <Button Grid.Column="1"
-                                Content="더보기"
-                                Margin="14,0,0,0"
-                                Click="OpenAssStyleDetails_Click" />
-                    </Grid>
-                </Border>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="UseCustomAssStyleCheckBox"
+                                          VerticalAlignment="Center"
+                                          Content="{loc:Loc Settings_UseAssStyle}" />
+                                <Button x:Name="AssStyleDetailsToggleButton"
+                                        Grid.Column="1"
+                                        Width="36"
+                                        Height="30"
+                                        Padding="0"
+                                        ToolTip="{loc:Loc Settings_ExpandAssStyle}"
+                                        Margin="14,0,0,0"
+                                        Click="ToggleAssStyleDetails_Click">
+                                    <Path Width="10"
+                                          Height="6"
+                                          Data="M 1 1 L 5 5 L 9 1"
+                                          Stroke="#323130"
+                                          StrokeThickness="1.5"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Stretch="None"
+                                          RenderTransformOrigin="0.5,0.5">
+                                        <Path.RenderTransform>
+                                            <RotateTransform x:Name="AssStyleDetailsArrowTransform" />
+                                        </Path.RenderTransform>
+                                    </Path>
+                                </Button>
+                            </Grid>
+
+                            <Border x:Name="AssStyleDetailsPanel"
+                                    Grid.Row="1"
+                                    Margin="0,14,0,0"
+                                    Padding="0,14,0,0"
+                                    BorderBrush="#E1E1E1"
+                                    BorderThickness="0,1,0,0"
+                                    Visibility="Collapsed">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{loc:Loc Settings_AssStyleDetails}"
+                                                       FontSize="17"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,3,16,0"
+                                                       Foreground="{StaticResource SecondaryTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Text="{loc:Loc Settings_AssStyleDetailsHelp}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Content="{loc:Loc Settings_ManualStyleInput}"
+                                                Margin="0"
+                                                VerticalAlignment="Center"
+                                                Click="OpenManualStyleInput_Click" />
+                                    </Grid>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="PlayResX" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="PlayResXTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="PlayResY" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="PlayResYTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_FontName}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="FontNameTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_FontSize}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="FontSizeTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_PrimaryColor}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="PrimaryColorTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_OutlineColor}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="OutlineColorTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="3" Grid.ColumnSpan="3" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_BackColor}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="BackColorTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                            <TextBlock Margin="0,4,0,0"
+                                                       Foreground="{StaticResource SecondaryTextBrush}"
+                                                       FontSize="11"
+                                                       Text="{loc:Loc Ass_ColorFormat}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="4" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_OutlineWidth}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="OutlineWidthTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="4" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_ShadowDepth}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="ShadowDepthTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="5" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_Alignment}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <ComboBox x:Name="AlignmentComboBox" Style="{StaticResource AssFieldComboBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="5" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_MarginVertical}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="MarginVerticalTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="6" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_MarginLeft}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="MarginLeftTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="6" Grid.Column="2" Style="{StaticResource AssFieldContainerStyle}">
+                                            <TextBlock Text="{loc:Loc Ass_MarginRight}" Style="{StaticResource AssFieldLabelStyle}" />
+                                            <TextBox x:Name="MarginRightTextBox" Style="{StaticResource AssFieldTextBoxStyle}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="7" Grid.ColumnSpan="3" Orientation="Horizontal">
+                                            <CheckBox x:Name="BoldCheckBox" Content="{loc:Loc Ass_Bold}" Margin="0,2,28,0" />
+                                            <CheckBox x:Name="ItalicCheckBox" Content="{loc:Loc Ass_Italic}" Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="외부 도구">
+            <TabItem Header="{loc:Loc Settings_TabTools}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,12,4,0">
                     <StackPanel>
                         <Border Style="{StaticResource SectionCardStyle}">
@@ -461,9 +664,11 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox x:Name="MkvMergePathTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0" />
-                                    <Button Grid.Column="1" Content="찾기" Margin="8,0,0,0" Click="BrowseMkvMerge_Click" />
+                                    <Button Grid.Column="1" Content="{loc:Loc Settings_AutoDetect}" Margin="8,0,0,0" Click="AutoDetectMkvMerge_Click" />
+                                    <Button Grid.Column="2" Content="{loc:Loc Common_Browse}" Margin="8,0,0,0" Click="BrowseMkvMerge_Click" />
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -471,17 +676,22 @@
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
                                 <TextBlock Text="Subtitle Edit seconv" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock Margin="0,4,0,10"
+                                <TextBlock Margin="0,4,0,3"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           Text="seconv.exe" />
+                                <TextBlock Margin="0,0,0,10"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="기본 Subtitle Edit 설치본에는 포함되지 않으므로 SeConv-Windows-x64.zip을 별도로 풀어 지정해야 합니다." />
+                                           Text="{loc:Loc Settings_SeConvInstallNotice}" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox x:Name="SeConvPathTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0" />
-                                    <Button Grid.Column="1" Content="찾기" Margin="8,0,0,0" Click="BrowseSeConv_Click" />
+                                    <Button Grid.Column="1" Content="{loc:Loc Settings_AutoDetect}" Margin="8,0,0,0" Click="AutoDetectSeConv_Click" />
+                                    <Button Grid.Column="2" Content="{loc:Loc Common_Browse}" Margin="8,0,0,0" Click="BrowseSeConv_Click" />
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -489,17 +699,23 @@
                         <TextBlock Margin="4,0,4,12"
                                    Foreground="{StaticResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
-                                   Text="비워 두면 앱 옆 tools 폴더, PATH, 표준 설치 경로 순으로 자동 탐색합니다." />
+                                   Text="{loc:Loc Settings_ToolPathHelp}" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
         </TabControl>
 
         <Border Grid.Row="2" Background="White" BorderBrush="#D1D1D1" BorderThickness="0,1,0,0" Padding="18,14">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="취소" IsCancel="True" />
-                <Button Content="저장" Style="{StaticResource PrimaryButtonStyle}" IsDefault="True" Click="SaveButton_Click" Margin="0" />
-            </StackPanel>
+            <Grid>
+                <Button Content="{loc:Loc Settings_OpenFolder}"
+                        HorizontalAlignment="Left"
+                        Margin="0"
+                        Click="OpenSettingsFolder_Click" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="{loc:Loc Common_Cancel}" IsCancel="True" />
+                    <Button Content="{loc:Loc Common_Save}" Style="{StaticResource PrimaryButtonStyle}" IsDefault="True" Click="SaveButton_Click" Margin="0" />
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

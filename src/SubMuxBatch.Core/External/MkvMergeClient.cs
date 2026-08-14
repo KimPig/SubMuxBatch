@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.External;
 
@@ -80,14 +83,17 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         CancellationToken cancellationToken = default)
     {
         var result = await processRunner.RunAsync(
-            new ProcessRequest(executablePath, ["-J", path], Path.GetDirectoryName(path)),
+            new ProcessRequest(
+                executablePath,
+                ["-J", path, "--ui-language", GetUiLanguageCode()],
+                Path.GetDirectoryName(path)),
             onOutput,
             cancellationToken).ConfigureAwait(false);
 
         if (result.ExitCode >= 2)
         {
             throw new InvalidOperationException(
-                $"mkvmerge가 영상 정보를 읽지 못했습니다. (종료 코드 {result.ExitCode}){Environment.NewLine}{result.StandardError.Trim()}");
+                CoreText.Get("Mkv_InspectionFailed", result.ExitCode, result.StandardError.Trim()));
         }
 
         var inspection = ParseInspection(result.StandardOutput);
@@ -118,11 +124,14 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         CancellationToken cancellationToken = default,
         bool removeExistingSubtitles = true,
         bool removeExistingFontAttachments = false,
-        AudioTrackLanguage? keepOnlyAudioLanguage = null)
+        AudioTrackLanguage? keepOnlyAudioLanguage = null,
+        IReadOnlyList<FontAttachmentFile>? fontAttachments = null)
     {
         var arguments = new List<string>
         {
             "--gui-mode",
+            "--ui-language",
+            GetUiLanguageCode(),
             "-o",
             outputPath
         };
@@ -147,7 +156,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             {
                 if (track.Id is null)
                 {
-                    throw new InvalidOperationException("기존 자막 트랙 ID를 확인할 수 없어 기본 플래그를 해제할 수 없습니다.");
+                    throw new InvalidOperationException(CoreText.Get("Mkv_SubtitleTrackIdMissing"));
                 }
 
                 arguments.Add("--default-track-flag");
@@ -164,7 +173,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                     .Where(static attachment => !IsFontAttachment(attachment))
                     .Select(static attachment => attachment.Id
                         ?? throw new InvalidOperationException(
-                            "폰트가 아닌 기존 첨부파일의 ID를 확인할 수 없어 안전하게 병합할 수 없습니다."))
+                            CoreText.Get("Mkv_NonFontAttachmentIdMissing")))
                     .ToArray();
 
                 if (retainedAttachmentIds.Length == 0)
@@ -194,13 +203,13 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                 if (retainedAudioTracks.Length == 0)
                 {
                     throw new JobSkippedException(
-                        $"원본 영상에서 선택한 {GetAudioLanguageDisplayName(audioLanguage)} 오디오 트랙을 찾지 못했습니다. 무음 결과 파일을 만들지 않고 해당 작업은 건너뜁니다.");
+                        CoreText.Get("Mkv_AudioLanguageNotFound", GetAudioLanguageDisplayName(audioLanguage)));
                 }
 
                 var retainedAudioIds = retainedAudioTracks
                     .Select(static track => track.Id
                         ?? throw new InvalidOperationException(
-                            "유지할 오디오 트랙의 ID를 확인할 수 없어 안전하게 병합할 수 없습니다."))
+                            CoreText.Get("Mkv_AudioTrackIdMissing")))
                     .ToArray();
                 arguments.Add("--audio-tracks");
                 arguments.Add(string.Join(",", retainedAudioIds));
@@ -215,8 +224,12 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
         arguments.Add(sourceVideo);
 
-        AddSubtitle(arguments, assPath, "스타일 자막 (ASS)", isDefault: true);
-        AddSubtitle(arguments, srtPath, "일반 자막 (SRT)", isDefault: false);
+        AddSubtitle(arguments, assPath, CoreText.Get("Mkv_AssTrackName"), isDefault: true);
+        AddSubtitle(arguments, srtPath, CoreText.Get("Mkv_SrtTrackName"), isDefault: false);
+        foreach (var fontAttachment in fontAttachments ?? [])
+        {
+            AddFontAttachment(arguments, fontAttachment);
+        }
 
         void HandleOutput(string line)
         {
@@ -237,7 +250,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         {
             var details = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
             throw new InvalidOperationException(
-                $"mkvmerge 병합 실패 (종료 코드 {result.ExitCode}){Environment.NewLine}{details.Trim()}");
+                CoreText.Get("Mkv_MuxFailed", result.ExitCode, details.Trim()));
         }
 
         return new MuxResult(
@@ -259,11 +272,19 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
         if (result.ExitCode == 1 && warnings.Count == 0)
         {
-            warnings.Add("mkvmerge가 경고와 함께 완료되었지만 상세 내용을 제공하지 않았습니다.");
+            warnings.Add(CoreText.Get("Mkv_WarningWithoutDetails"));
         }
 
         return warnings;
     }
+
+    private static string GetUiLanguageCode() =>
+        string.Equals(
+            CultureInfo.CurrentUICulture.TwoLetterISOLanguageName,
+            "ko",
+            StringComparison.OrdinalIgnoreCase)
+            ? "ko"
+            : "en";
 
     private static IEnumerable<string> ReadLines(string text)
     {
@@ -279,7 +300,8 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         MkvInspection output,
         bool removeExistingSubtitles = true,
         bool removeExistingFontAttachments = false,
-        AudioTrackLanguage? keepOnlyAudioLanguage = null)
+        AudioTrackLanguage? keepOnlyAudioLanguage = null,
+        IReadOnlyList<FontAttachmentFile>? addedFontAttachments = null)
     {
         var errors = new List<string>();
         var sourceAudioTracks = source.Tracks.Where(static track => IsTrackType(track, "audio")).ToArray();
@@ -296,12 +318,12 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
         if (audioFilterApplies && !sourceMediaTracks.Any(static track => IsTrackType(track, "audio")))
         {
-            errors.Add($"원본 영상에 선택한 {GetAudioLanguageDisplayName(keepOnlyAudioLanguage!.Value)} 오디오 트랙이 없습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationAudioMissing", GetAudioLanguageDisplayName(keepOnlyAudioLanguage!.Value)));
         }
 
         if (sourceMediaTracks.Length != outputMediaTracks.Length)
         {
-            errors.Add("원본과 결과의 비자막 트랙 수가 다릅니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationMediaTrackCount"));
         }
         else
         {
@@ -310,14 +332,14 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                 if (!string.Equals(sourceMediaTracks[index].Type, outputMediaTracks[index].Type, StringComparison.OrdinalIgnoreCase)
                     || !CodecMetadataEquals(sourceMediaTracks[index], outputMediaTracks[index]))
                 {
-                    errors.Add($"원본의 {index + 1}번째 비자막 트랙이 결과와 다릅니다.");
+                    errors.Add(CoreText.Get("Mkv_ValidationMediaTrackMismatch", index + 1));
                 }
                 else if (audioFilterApplies
                          && IsTrackType(sourceMediaTracks[index], "audio")
                          && !MatchesAudioLanguage(outputMediaTracks[index], keepOnlyAudioLanguage!.Value))
                 {
                     errors.Add(
-                        $"결과의 {index + 1}번째 비자막 트랙이 선택한 {GetAudioLanguageDisplayName(keepOnlyAudioLanguage.Value)} 오디오가 아닙니다.");
+                        CoreText.Get("Mkv_ValidationWrongAudio", index + 1, GetAudioLanguageDisplayName(keepOnlyAudioLanguage.Value)));
                 }
                 else if (audioFilterApplies
                          && IsTrackType(sourceMediaTracks[index], "audio")
@@ -331,7 +353,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                              || sourceMediaTracks[index].ForcedTrack != outputMediaTracks[index].ForcedTrack))
                 {
                     errors.Add(
-                        $"원본의 {index + 1}번째 선택 오디오 트랙 메타데이터가 결과에 보존되지 않았습니다.");
+                        CoreText.Get("Mkv_ValidationAudioMetadata", index + 1));
                 }
             }
         }
@@ -339,19 +361,40 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         var expectedAttachments = removeExistingFontAttachments
             ? source.Attachments.Where(static attachment => !IsFontAttachment(attachment)).ToArray()
             : source.Attachments.ToArray();
-        if (expectedAttachments.Length != output.AttachmentCount)
+        var addedAttachments = addedFontAttachments ?? [];
+        if (expectedAttachments.Length + addedAttachments.Count != output.AttachmentCount)
         {
-            errors.Add(removeExistingFontAttachments
-                ? "폰트를 제외한 원본 첨부 파일 수가 결과와 다릅니다."
-                : "원본 첨부 파일 수가 보존되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationAttachmentCount"));
         }
         else
         {
+            var remainingAttachments = output.Attachments.ToList();
             for (var index = 0; index < expectedAttachments.Length; index++)
             {
-                if (!AttachmentMetadataEquals(expectedAttachments[index], output.Attachments[index]))
+                var matchIndex = remainingAttachments.FindIndex(
+                    attachment => AttachmentMetadataEquals(expectedAttachments[index], attachment));
+                if (matchIndex < 0)
                 {
-                    errors.Add($"보존 대상인 {index + 1}번째 첨부 파일 정보가 결과와 다릅니다.");
+                    errors.Add(CoreText.Get("Mkv_ValidationPreservedAttachment", index + 1));
+                }
+                else
+                {
+                    remainingAttachments.RemoveAt(matchIndex);
+                }
+            }
+
+            for (var index = 0; index < addedAttachments.Count; index++)
+            {
+                var expected = addedAttachments[index];
+                var matchIndex = remainingAttachments.FindIndex(
+                    attachment => AddedFontAttachmentMetadataEquals(expected, attachment));
+                if (matchIndex < 0)
+                {
+                    errors.Add(CoreText.Get("Mkv_ValidationAddedFont", expected.FileName));
+                }
+                else
+                {
+                    remainingAttachments.RemoveAt(matchIndex);
                 }
             }
         }
@@ -359,7 +402,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         if (source.ChapterCount.HasValue && output.ChapterCount.HasValue
             && source.ChapterCount.Value != output.ChapterCount.Value)
         {
-            errors.Add("원본 챕터 수가 보존되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationChapterCount"));
         }
 
         var sourceSubtitles = source.Tracks.Where(static track => track.Type == "subtitles").ToArray();
@@ -367,7 +410,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         var expectedSubtitleCount = removeExistingSubtitles ? 2 : sourceSubtitles.Length + 2;
         if (outputSubtitles.Length != expectedSubtitleCount)
         {
-            errors.Add($"결과의 자막 트랙은 {expectedSubtitleCount}개여야 하지만 {outputSubtitles.Length}개입니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationSubtitleCount", expectedSubtitleCount, outputSubtitles.Length));
             return errors;
         }
 
@@ -381,12 +424,12 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
         var addedAssIndex = outputSubtitles.Length - 2;
         var addedSrtIndex = outputSubtitles.Length - 1;
-        ValidateSubtitle(outputSubtitles[addedAssIndex], "S_TEXT/ASS", shouldBeDefault: true, "추가된 ASS", errors);
-        ValidateSubtitle(outputSubtitles[addedSrtIndex], "S_TEXT/UTF8", shouldBeDefault: false, "추가된 SRT", errors);
+        ValidateSubtitle(outputSubtitles[addedAssIndex], "S_TEXT/ASS", shouldBeDefault: true, CoreText.Get("Mkv_AddedAssLabel"), errors);
+        ValidateSubtitle(outputSubtitles[addedSrtIndex], "S_TEXT/UTF8", shouldBeDefault: false, CoreText.Get("Mkv_AddedSrtLabel"), errors);
 
         if (outputSubtitles.Count(static track => track.DefaultTrack) != 1)
         {
-            errors.Add("추가된 ASS만 유일한 기본 자막 트랙이어야 합니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationOnlyAssDefault"));
         }
 
         return errors;
@@ -398,30 +441,30 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         int index,
         ICollection<string> errors)
     {
-        var label = $"기존 {index + 1}번째 자막";
+        var label = CoreText.Get("Mkv_PreservedSubtitleLabel", index + 1);
         if (!CodecMetadataEquals(source, output))
         {
-            errors.Add($"{label} 트랙의 코덱이 보존되지 않았습니다: {source.CodecId} -> {output.CodecId}");
+            errors.Add(CoreText.Get("Mkv_ValidationCodecNotPreserved", label, source.CodecId, output.CodecId));
         }
 
         if (source.ForcedTrack != output.ForcedTrack)
         {
-            errors.Add($"{label} 트랙의 forced 플래그가 보존되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationForcedNotPreserved", label));
         }
 
         if (!LanguageMetadataPreserved(source, output))
         {
-            errors.Add($"{label} 트랙의 언어 정보가 보존되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationLanguageNotPreserved", label));
         }
 
         if (!string.Equals(source.TrackName, output.TrackName, StringComparison.Ordinal))
         {
-            errors.Add($"{label} 트랙 이름이 보존되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationNameNotPreserved", label));
         }
 
         if (output.DefaultTrack)
         {
-            errors.Add($"{label} 트랙의 기본 플래그가 해제되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationDefaultNotCleared", label));
         }
     }
 
@@ -446,6 +489,21 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         arguments.Add(path);
     }
 
+    private static void AddFontAttachment(List<string> arguments, FontAttachmentFile attachment)
+    {
+        if (!File.Exists(attachment.FilePath))
+        {
+            throw new FileNotFoundException(CoreText.Get("Mkv_FontAttachmentMissing"), attachment.FilePath);
+        }
+
+        arguments.Add("--attachment-mime-type");
+        arguments.Add(attachment.MimeType);
+        arguments.Add("--attachment-name");
+        arguments.Add(attachment.FileName);
+        arguments.Add("--attach-file");
+        arguments.Add(attachment.FilePath);
+    }
+
     private static void ValidateSubtitle(
         MkvTrackInfo track,
         string expectedCodec,
@@ -455,17 +513,17 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
     {
         if (!string.Equals(track.CodecId, expectedCodec, StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add($"{label} 트랙 코덱이 {expectedCodec}이 아닙니다: {track.CodecId}");
+            errors.Add(CoreText.Get("Mkv_ValidationWrongCodec", label, expectedCodec, track.CodecId));
         }
 
         if (track.DefaultTrack != shouldBeDefault)
         {
-            errors.Add($"{label} 트랙의 기본 플래그가 올바르지 않습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationWrongDefault", label));
         }
 
         if (track.ForcedTrack)
         {
-            errors.Add($"{label} 트랙에 forced 플래그가 설정되어 있습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationForcedSet", label));
         }
 
         var isKorean = string.Equals(track.Language, "kor", StringComparison.OrdinalIgnoreCase)
@@ -474,7 +532,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                        || track.LanguageIetf?.StartsWith("ko-", StringComparison.OrdinalIgnoreCase) == true;
         if (!isKorean)
         {
-            errors.Add($"{label} 트랙의 언어가 한국어로 지정되지 않았습니다.");
+            errors.Add(CoreText.Get("Mkv_ValidationNotKorean", label));
         }
     }
 
@@ -554,9 +612,9 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
     private static string GetAudioLanguageDisplayName(AudioTrackLanguage language) => language switch
     {
-        AudioTrackLanguage.English => "영어",
-        AudioTrackLanguage.Japanese => "일본어",
-        AudioTrackLanguage.Korean => "한국어",
+        AudioTrackLanguage.English => CoreText.Get("Language_English"),
+        AudioTrackLanguage.Japanese => CoreText.Get("Language_Japanese"),
+        AudioTrackLanguage.Korean => CoreText.Get("Language_Korean"),
         _ => throw new ArgumentOutOfRangeException(nameof(language), language, null)
     };
 
@@ -586,6 +644,13 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         && string.Equals(expected.Description, actual.Description, StringComparison.Ordinal)
         && expected.Size == actual.Size
         && string.Equals(expected.Uid, actual.Uid, StringComparison.Ordinal);
+
+    private static bool AddedFontAttachmentMetadataEquals(
+        FontAttachmentFile expected,
+        MkvAttachmentInfo actual) =>
+        string.Equals(expected.FileName, actual.FileName, StringComparison.Ordinal)
+        && string.Equals(expected.MimeType, actual.ContentType, StringComparison.OrdinalIgnoreCase)
+        && expected.Size == actual.Size;
 
     private static MkvInspection ParseInspection(string json)
     {
@@ -673,7 +738,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         }
         catch (JsonException exception)
         {
-            throw new InvalidOperationException("mkvmerge JSON 정보를 해석할 수 없습니다.", exception);
+            throw new InvalidOperationException(CoreText.Get("Mkv_JsonParseFailed"), exception);
         }
     }
 

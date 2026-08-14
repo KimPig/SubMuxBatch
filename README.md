@@ -10,6 +10,8 @@ Prebuilt, self-contained Windows x64 packages are available on the [Releases](ht
 
 MKVToolNix and Subtitle Edit's command-line converter are external dependencies and are not bundled. Install or extract them separately before using the application.
 
+The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
+
 ## Supported video inputs
 
 Supported input containers are **MKV, MP4, M4V, MOV, AVI, TS, MTS, M2TS, and WebM**. Output is always MKV. Container conversion is performed by `mkvmerge` without re-encoding the video or audio streams.
@@ -33,6 +35,7 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 - If two supported videos have the same directory and filename stem, such as `Movie.mkv` and `Movie.mp4`, the item is marked invalid instead of selecting one silently.
 - When **Remove all existing subtitle tracks from the source video** is enabled, existing tracks are replaced by the selected ASS and SRT. When disabled, every existing subtitle track is retained and the new ASS/SRT tracks are appended. The subtitle codec or representation may change when a source-container format is remuxed into Matroska; for example, MP4 Timed Text is stored as an SRT-compatible text track. Existing subtitle default flags are cleared so that only the new ASS is the default.
 - When **Remove font attachments from the source video** is enabled, font attachments are removed while cover art and other attachments are preserved.
+- When **Attach ASS style font files** is enabled, SubMux Batch reads the font families used by the final ASS, finds matching TTF/OTF font files installed on Windows by their internal family metadata, and attaches the available family variants to the result. If any required font cannot be found, the job is skipped without creating an output file and a warning is logged. This can be enabled together with font removal: old source fonts are removed first and the fonts required by the current ASS are then attached.
 - Video, audio, attachments, and chapters are preserved by default. When **Keep only audio tracks in the selected language** is enabled for a multi-audio file, all English, Japanese, or Korean tracks in the selected language are retained and other audio tracks are removed. A single audio track is always preserved. If the selected language is absent, that job is skipped without creating a silent output file.
 - The finished MKV structure is inspected before the temporary output is committed to its final filename.
 - New subtitle tracks use the Korean language tag (`kor`). ASS is the default track, SRT is non-default, and neither track is forced.
@@ -43,6 +46,8 @@ The repository and release packages do not include these applications:
 
 - `mkvmerge.exe` from [MKVToolNix](https://mkvtoolnix.download/)
 - `seconv.exe` and the libraries distributed with it from [Subtitle Edit](https://github.com/SubtitleEdit/subtitleedit/releases) ([official command-line documentation](https://github.com/SubtitleEdit/subtitleedit/blob/main/docs/reference/command-line.md))
+
+The standard Subtitle Edit installer does not include `seconv.exe`. Download and extract the separate `SeConv-Windows-x64.zip` package, then select `seconv.exe` in Settings if it is not detected automatically.
 
 SubMux Batch searches for each executable in this order:
 
@@ -88,6 +93,14 @@ PlayResX: 1920
 PlayResY: 1080
 Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1
 ```
+
+### ASS font attachments
+
+**Attach ASS style font files** is enabled by default for portable MKV output.
+
+SubMux Batch matches the ASS `Fontname` against the internal family-name metadata of installed Windows fonts instead of guessing from filenames. It attaches matching `.ttf`, `.otf`, `.ttc`, and `.otc` files with an appropriate font MIME type. Available regular, bold, italic, and bold-italic family files are included so ASS inline styling remains usable.
+
+Font files can have separate redistribution terms. **The user is responsible for verifying that each attached font's license permits redistribution.** SubMux Batch does not make or enforce that licensing decision.
 
 SubMux Batch also works around `seconv` 5.1.0 interpreting `[` and `]` in arguments as console markup, so filenames and directories such as `[Release Group] Movie.mp4` are supported.
 

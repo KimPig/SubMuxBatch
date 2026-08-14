@@ -12,13 +12,19 @@
     <Description>Windows GUI for remuxing supported video files with Korean ASS, SRT, and SMI subtitle tracks into MKV files.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon />
-    <Version>2026.8.14</Version>
-    <AssemblyVersion>2026.8.14.0</AssemblyVersion>
-    <FileVersion>2026.8.14.0</FileVersion>
-    <InformationalVersion>2026.08.14</InformationalVersion>
+    <BuildDate>$([System.DateTime]::Now.ToString('yyyy.MM.dd'))</BuildDate>
+    <BuildAssemblyVersion>$([System.DateTime]::Now.ToString('yyyy.M.d.0'))</BuildAssemblyVersion>
+    <Version>$(BuildDate)</Version>
+    <AssemblyVersion>$(BuildAssemblyVersion)</AssemblyVersion>
+    <FileVersion>$(BuildAssemblyVersion)</FileVersion>
+    <InformationalVersion>$(BuildDate)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SubMuxBatch.Core\SubMuxBatch.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\AppStrings.en.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.en.json" WithCulture="false" />
+    <EmbeddedResource Include="Localization\AppStrings.ko.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.ko.json" WithCulture="false" />
   </ItemGroup>
 </Project>

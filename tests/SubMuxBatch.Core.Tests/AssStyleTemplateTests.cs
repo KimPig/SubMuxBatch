@@ -13,6 +13,7 @@ public sealed class AssStyleTemplateTests
         Assert.Equal(1920, settings.PlayResX);
         Assert.Equal(1080, settings.PlayResY);
         Assert.False(settings.RemoveExistingFontAttachments);
+        Assert.True(settings.AttachAssStyleFonts);
         Assert.Equal(
             "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1",
             settings.AssStyleLine);
@@ -126,6 +127,7 @@ public sealed class AssStyleTemplateTests
             PlayResX = 1280,
             PlayResY = 720,
             RemoveExistingFontAttachments = true,
+            AttachAssStyleFonts = false,
             AssStyleLine = "saved for later"
         };
 
@@ -135,6 +137,7 @@ public sealed class AssStyleTemplateTests
         Assert.Equal(1280, copy.PlayResX);
         Assert.Equal(720, copy.PlayResY);
         Assert.True(copy.RemoveExistingFontAttachments);
+        Assert.False(copy.AttachAssStyleFonts);
         Assert.Equal("saved for later", copy.AssStyleLine);
     }
 
@@ -157,6 +160,7 @@ public sealed class AssStyleTemplateTests
         Assert.Equal(1280, migrated.PlayResX);
         Assert.Equal(720, migrated.PlayResY);
         Assert.Equal(AppSettings.DefaultAssStyleLine, migrated.AssStyleLine);
+        Assert.True(migrated.AttachAssStyleFonts);
     }
 
     private static int Count(string value, string pattern) =>

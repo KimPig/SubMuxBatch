@@ -1,4 +1,5 @@
 using System.Windows;
+using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
 using SubMuxBatch.Core.Configuration;
 
@@ -27,8 +28,8 @@ public partial class ManualAssStyleInputWindow : Window
         {
             MessageBox.Show(
                 this,
-                error ?? "ASS Style 값을 확인해 주세요.",
-                "Style 입력 확인",
+                error ?? AppText.Get("ManualStyle_Invalid"),
+                AppText.Get("ManualStyle_ValidationTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -38,8 +39,8 @@ public partial class ManualAssStyleInputWindow : Window
         {
             MessageBox.Show(
                 this,
-                "Default 스타일만 사용할 수 있습니다. Style 이름을 Default로 입력해 주세요.",
-                "Style 입력 확인",
+                AppText.Get("ManualStyle_DefaultOnly"),
+                AppText.Get("ManualStyle_ValidationTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.IO;
+using SubMuxBatch.App.Localization;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
@@ -10,6 +11,7 @@ namespace SubMuxBatch.App.ViewModels;
 
 public sealed class QueueItemViewModel : INotifyPropertyChanged
 {
+    public bool IsQueueEndSpacer => false;
     private MediaSet _media;
     private ConversionPlan _plan;
     private JobState _state;
@@ -18,7 +20,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private string? _outputPath;
     private string _plannedOutputFile = string.Empty;
     private MkvInspection? _mediaInspection;
-    private string _mediaInfoStatus = "미디어 정보를 읽는 중…";
+    private string _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
+    private bool _mediaInspectionFailed;
 
     public QueueItemViewModel(MediaSet media, AppSettings settings)
     {
@@ -69,7 +72,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         {
             if (_media.HasVideoConflict)
             {
-                return "중복";
+                return AppText.Get("Common_Duplicate");
             }
 
             if (_media.VideoPath is null)
@@ -79,17 +82,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
             if (_mediaInspection is null)
             {
-                return _mediaInfoStatus.StartsWith(
-                    "미디어 정보 확인 실패",
-                    StringComparison.Ordinal)
-                        ? "확인 실패"
-                        : "확인 중…";
+                return _mediaInspectionFailed
+                    ? AppText.Get("Common_CheckFailed")
+                    : AppText.Get("Common_Checking");
             }
 
             var videoTracks = GetVideoTracks(_mediaInspection);
             if (videoTracks.Length == 0)
             {
-                return "없음";
+                return AppText.Get("Common_None");
             }
 
             var primaryTrack = GetPrimaryVideoTrack(videoTracks)!;
@@ -97,12 +98,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             return FormatCodec(primaryTrack) + suffix;
         }
     }
+    public string DurationText => _mediaInspection?.DurationNanoseconds is > 0
+        ? FormatDuration(_mediaInspection.DurationNanoseconds.Value)
+        : _media.VideoPath is null ? "—" : _mediaInspection is null ? AppText.Get("Common_Checking") : "—";
     public string PlanDescription => _plan.Description;
     public string OutputFile => _outputPath is null
         ? _plannedOutputFile
         : Path.GetFileName(_outputPath);
     public string VideoPathDisplay => _media.CandidateVideoPaths.Count == 0
-        ? "없음"
+        ? AppText.Get("Common_None")
         : string.Join(Environment.NewLine, _media.CandidateVideoPaths);
     public string VideoFileNamesDisplay => _media.CandidateVideoPaths.Count == 0
         ? VideoPathDisplay
@@ -117,7 +121,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 _media.SmiPath is null ? null : $"SMI: {Path.GetFileName(_media.SmiPath)}"
             }.Where(static value => value is not null);
             var text = string.Join(" · ", files);
-            return text.Length > 0 ? text : "없음";
+            return text.Length > 0 ? text : AppText.Get("Common_None");
         }
     }
     public string SubtitlePathDisplay
@@ -131,7 +135,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         }
     }    public string OutputPathDisplay => OutputPath
         ?? (_media.VideoPath is null
-            ? "미정"
+            ? AppText.Get("Common_Undetermined")
             : Path.Combine(Folder, _plannedOutputFile));
     public bool NeedsMediaInspection => _media.VideoPath is not null && _mediaInspection is null;
     public string InputSummary
@@ -141,12 +145,12 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             if (_media.HasVideoConflict)
             {
                 var names = string.Join(", ", _media.CandidateVideoPaths.Select(Path.GetFileName));
-                return $"영상 중복 · {names}";
+                return AppText.Get("Queue_VideoConflict", names);
             }
 
             if (_media.VideoPath is null)
             {
-                return "영상 없음";
+                return AppText.Get("Queue_NoVideo");
             }
 
             if (_mediaInspection is null)
@@ -188,7 +192,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var track = GetPrimaryVideoTrack(GetVideoTracks(_mediaInspection));
             if (track is null)
             {
-                return "비디오 트랙 없음";
+                return AppText.Get("Queue_NoVideoTrack");
             }
 
             var parts = new List<string> { FormatCodec(track) };
@@ -223,7 +227,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 .ToArray();
             if (tracks.Length == 0)
             {
-                return "오디오 트랙 없음";
+                return AppText.Get("Queue_NoAudioTrack");
             }
 
             return string.Join(Environment.NewLine, tracks.Select((track, index) =>
@@ -270,7 +274,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 string.Equals(track.Type, "subtitles", StringComparison.OrdinalIgnoreCase));
             var fontCount = _mediaInspection.Attachments.Count(MkvMergeClient.IsFontAttachment);
             var chapterCount = _mediaInspection.ChapterCount ?? 0;
-            return $"오디오 {audioCount} · 자막 {subtitleCount} · 첨부 폰트 {fontCount} · 챕터 {chapterCount}";
+            return AppText.Get("Queue_TrackSummary", audioCount, subtitleCount, fontCount, chapterCount);
         }
     }
     public string IssuesText
@@ -280,7 +284,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var issues = new List<string>();
             if (_plan.Error is not null) issues.Add(_plan.Error);
             issues.AddRange(_plan.Warnings);
-            if (!string.IsNullOrWhiteSpace(Error)) issues.Add($"실행 오류: {Error}");
+            if (!string.IsNullOrWhiteSpace(Error)) issues.Add(AppText.Get("Queue_RuntimeError", Error));
             return string.Join(" · ", issues);
         }
     }
@@ -294,6 +298,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             if (SetField(ref _state, value))
             {
                 OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(StatusForeground));
+                OnPropertyChanged(nameof(StatusBackground));
             }
         }
     }
@@ -339,21 +345,42 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
     public string StatusText => State switch
     {
-        JobState.Ready => _plan.Warnings.Count > 0 ? "준비 (경고)" : "준비",
-        JobState.Invalid => "처리 불가",
-        JobState.Queued => "대기 중",
+        JobState.Ready => _plan.Warnings.Count > 0 ? AppText.Get("Status_ReadyWarning") : AppText.Get("Status_Ready"),
+        JobState.Invalid => AppText.Get("Status_Invalid"),
+        JobState.Queued => AppText.Get("Status_Queued"),
         JobState.ConvertingSmiToSrt => "SMI → SRT",
         JobState.ConvertingAssToSrt => "ASS → SRT",
         JobState.ConvertingSrtToAss => "SRT → ASS",
-        JobState.Muxing => $"MKV 병합 {Progress}%",
-        JobState.Verifying => "검증 중",
-        JobState.Succeeded => "완료",
-        JobState.SucceededWithWarnings => "완료 (경고)",
-        JobState.Skipped => "건너뜀",
-        JobState.Failed => "실패",
-        JobState.Cancelling => "취소 중",
-        JobState.Cancelled => "취소됨",
+        JobState.Muxing => AppText.Get("Status_Muxing", Progress),
+        JobState.Verifying => AppText.Get("Status_Verifying"),
+        JobState.Succeeded => AppText.Get("Status_Succeeded"),
+        JobState.SucceededWithWarnings => AppText.Get("Status_SucceededWarning"),
+        JobState.Skipped => AppText.Get("Status_Skipped"),
+        JobState.Failed => AppText.Get("Status_Failed"),
+        JobState.Cancelling => AppText.Get("Status_Cancelling"),
+        JobState.Cancelled => AppText.Get("Status_Cancelled"),
         _ => State.ToString()
+    };
+
+    public string StatusForeground => State switch
+    {
+        JobState.Succeeded => "#107C10",
+        JobState.SucceededWithWarnings => "#9A6700",
+        JobState.Ready when _plan.Warnings.Count > 0 => "#9A6700",
+        JobState.Invalid or JobState.Skipped or JobState.Failed => "#C42B1C",
+        JobState.Cancelling => "#A15C00",
+        JobState.Cancelled => "#6B6B6B",
+        _ => "#0067C0"
+    };
+
+    public string StatusBackground => State switch
+    {
+        JobState.Succeeded => "#E8F5E9",
+        JobState.SucceededWithWarnings => "#FFF4CE",
+        JobState.Ready when _plan.Warnings.Count > 0 => "#FFF4CE",
+        JobState.Invalid or JobState.Skipped or JobState.Failed => "#FDE7E9",
+        JobState.Cancelling => "#FFF4CE",
+        _ => "Transparent"
     };
 
     public string Details
@@ -362,25 +389,25 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         {
             var lines = new List<string>
             {
-                $"기준 이름: {Name}",
-                $"폴더: {Folder}",
-                $"영상: {VideoPathDisplay}",
-                $"ASS: {_media.AssPath ?? "없음"}",
-                $"SRT: {_media.SrtPath ?? "없음"}",
-                $"SMI: {_media.SmiPath ?? "없음"}",
-                $"처리 계획: {_plan.Description}",
-                $"출력: {OutputPath ?? OutputFile}"
+                AppText.Get("Detail_BaseNameValue", Name),
+                AppText.Get("Detail_FolderValue", Folder),
+                AppText.Get("Detail_VideoValue", VideoPathDisplay),
+                $"ASS: {_media.AssPath ?? AppText.Get("Common_None")}",
+                $"SRT: {_media.SrtPath ?? AppText.Get("Common_None")}",
+                $"SMI: {_media.SmiPath ?? AppText.Get("Common_None")}",
+                AppText.Get("Detail_PlanValue", _plan.Description),
+                AppText.Get("Detail_OutputValue", OutputPath ?? OutputFile)
             };
 
             if (_plan.Error is not null)
             {
-                lines.Add($"오류: {_plan.Error}");
+                lines.Add(AppText.Get("Common_ErrorValue", _plan.Error));
             }
 
-            lines.AddRange(_plan.Warnings.Select(static warning => $"경고: {warning}"));
+            lines.AddRange(_plan.Warnings.Select(static warning => AppText.Get("Common_WarningValue", warning)));
             if (!string.IsNullOrWhiteSpace(Error))
             {
-                lines.Add($"실행 오류: {Error}");
+                lines.Add(AppText.Get("Queue_RuntimeError", Error));
             }
 
             return string.Join(Environment.NewLine, lines);
@@ -390,6 +417,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     public void SetMediaInspection(MkvInspection inspection)
     {
         _mediaInspection = inspection;
+        _mediaInspectionFailed = false;
         _mediaInfoStatus = string.Empty;
         RaiseMediaInfoChanged();
     }
@@ -397,7 +425,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     public void SetMediaInspectionError(string message)
     {
         _mediaInspection = null;
-        _mediaInfoStatus = $"미디어 정보 확인 실패 · {message}";
+        _mediaInspectionFailed = true;
+        _mediaInfoStatus = AppText.Get("MediaInfo_Failed", message);
         RaiseMediaInfoChanged();
     }
 
@@ -408,7 +437,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         if (!string.Equals(previousVideoPath, _media.VideoPath, StringComparison.OrdinalIgnoreCase))
         {
             _mediaInspection = null;
-            _mediaInfoStatus = "미디어 정보를 읽는 중…";
+            _mediaInspectionFailed = false;
+            _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
             RaiseMediaInfoChanged();
         }
         _plan = ConversionPlanFactory.Create(_media);
@@ -424,6 +454,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(DetectedFiles));
         OnPropertyChanged(nameof(InputSummary));
         OnPropertyChanged(nameof(MediaFormatText));
+        OnPropertyChanged(nameof(DurationText));
         OnPropertyChanged(nameof(VideoCodecText));
         OnPropertyChanged(nameof(VideoPathDisplay));
         OnPropertyChanged(nameof(VideoFileNamesDisplay));
@@ -458,6 +489,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(NeedsMediaInspection));
         OnPropertyChanged(nameof(InputSummary));
         OnPropertyChanged(nameof(MediaFormatText));
+        OnPropertyChanged(nameof(DurationText));
         OnPropertyChanged(nameof(VideoCodecText));
         OnPropertyChanged(nameof(VideoSummary));
         OnPropertyChanged(nameof(AudioSummary));
@@ -499,15 +531,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(language) || string.Equals(language, "und", StringComparison.OrdinalIgnoreCase))
         {
-            return "언어 미지정";
+            return AppText.Get("Language_Undetermined");
         }
 
         var primary = language.Split('-', StringSplitOptions.RemoveEmptyEntries)[0];
         return primary.ToLowerInvariant() switch
         {
-            "ko" or "kor" => "한국어",
-            "ja" or "jpn" => "일본어",
-            "en" or "eng" => "영어",
+            "ko" or "kor" => AppText.Get("Language_Korean"),
+            "ja" or "jpn" => AppText.Get("Language_Japanese"),
+            "en" or "eng" => AppText.Get("Language_English"),
             _ => language
         };
     }
@@ -515,9 +547,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private static string FormatDuration(long nanoseconds)
     {
         var duration = TimeSpan.FromTicks(nanoseconds / 100);
-        return duration.TotalHours >= 1
-            ? $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}"
-            : $"{duration.Minutes:00}:{duration.Seconds:00}";
+        return $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
     private static string FormatFileSize(long bytes)

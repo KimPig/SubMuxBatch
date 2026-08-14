@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.External;
 
@@ -76,12 +77,12 @@ public sealed class ExternalProcessRunner : IProcessRunner
         {
             if (!process.Start())
             {
-                throw new InvalidOperationException($"프로세스를 시작하지 못했습니다: {request.FileName}");
+                throw new InvalidOperationException(CoreText.Get("Process_StartFailed", request.FileName));
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            throw new InvalidOperationException($"외부 프로그램을 실행하지 못했습니다: {request.FileName}", exception);
+            throw new InvalidOperationException(CoreText.Get("Process_ExecuteFailed", request.FileName), exception);
         }
 
         process.BeginOutputReadLine();

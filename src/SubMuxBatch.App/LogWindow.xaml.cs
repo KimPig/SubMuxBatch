@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
 
 namespace SubMuxBatch.App;
@@ -9,10 +10,18 @@ public partial class LogWindow : Window
 {
     private readonly string _logDirectory;
 
-    public LogWindow(string initialText, string logPath, string logDirectory)
+    public LogWindow(
+        string initialText,
+        string logPath,
+        string logDirectory,
+        string? heading = null,
+        string? description = null)
     {
         InitializeComponent();
         _logDirectory = logDirectory;
+        HeadingText.Text = heading ?? AppText.Get("Log_Heading");
+        DescriptionText.Text = description ?? AppText.Get("Log_Description");
+        Title = $"SubMux Batch - {HeadingText.Text}";
         LogTextBox.Text = initialText;
         LogPathText.Text = logPath;
         LogPathText.ToolTip = logPath;
@@ -57,8 +66,8 @@ public partial class LogWindow : Window
         {
             MessageBox.Show(
                 this,
-                $"로그를 클립보드에 복사하지 못했습니다.\n{exception.Message}",
-                "로그 복사",
+                AppText.Get("Log_CopyFailed", exception.Message),
+                AppText.Get("Log_CopyTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }

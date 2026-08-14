@@ -2,4 +2,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\CoreStrings.en.json" LogicalName="SubMuxBatch.Core.Localization.CoreStrings.en.json" WithCulture="false" />
+    <EmbeddedResource Include="Localization\CoreStrings.ko.json" LogicalName="SubMuxBatch.Core.Localization.CoreStrings.ko.json" WithCulture="false" />
+  </ItemGroup>
 </Project>

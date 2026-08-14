@@ -208,13 +208,6 @@ public partial class CompletionNotificationWindow : Window
         e.Handled = true;
     }
 
-    private void OpenButton_Click(object sender, RoutedEventArgs e)
-    {
-        RestoreAnchor();
-        BeginDismissAnimation();
-        e.Handled = true;
-    }
-
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         BeginDismissAnimation();

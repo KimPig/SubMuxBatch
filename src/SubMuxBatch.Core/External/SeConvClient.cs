@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.External;
 
@@ -25,17 +26,17 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
         var resolvedInput = Path.GetFullPath(inputPath);
         var resolvedOutput = Path.GetFullPath(outputPath);
         var outputDirectory = Path.GetDirectoryName(resolvedOutput)
-            ?? throw new ArgumentException("출력 폴더를 확인할 수 없습니다.", nameof(outputPath));
+            ?? throw new ArgumentException(CoreText.Get("SeConv_NoOutputFolder"), nameof(outputPath));
         Directory.CreateDirectory(outputDirectory);
 
         if (!File.Exists(resolvedInput))
         {
-            throw new FileNotFoundException("변환할 자막 파일을 찾지 못했습니다.", resolvedInput);
+            throw new FileNotFoundException(CoreText.Get("SeConv_InputNotFound"), resolvedInput);
         }
 
         if (File.Exists(resolvedOutput))
         {
-            throw new IOException($"변환 출력 파일이 이미 존재합니다: {resolvedOutput}");
+            throw new IOException(CoreText.Get("SeConv_OutputExists", resolvedOutput));
         }
 
         // seconv 5.1.0 treats square brackets in path arguments as Spectre.Console
@@ -72,7 +73,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
                 {
                     if (!File.Exists(assStylePath))
                     {
-                        throw new InvalidOperationException("SRT→ASS 변환에 사용할 ASS 스타일 파일이 없습니다.");
+                        throw new InvalidOperationException(CoreText.Get("SeConv_StyleFileMissing"));
                     }
 
                     File.Copy(Path.GetFullPath(assStylePath), stagedStylePath, overwrite: false);
@@ -87,7 +88,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
 
             if (result.ExitCode != 0)
             {
-                throw new InvalidOperationException(BuildFailureMessage("Subtitle Edit 변환 실패", result));
+                throw new InvalidOperationException(BuildFailureMessage(CoreText.Get("SeConv_ConversionFailed"), result));
             }
 
             var warnings = ValidateJsonResult(result.StandardOutput, stagedOutputPath, outputDirectory);
@@ -97,7 +98,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
 
             foreach (var warning in warnings)
             {
-                onOutput?.Invoke($"Subtitle Edit 경고: {warning}");
+                onOutput?.Invoke(CoreText.Get("SeConv_Warning", warning));
             }
 
             return new SeConvResult(warnings);
@@ -119,7 +120,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
         var end = output.LastIndexOf('}');
         if (start < 0 || end <= start)
         {
-            throw new InvalidOperationException("seconv가 유효한 JSON 결과를 반환하지 않았습니다.");
+            throw new InvalidOperationException(CoreText.Get("SeConv_InvalidJsonResult"));
         }
 
         try
@@ -133,26 +134,26 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
 
             if (!success || totalFiles != 1 || successfulFiles != 1 || failedFiles != 0)
             {
-                throw new InvalidOperationException("seconv가 변환 실패를 보고했습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_ReportedFailure"));
             }
 
             if (!root.TryGetProperty("files", out var files)
                 || files.ValueKind != JsonValueKind.Array
                 || files.GetArrayLength() != 1)
             {
-                throw new InvalidOperationException("seconv 결과의 파일 목록이 올바르지 않습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_InvalidFileList"));
             }
 
             var file = files[0];
             if (!GetBoolean(file, "success"))
             {
-                throw new InvalidOperationException("seconv가 입력 파일 변환 실패를 보고했습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_InputConversionFailed"));
             }
 
             var reportedOutput = GetString(file, "output");
             if (string.IsNullOrWhiteSpace(reportedOutput))
             {
-                throw new InvalidOperationException("seconv 결과에 출력 파일 경로가 없습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_NoOutputPath"));
             }
 
             var resolvedReportedOutput = Path.GetFullPath(reportedOutput, workingDirectory);
@@ -161,7 +162,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
                     Path.GetFullPath(expectedOutputPath),
                     StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("seconv가 요청과 다른 출력 파일을 보고했습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_UnexpectedOutputPath"));
             }
 
             var warnings = new List<string>();
@@ -171,7 +172,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
         }
         catch (JsonException exception)
         {
-            throw new InvalidOperationException("seconv 결과 JSON을 해석할 수 없습니다.", exception);
+            throw new InvalidOperationException(CoreText.Get("SeConv_JsonParseFailed"), exception);
         }
     }
 
@@ -209,7 +210,7 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
         var file = new FileInfo(outputPath);
         if (!file.Exists || file.Length == 0)
         {
-            throw new InvalidOperationException("seconv가 요청한 출력 파일을 만들지 않았습니다.");
+            throw new InvalidOperationException(CoreText.Get("SeConv_OutputNotCreated"));
         }
 
         var text = File.ReadAllText(outputPath);
@@ -219,14 +220,14 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
                     text,
                     @"\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"))
             {
-                throw new InvalidOperationException("생성된 SRT에서 유효한 타임코드를 찾지 못했습니다.");
+                throw new InvalidOperationException(CoreText.Get("SeConv_InvalidSrtTimecode"));
             }
         }
         else if (!text.Contains("[V4+ Styles]", StringComparison.OrdinalIgnoreCase)
                  || !text.Contains("[Events]", StringComparison.OrdinalIgnoreCase)
                  || !text.Contains("Dialogue:", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("생성된 ASS의 필수 섹션 또는 Dialogue가 없습니다.");
+            throw new InvalidOperationException(CoreText.Get("SeConv_InvalidAssSections"));
         }
     }
 
@@ -277,6 +278,6 @@ public sealed class SeConvClient(string executablePath, IProcessRunner processRu
         var details = string.IsNullOrWhiteSpace(result.StandardError)
             ? result.StandardOutput
             : result.StandardError;
-        return $"{title} (종료 코드 {result.ExitCode}){Environment.NewLine}{details.Trim()}";
+        return CoreText.Get("Process_FailureWithExitCode", title, result.ExitCode, details.Trim());
     }
 }

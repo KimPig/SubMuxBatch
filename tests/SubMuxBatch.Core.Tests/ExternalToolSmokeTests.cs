@@ -3,6 +3,7 @@ using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Fonts;
 using SubMuxBatch.Core.Planning;
 using SubMuxBatch.Core.Processing;
 using Xunit.Abstractions;
@@ -13,6 +14,69 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
 {
     private const string ArialStyleLine =
         "Style: Default,Arial,42,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,20,20,30,1";
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task RealMkvMergeIncludesAddedFontAttachment()
+    {
+        var mkvMergePath = FindExecutable(
+            "MKVMERGE_PATH",
+            "mkvmerge.exe",
+            @"C:\Program Files\MKVToolNix\mkvmerge.exe");
+        if (mkvMergePath is null)
+        {
+            output.WriteLine("mkvmerge를 찾지 못해 실제 폰트 첨부 smoke test를 건너뜁니다.");
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-font-smoke-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var sourceSubtitle = Path.Combine(root, "source.srt");
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var font = Path.Combine(root, "test-family.ttf");
+            var outputPath = Path.Combine(root, "output.mkv");
+            await File.WriteAllTextAsync(sourceSubtitle, "1\n00:00:00,000 --> 00:00:01,000\nSource\n");
+            await File.WriteAllTextAsync(
+                ass,
+                "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Test Family,40,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,20,20,30,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Test\n");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+            await File.WriteAllBytesAsync(font, [1, 2, 3, 4, 5]);
+
+            var runner = new ExternalProcessRunner();
+            var sourceResult = await runner.RunAsync(new ProcessRequest(
+                mkvMergePath,
+                ["-o", source, sourceSubtitle],
+                root));
+            Assert.InRange(sourceResult.ExitCode, 0, 1);
+
+            var attachment = new FontAttachmentFile(font, "font/ttf");
+            var client = new MkvMergeClient(mkvMergePath, runner);
+            await client.MuxAsync(
+                source,
+                ass,
+                srt,
+                outputPath,
+                fontAttachments: [attachment]);
+
+            var sourceInspection = await client.InspectAsync(source);
+            var outputInspection = await client.InspectAsync(outputPath);
+            Assert.Empty(MkvMergeClient.ValidateOutput(
+                sourceInspection,
+                outputInspection,
+                addedFontAttachments: [attachment]));
+            var added = Assert.Single(outputInspection.Attachments);
+            Assert.Equal("test-family.ttf", added.FileName);
+            Assert.Equal("font/ttf", added.ContentType);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
 
     [Fact]
     [Trait("Category", "Integration")]
@@ -111,7 +175,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 OutputPrefix = "result_",
                 AssStyleLine = ArialStyleLine,
                 PlayResX = 1280,
-                PlayResY = 720
+                PlayResY = 720,
+                AttachAssStyleFonts = false
             };
 
             var stylePath = Path.Combine(root, "style.ass");
@@ -276,7 +341,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var result = await new BatchProcessor(runner).ProcessAsync(
                 media,
                 ConversionPlanFactory.Create(media),
-                new AppSettings { OutputPrefix = "result_", AssStyleLine = ArialStyleLine },
+                new AppSettings { OutputPrefix = "result_", AssStyleLine = ArialStyleLine, AttachAssStyleFonts = false },
                 new DependencyReport(
                     new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"),
                     new ToolDependency("Subtitle Edit seconv", "seconv.exe", seConvPath, "smoke")));
@@ -294,7 +359,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             {
                 OutputPrefix = "preserved_",
                 AssStyleLine = ArialStyleLine,
-                RemoveExistingSubtitles = false
+                RemoveExistingSubtitles = false,
+                AttachAssStyleFonts = false
             };
             var preservedResult = await new BatchProcessor(runner).ProcessAsync(
                 media,

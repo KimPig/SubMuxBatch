@@ -10,6 +10,10 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $projectRoot 'src\SubMuxBatch.App\SubMuxBatch.App.csproj'
 $testPath = Join-Path $projectRoot 'tests\SubMuxBatch.Core.Tests\SubMuxBatch.Core.Tests.csproj'
 $outputPath = Join-Path $projectRoot "artifacts\publish\$Runtime"
+$version = Get-Date -Format 'yyyy.MM.dd'
+$assemblyVersion = Get-Date -Format 'yyyy.M.d.0'
+$releasePath = Join-Path $projectRoot "artifacts\release\v$version"
+$releaseArchivePath = Join-Path $releasePath "SubMuxBatch-v$version-$Runtime.zip"
 
 if (-not $SkipTests) {
     dotnet test $testPath -c Release --nologo
@@ -38,6 +42,10 @@ dotnet publish $projectPath `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `
+    -p:Version=$version `
+    -p:AssemblyVersion=$assemblyVersion `
+    -p:FileVersion=$assemblyVersion `
+    -p:InformationalVersion=$version `
     -o $outputPath
 
 if ($LASTEXITCODE -ne 0) {
@@ -45,5 +53,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $outputPath -Force
+[System.IO.Directory]::CreateDirectory($releasePath) | Out-Null
+if (Test-Path -LiteralPath $releaseArchivePath) {
+    Remove-Item -LiteralPath $releaseArchivePath -Force
+}
+Compress-Archive -Path (Join-Path $outputPath '*') -DestinationPath $releaseArchivePath -CompressionLevel Optimal
 Write-Host "Published: $outputPath"
+Write-Host "Release archive: $releaseArchivePath"
 Write-Host 'MKVToolNix and seconv are external dependencies and are not bundled.'

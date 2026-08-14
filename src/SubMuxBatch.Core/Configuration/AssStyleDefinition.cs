@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.Configuration;
 
@@ -53,101 +54,101 @@ public sealed class AssStyleDefinition
     public string Name
     {
         get => _fields[NameIndex];
-        set => SetRequiredText(NameIndex, value, "스타일 이름");
+        set => SetRequiredText(NameIndex, value, Label("AssLabel_StyleName"));
     }
 
     public string FontName
     {
         get => _fields[FontNameIndex];
-        set => SetRequiredText(FontNameIndex, value, "폰트 이름");
+        set => SetRequiredText(FontNameIndex, value, Label("AssLabel_FontName"));
     }
 
     public double FontSize
     {
-        get => ParseDouble(_fields[FontSizeIndex], "폰트 크기");
-        set => SetFiniteDouble(FontSizeIndex, value, 0, double.MaxValue, "폰트 크기");
+        get => ParseDouble(_fields[FontSizeIndex], Label("AssLabel_FontSize"));
+        set => SetFiniteDouble(FontSizeIndex, value, 0, double.MaxValue, Label("AssLabel_FontSize"));
     }
 
     public string PrimaryColour
     {
         get => _fields[PrimaryColourIndex];
-        set => SetColour(PrimaryColourIndex, value, "기본 색상");
+        set => SetColour(PrimaryColourIndex, value, Label("AssLabel_PrimaryColour"));
     }
 
     public string SecondaryColour
     {
         get => _fields[SecondaryColourIndex];
-        set => SetColour(SecondaryColourIndex, value, "보조 색상");
+        set => SetColour(SecondaryColourIndex, value, Label("AssLabel_SecondaryColour"));
     }
 
     public string OutlineColour
     {
         get => _fields[OutlineColourIndex];
-        set => SetColour(OutlineColourIndex, value, "외곽선 색상");
+        set => SetColour(OutlineColourIndex, value, Label("AssLabel_OutlineColour"));
     }
 
     public string BackColour
     {
         get => _fields[BackColourIndex];
-        set => SetColour(BackColourIndex, value, "그림자 색상");
+        set => SetColour(BackColourIndex, value, Label("AssLabel_BackColour"));
     }
 
     public bool Bold
     {
-        get => ParseAssBoolean(_fields[BoldIndex], "굵게");
+        get => ParseAssBoolean(_fields[BoldIndex], Label("AssLabel_Bold"));
         set => _fields[BoldIndex] = value ? "-1" : "0";
     }
 
     public bool Italic
     {
-        get => ParseAssBoolean(_fields[ItalicIndex], "기울임꼴");
+        get => ParseAssBoolean(_fields[ItalicIndex], Label("AssLabel_Italic"));
         set => _fields[ItalicIndex] = value ? "-1" : "0";
     }
 
     public bool Underline
     {
-        get => ParseAssBoolean(_fields[UnderlineIndex], "밑줄");
+        get => ParseAssBoolean(_fields[UnderlineIndex], Label("AssLabel_Underline"));
         set => _fields[UnderlineIndex] = value ? "-1" : "0";
     }
 
     public bool StrikeOut
     {
-        get => ParseAssBoolean(_fields[StrikeOutIndex], "취소선");
+        get => ParseAssBoolean(_fields[StrikeOutIndex], Label("AssLabel_StrikeOut"));
         set => _fields[StrikeOutIndex] = value ? "-1" : "0";
     }
 
     public double ScaleX
     {
-        get => ParseDouble(_fields[ScaleXIndex], "가로 배율");
-        set => SetFiniteDouble(ScaleXIndex, value, 0, double.MaxValue, "가로 배율");
+        get => ParseDouble(_fields[ScaleXIndex], Label("AssLabel_ScaleX"));
+        set => SetFiniteDouble(ScaleXIndex, value, 0, double.MaxValue, Label("AssLabel_ScaleX"));
     }
 
     public double ScaleY
     {
-        get => ParseDouble(_fields[ScaleYIndex], "세로 배율");
-        set => SetFiniteDouble(ScaleYIndex, value, 0, double.MaxValue, "세로 배율");
+        get => ParseDouble(_fields[ScaleYIndex], Label("AssLabel_ScaleY"));
+        set => SetFiniteDouble(ScaleYIndex, value, 0, double.MaxValue, Label("AssLabel_ScaleY"));
     }
 
     public double Spacing
     {
-        get => ParseDouble(_fields[SpacingIndex], "글자 간격");
-        set => SetFiniteDouble(SpacingIndex, value, double.MinValue, double.MaxValue, "글자 간격");
+        get => ParseDouble(_fields[SpacingIndex], Label("AssLabel_Spacing"));
+        set => SetFiniteDouble(SpacingIndex, value, double.MinValue, double.MaxValue, Label("AssLabel_Spacing"));
     }
 
     public double Angle
     {
-        get => ParseDouble(_fields[AngleIndex], "회전 각도");
-        set => SetFiniteDouble(AngleIndex, value, double.MinValue, double.MaxValue, "회전 각도");
+        get => ParseDouble(_fields[AngleIndex], Label("AssLabel_Angle"));
+        set => SetFiniteDouble(AngleIndex, value, double.MinValue, double.MaxValue, Label("AssLabel_Angle"));
     }
 
     public int BorderStyle
     {
-        get => ParseInteger(_fields[BorderStyleIndex], "테두리 형식");
+        get => ParseInteger(_fields[BorderStyleIndex], Label("AssLabel_BorderStyle"));
         set
         {
             if (value is not (1 or 3))
             {
-                throw new ArgumentOutOfRangeException(nameof(value), "ASS 테두리 형식은 1 또는 3이어야 합니다.");
+                throw new ArgumentOutOfRangeException(nameof(value), CoreText.Get("Ass_BorderStyleRange"));
             }
 
             _fields[BorderStyleIndex] = value.ToString(CultureInfo.InvariantCulture);
@@ -156,24 +157,24 @@ public sealed class AssStyleDefinition
 
     public double Outline
     {
-        get => ParseDouble(_fields[OutlineIndex], "외곽선 두께");
-        set => SetFiniteDouble(OutlineIndex, value, 0, double.MaxValue, "외곽선 두께");
+        get => ParseDouble(_fields[OutlineIndex], Label("AssLabel_Outline"));
+        set => SetFiniteDouble(OutlineIndex, value, 0, double.MaxValue, Label("AssLabel_Outline"));
     }
 
     public double Shadow
     {
-        get => ParseDouble(_fields[ShadowIndex], "그림자 깊이");
-        set => SetFiniteDouble(ShadowIndex, value, 0, double.MaxValue, "그림자 깊이");
+        get => ParseDouble(_fields[ShadowIndex], Label("AssLabel_Shadow"));
+        set => SetFiniteDouble(ShadowIndex, value, 0, double.MaxValue, Label("AssLabel_Shadow"));
     }
 
     public int Alignment
     {
-        get => ParseInteger(_fields[AlignmentIndex], "정렬");
+        get => ParseInteger(_fields[AlignmentIndex], Label("AssLabel_Alignment"));
         set
         {
             if (value is < 1 or > 9)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), "ASS 정렬은 1부터 9까지여야 합니다.");
+                throw new ArgumentOutOfRangeException(nameof(value), CoreText.Get("Ass_AlignmentRange"));
             }
 
             _fields[AlignmentIndex] = value.ToString(CultureInfo.InvariantCulture);
@@ -182,25 +183,25 @@ public sealed class AssStyleDefinition
 
     public int MarginLeft
     {
-        get => ParseInteger(_fields[MarginLeftIndex], "왼쪽 여백");
-        set => SetNonNegativeInteger(MarginLeftIndex, value, "왼쪽 여백");
+        get => ParseInteger(_fields[MarginLeftIndex], Label("AssLabel_MarginLeft"));
+        set => SetNonNegativeInteger(MarginLeftIndex, value, Label("AssLabel_MarginLeft"));
     }
 
     public int MarginRight
     {
-        get => ParseInteger(_fields[MarginRightIndex], "오른쪽 여백");
-        set => SetNonNegativeInteger(MarginRightIndex, value, "오른쪽 여백");
+        get => ParseInteger(_fields[MarginRightIndex], Label("AssLabel_MarginRight"));
+        set => SetNonNegativeInteger(MarginRightIndex, value, Label("AssLabel_MarginRight"));
     }
 
     public int MarginVertical
     {
-        get => ParseInteger(_fields[MarginVerticalIndex], "수직 여백");
-        set => SetNonNegativeInteger(MarginVerticalIndex, value, "수직 여백");
+        get => ParseInteger(_fields[MarginVerticalIndex], Label("AssLabel_MarginVertical"));
+        set => SetNonNegativeInteger(MarginVerticalIndex, value, Label("AssLabel_MarginVertical"));
     }
 
     public int Encoding
     {
-        get => ParseInteger(_fields[EncodingIndex], "문자 인코딩");
+        get => ParseInteger(_fields[EncodingIndex], Label("AssLabel_Encoding"));
         set => _fields[EncodingIndex] = value.ToString(CultureInfo.InvariantCulture);
     }
 
@@ -227,13 +228,13 @@ public sealed class AssStyleDefinition
 
         if (string.IsNullOrWhiteSpace(value))
         {
-            error = "ASS 스타일이 비어 있습니다.";
+            error = CoreText.Get("Ass_EmptyStyle");
             return false;
         }
 
         if (value.Length > 8192 || value.Contains('\r') || value.Contains('\n'))
         {
-            error = "ASS 스타일은 8192자 이하의 한 줄이어야 합니다.";
+            error = CoreText.Get("Ass_OneLineLimit");
             return false;
         }
 
@@ -246,7 +247,7 @@ public sealed class AssStyleDefinition
         var fields = content.Split(',').Select(static field => field.Trim()).ToArray();
         if (fields.Length != FieldCount)
         {
-            error = $"ASS V4+ 스타일에는 정확히 {FieldCount}개 필드가 필요합니다.";
+            error = CoreText.Get("Ass_FieldCount", FieldCount);
             return false;
         }
 
@@ -266,39 +267,39 @@ public sealed class AssStyleDefinition
 
     public void Validate()
     {
-        SetRequiredText(NameIndex, _fields[NameIndex], "스타일 이름");
-        SetRequiredText(FontNameIndex, _fields[FontNameIndex], "폰트 이름");
+        SetRequiredText(NameIndex, _fields[NameIndex], Label("AssLabel_StyleName"));
+        SetRequiredText(FontNameIndex, _fields[FontNameIndex], Label("AssLabel_FontName"));
 
-        ValidateFiniteRange(FontSize, 0, double.MaxValue, "폰트 크기", exclusiveMinimum: true);
-        ValidateColour(PrimaryColour, "기본 색상");
-        ValidateColour(SecondaryColour, "보조 색상");
-        ValidateColour(OutlineColour, "외곽선 색상");
-        ValidateColour(BackColour, "그림자 색상");
+        ValidateFiniteRange(FontSize, 0, double.MaxValue, Label("AssLabel_FontSize"), exclusiveMinimum: true);
+        ValidateColour(PrimaryColour, Label("AssLabel_PrimaryColour"));
+        ValidateColour(SecondaryColour, Label("AssLabel_SecondaryColour"));
+        ValidateColour(OutlineColour, Label("AssLabel_OutlineColour"));
+        ValidateColour(BackColour, Label("AssLabel_BackColour"));
 
         _ = Bold;
         _ = Italic;
         _ = Underline;
         _ = StrikeOut;
-        ValidateFiniteRange(ScaleX, 0, double.MaxValue, "가로 배율", exclusiveMinimum: true);
-        ValidateFiniteRange(ScaleY, 0, double.MaxValue, "세로 배율", exclusiveMinimum: true);
-        ValidateFiniteRange(Spacing, double.MinValue, double.MaxValue, "글자 간격");
-        ValidateFiniteRange(Angle, double.MinValue, double.MaxValue, "회전 각도");
+        ValidateFiniteRange(ScaleX, 0, double.MaxValue, Label("AssLabel_ScaleX"), exclusiveMinimum: true);
+        ValidateFiniteRange(ScaleY, 0, double.MaxValue, Label("AssLabel_ScaleY"), exclusiveMinimum: true);
+        ValidateFiniteRange(Spacing, double.MinValue, double.MaxValue, Label("AssLabel_Spacing"));
+        ValidateFiniteRange(Angle, double.MinValue, double.MaxValue, Label("AssLabel_Angle"));
 
         if (BorderStyle is not (1 or 3))
         {
-            throw new FormatException("ASS 테두리 형식은 1 또는 3이어야 합니다.");
+            throw new FormatException(CoreText.Get("Ass_BorderStyleRange"));
         }
 
-        ValidateFiniteRange(Outline, 0, double.MaxValue, "외곽선 두께");
-        ValidateFiniteRange(Shadow, 0, double.MaxValue, "그림자 깊이");
+        ValidateFiniteRange(Outline, 0, double.MaxValue, Label("AssLabel_Outline"));
+        ValidateFiniteRange(Shadow, 0, double.MaxValue, Label("AssLabel_Shadow"));
         if (Alignment is < 1 or > 9)
         {
-            throw new FormatException("ASS 정렬은 1부터 9까지여야 합니다.");
+            throw new FormatException(CoreText.Get("Ass_AlignmentRange"));
         }
 
-        ValidateNonNegative(MarginLeft, "왼쪽 여백");
-        ValidateNonNegative(MarginRight, "오른쪽 여백");
-        ValidateNonNegative(MarginVertical, "수직 여백");
+        ValidateNonNegative(MarginLeft, Label("AssLabel_MarginLeft"));
+        ValidateNonNegative(MarginRight, Label("AssLabel_MarginRight"));
+        ValidateNonNegative(MarginVertical, Label("AssLabel_MarginVertical"));
         _ = Encoding;
     }
 
@@ -324,7 +325,7 @@ public sealed class AssStyleDefinition
         ArgumentNullException.ThrowIfNull(value);
         if (value.Contains(',') || value.Contains('\r') || value.Contains('\n'))
         {
-            throw new ArgumentException("ASS 필드에는 쉼표나 줄바꿈을 사용할 수 없습니다.", nameof(value));
+            throw new ArgumentException(CoreText.Get("Ass_FieldNoCommaOrNewline"), nameof(value));
         }
 
         var previous = _fields[index];
@@ -345,7 +346,7 @@ public sealed class AssStyleDefinition
         var trimmed = value?.Trim() ?? string.Empty;
         if (trimmed.Length == 0 || trimmed.Contains(',') || trimmed.Contains('\r') || trimmed.Contains('\n'))
         {
-            throw new ArgumentException($"ASS {label}이 올바르지 않습니다.", nameof(value));
+            throw new ArgumentException(CoreText.Get("Ass_InvalidField", label), nameof(value));
         }
 
         _fields[index] = trimmed;
@@ -375,7 +376,7 @@ public sealed class AssStyleDefinition
         if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var result)
             || !double.IsFinite(result))
         {
-            throw new FormatException($"ASS {label} 값이 올바른 숫자가 아닙니다.");
+            throw new FormatException(CoreText.Get("Ass_InvalidNumber", label));
         }
 
         return result;
@@ -385,7 +386,7 @@ public sealed class AssStyleDefinition
     {
         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result))
         {
-            throw new FormatException($"ASS {label} 값이 올바른 정수가 아닙니다.");
+            throw new FormatException(CoreText.Get("Ass_InvalidInteger", label));
         }
 
         return result;
@@ -396,7 +397,7 @@ public sealed class AssStyleDefinition
         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)
             || result is not (-1 or 0 or 1))
         {
-            throw new FormatException($"ASS {label} 값은 -1, 0 또는 1이어야 합니다.");
+            throw new FormatException(CoreText.Get("Ass_InvalidBoolean", label));
         }
 
         return result != 0;
@@ -406,7 +407,7 @@ public sealed class AssStyleDefinition
     {
         if (!ColourPattern.IsMatch(value))
         {
-            throw new FormatException($"ASS {label}은 &H 뒤에 1~8자리 16진수로 입력해야 합니다.");
+            throw new FormatException(CoreText.Get("Ass_InvalidColour", label));
         }
     }
 
@@ -420,8 +421,9 @@ public sealed class AssStyleDefinition
         var belowMinimum = exclusiveMinimum ? value <= minimum : value < minimum;
         if (!double.IsFinite(value) || belowMinimum || value > maximum)
         {
-            var comparison = exclusiveMinimum ? "보다 커야" : "이상이어야";
-            throw new ArgumentOutOfRangeException(nameof(value), $"ASS {label} 값은 {minimum} {comparison} 합니다.");
+            throw new ArgumentOutOfRangeException(
+                nameof(value),
+                CoreText.Get(exclusiveMinimum ? "Ass_GreaterThan" : "Ass_AtLeast", label, minimum));
         }
     }
 
@@ -429,7 +431,9 @@ public sealed class AssStyleDefinition
     {
         if (value < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), $"ASS {label} 값은 음수일 수 없습니다.");
+            throw new ArgumentOutOfRangeException(nameof(value), CoreText.Get("Ass_NonNegative", label));
         }
     }
+
+    private static string Label(string key) => CoreText.Get(key);
 }
