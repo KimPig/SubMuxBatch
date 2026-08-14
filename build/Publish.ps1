@@ -40,6 +40,7 @@ dotnet publish $projectPath `
     --nologo `
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:IncludeAllContentForSelfExtract=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:Version=$version `
@@ -60,4 +61,4 @@ if (Test-Path -LiteralPath $releaseArchivePath) {
 Compress-Archive -Path (Join-Path $outputPath '*') -DestinationPath $releaseArchivePath -CompressionLevel Optimal
 Write-Host "Published: $outputPath"
 Write-Host "Release archive: $releaseArchivePath"
-Write-Host 'MKVToolNix and seconv are external dependencies and are not bundled.'
+Write-Host 'MediaInfoLib is bundled. MKVToolNix and seconv remain external dependencies.'

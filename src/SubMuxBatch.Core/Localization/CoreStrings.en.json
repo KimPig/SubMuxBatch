@@ -11,6 +11,7 @@
   "Plan_Invalid": "Cannot process",
   "Media_NoParentFolder": "The parent folder of the file could not be determined.",
   "Media_CannotMergeDifferentSets": "Different media sets cannot be merged.",
+  "MediaInfo_OpenFailed": "MediaInfo could not open '{0}'.",
   "Batch_InvalidPlan": "The processing plan is invalid.",
   "Batch_DependenciesMissing": "mkvmerge or seconv could not be found.",
   "Batch_ConvertAssToSrt": "Converting ASS to SRT.",

@@ -23,6 +23,16 @@
   <ItemGroup>
     <ProjectReference Include="..\SubMuxBatch.Core\SubMuxBatch.Core.csproj" />
   </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <Content Include="$(NuGetPackageRoot)mediainfodll\26.1.0\lib\netstandard2.0\x64\MediaInfo.dll"
+             Link="MediaInfo.dll"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64'">
+    <Content Include="$(NuGetPackageRoot)mediainfodll\26.1.0\lib\netstandard2.0\arm64\MediaInfo.dll"
+             Link="MediaInfo.dll"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Localization\AppStrings.en.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.en.json" WithCulture="false" />
     <EmbeddedResource Include="Localization\AppStrings.ko.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.ko.json" WithCulture="false" />

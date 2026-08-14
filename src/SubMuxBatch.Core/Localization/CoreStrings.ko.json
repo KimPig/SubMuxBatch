@@ -11,6 +11,7 @@
   "Plan_Invalid": "처리 불가",
   "Media_NoParentFolder": "파일의 상위 폴더를 확인할 수 없습니다.",
   "Media_CannotMergeDifferentSets": "서로 다른 미디어 묶음은 합칠 수 없습니다.",
+  "MediaInfo_OpenFailed": "MediaInfo가 '{0}' 파일을 열지 못했습니다.",
   "Batch_InvalidPlan": "처리 계획이 유효하지 않습니다.",
   "Batch_DependenciesMissing": "mkvmerge 또는 seconv를 찾지 못했습니다.",
   "Batch_ConvertAssToSrt": "ASS를 SRT로 변환합니다.",

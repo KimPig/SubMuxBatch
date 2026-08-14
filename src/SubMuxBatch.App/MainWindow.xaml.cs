@@ -22,6 +22,7 @@ using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Discovery;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Processing;
 
 namespace SubMuxBatch.App;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private LogWindow? _logWindow;
     private readonly Dictionary<QueueItemViewModel, StringBuilder> _jobLogs = [];
     private readonly Dictionary<QueueItemViewModel, LogWindow> _jobLogWindows = [];
+    private readonly Dictionary<QueueItemViewModel, MediaInfoWindow> _mediaInfoWindows = [];
     private CompletionNotificationWindow? _completionNotificationWindow;
     private bool _isBusy;
     private bool _isScanning;
@@ -277,9 +279,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             OverallStatusText.Text = AppText.Get("Main_ScanningFiles");
-            var discovery = new MediaSetDiscovery(
-                _settings.OutputPrefix,
-                _settings.AllowSubtitleSuffixMatch);
+            var discovery = new MediaSetDiscovery(_settings.AllowSubtitleSuffixMatch);
             var discovered = await discovery.DiscoverAsync(
                 snapshot,
                 _settings.IncludeSubdirectories,
@@ -356,18 +356,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CancellationToken cancellationToken)
     {
         var mkvMergePath = _dependencies?.MkvMerge.Path;
-        if (string.IsNullOrWhiteSpace(mkvMergePath))
-        {
-            foreach (var target in targets)
-            {
-                target.SetMediaInspectionError(AppText.Get("MediaInfo_SetMkvMergePath"));
-            }
-
-            return;
-        }
-
         using var concurrency = new SemaphoreSlim(3);
-        var client = new MkvMergeClient(mkvMergePath, new ExternalProcessRunner());
+        var mkvMergeClient = string.IsNullOrWhiteSpace(mkvMergePath)
+            ? null
+            : new MkvMergeClient(mkvMergePath, new ExternalProcessRunner());
+        var mediaInfoClient = new MediaInfoClient();
         var completed = 0;
         var failed = 0;
         var tasks = targets.Select(async target =>
@@ -381,10 +374,66 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     return;
                 }
 
-                var inspection = await client.InspectAsync(
-                    videoPath,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-                await Dispatcher.InvokeAsync(() => target.SetMediaInspection(inspection));
+                MkvInspection? mkvInspection = null;
+                MediaInfoInspection? displayInspection = null;
+                var errors = new List<string>();
+
+                try
+                {
+                    displayInspection = await mediaInfoClient.InspectAsync(
+                        videoPath,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    errors.Add($"MediaInfo: {exception.Message}");
+                }
+
+                if (mkvMergeClient is not null)
+                {
+                    try
+                    {
+                        mkvInspection = await mkvMergeClient.InspectAsync(
+                            videoPath,
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add($"mkvmerge: {exception.Message}");
+                    }
+                }
+
+                if (mkvInspection is null && displayInspection is null)
+                {
+                    Interlocked.Increment(ref failed);
+                    var message = errors.Count == 0
+                        ? AppText.Get("MediaInfo_SetMkvMergePath")
+                        : string.Join(" · ", errors);
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        target.SetMediaInspectionError(message);
+                        AppendJobLog(target, AppText.Get("Log_MediaInspectionFailed", message));
+                    });
+                }
+                else
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        target.SetMediaInspections(mkvInspection, displayInspection);
+                        foreach (var error in errors)
+                        {
+                            AppendJobLog(target, AppText.Get("Log_MediaInspectionPartial", error));
+                        }
+                    });
+                }
             }
             catch (OperationCanceledException)
             {
@@ -2159,6 +2208,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         window.Closed += (_, _) => _jobLogWindows.Remove(target);
         _jobLogWindows[target] = window;
+        window.Show();
+    }
+
+    private void OpenSelectedMediaInfoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobsList.SelectedItem is not QueueItemViewModel target)
+        {
+            return;
+        }
+
+        if (_mediaInfoWindows.TryGetValue(target, out var existingWindow))
+        {
+            if (existingWindow.WindowState == WindowState.Minimized)
+            {
+                existingWindow.WindowState = WindowState.Normal;
+            }
+
+            existingWindow.Activate();
+            return;
+        }
+
+        var window = new MediaInfoWindow(target)
+        {
+            Owner = this
+        };
+        window.Closed += (_, _) => _mediaInfoWindows.Remove(target);
+        _mediaInfoWindows[target] = window;
         window.Show();
     }
 

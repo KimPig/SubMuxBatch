@@ -8,7 +8,7 @@ You can add individual files, select folders, or drag files and folders from Fil
 
 Prebuilt, self-contained Windows x64 packages are available on the [Releases](https://github.com/KimPig/SubMuxBatch/releases) page.
 
-MKVToolNix and Subtitle Edit's command-line converter are external dependencies and are not bundled. Install or extract them separately before using the application.
+MKVToolNix and Subtitle Edit's command-line converter are external dependencies and are not bundled. Install or extract them separately before using the application. MediaInfoLib is bundled with SubMux Batch and requires no separate installation or path setting.
 
 The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
 
@@ -57,6 +57,8 @@ SubMux Batch searches for each executable in this order:
 4. The Windows `PATH`
 
 Development and integration testing used MKVToolNix 88.0 and `seconv` 5.1.0. Test a small copy of your media first when using another version. Installation and redistribution of each dependency are governed by that project's license.
+
+Media information shown in the queue and detail panel is read primarily with the bundled MediaInfoLib. This includes the actual container format, duration, overall and per-track bit rates, video frame rate and frame count, resolution, and audio properties. `mkvmerge` identification remains authoritative for remuxing track IDs, attachments, chapters, and output validation. The bundled library notice is included below.
 
 ## Subtitle conversion policy
 
@@ -111,7 +113,7 @@ SubMux Batch also works around `seconv` 5.1.0 interpreting `[` and `]` in argume
 3. If a dependency is not detected automatically, select its executable in **Settings**.
 4. Add files or folders, or drag them into the application window.
 5. Optionally sort by a column header or drag rows to change the processing order.
-6. Right-click the queue header to show or hide the File, Composition, Format, Codec, Work, and Status columns. The selection is saved immediately.
+6. Right-click the queue header to show or hide the Name, Composition, Format, Duration, Codec, Action, and Status columns. The selection is saved immediately.
 7. Review the detected files and processing plan, then select **Start all ready jobs**. The queue automatically scrolls to the most recently started job while preserving the current selection.
 
 The number of concurrent jobs can be set from 1 to 8. One job at a time is recommended when the source and output are on the same hard drive; faster storage may benefit from a higher value.
@@ -151,7 +153,7 @@ Create a self-contained Windows build without bundling the external dependencies
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The application is published as a self-contained single EXE; MKVToolNix and `seconv` remain separate external dependencies.
+The default output is written to `artifacts\publish\win-x64`. The application is published as a self-contained single EXE that includes MediaInfoLib; MKVToolNix and `seconv` remain separate external dependencies.
 
 ## Project structure
 
@@ -159,3 +161,24 @@ The default output is written to `artifacts\publish\win-x64`. The application is
 - `src/SubMuxBatch.Core`: discovery, planning, conversion, muxing, and output validation
 - `tests/SubMuxBatch.Core.Tests`: unit tests and optional real-tool integration tests
 - `build/Publish.ps1`: self-contained Windows publishing script
+
+## Third-party notices
+
+SubMux Batch includes MediaInfoLib through the MediaInfoDLL .NET package.
+
+### MediaInfoLib
+
+Copyright (c) 2002-2020, MediaArea.net SARL
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+MediaInfoLib: https://mediaarea.net/MediaInfo
+
+MediaInfoDLL package: https://www.nuget.org/packages/MediaInfoDLL

@@ -694,6 +694,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding Name, Mode=OneWay}"
                                                FontWeight="SemiBold"
@@ -704,9 +705,14 @@
                                     <Button Grid.Column="1"
                                             Margin="12,-2,0,-2"
                                             Padding="9,2"
+                                            Content="{loc:Loc Main_MediaInfo}"
+                                            Click="OpenSelectedMediaInfoButton_Click" />
+                                    <Button Grid.Column="2"
+                                            Margin="8,-2,0,-2"
+                                            Padding="9,2"
                                             Content="{loc:Loc Main_ViewJobLog}"
                                             Click="OpenSelectedJobLogButton_Click" />
-                                    <TextBlock Grid.Column="2"
+                                    <TextBlock Grid.Column="3"
                                                Margin="12,0,0,0"
                                                Text="{Binding StatusText}"
                                                Foreground="{Binding StatusForeground}"
@@ -785,7 +791,8 @@
                                                ToolTip="{Binding IssuesText}"
                                                Foreground="{Binding StatusForeground}"
                                                FontSize="11"
-                                               TextWrapping="Wrap">
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
                                                 <Setter Property="Visibility" Value="Visible" />

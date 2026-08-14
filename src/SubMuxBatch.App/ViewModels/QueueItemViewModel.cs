@@ -5,6 +5,7 @@ using SubMuxBatch.App.Localization;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
+using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Planning;
 
 namespace SubMuxBatch.App.ViewModels;
@@ -20,8 +21,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private string? _outputPath;
     private string _plannedOutputFile = string.Empty;
     private MkvInspection? _mediaInspection;
+    private MediaInfoInspection? _displayInspection;
     private string _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
     private bool _mediaInspectionFailed;
+    private bool _mediaInspectionCompleted;
 
     public QueueItemViewModel(MediaSet media, AppSettings settings)
     {
@@ -58,6 +61,16 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(_displayInspection?.ContainerFormat))
+            {
+                return FormatContainer(_displayInspection.ContainerFormat);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_mediaInspection?.ContainerType))
+            {
+                return FormatContainer(_mediaInspection.ContainerType);
+            }
+
             var formats = _media.CandidateVideoPaths
                 .Select(static path => Path.GetExtension(path).TrimStart('.').ToUpperInvariant())
                 .Where(static extension => extension.Length > 0)
@@ -80,6 +93,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 return "—";
             }
 
+            if (_displayInspection?.VideoStreams.Count > 0)
+            {
+                var primaryStream = _displayInspection.VideoStreams[0];
+                var displaySuffix = _displayInspection.VideoStreams.Count > 1
+                    ? $" +{_displayInspection.VideoStreams.Count - 1}"
+                    : string.Empty;
+                return FormatCodec(primaryStream.Format, primaryStream.CodecId) + displaySuffix;
+            }
+
             if (_mediaInspection is null)
             {
                 return _mediaInspectionFailed
@@ -98,9 +120,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             return FormatCodec(primaryTrack) + suffix;
         }
     }
-    public string DurationText => _mediaInspection?.DurationNanoseconds is > 0
-        ? FormatDuration(_mediaInspection.DurationNanoseconds.Value)
-        : _media.VideoPath is null ? "—" : _mediaInspection is null ? AppText.Get("Common_Checking") : "—";
+    public string DurationText => GetDisplayDuration() is > 0 and var duration
+        ? FormatDuration(duration)
+        : _media.VideoPath is null ? "—" : !_mediaInspectionCompleted ? AppText.Get("Common_Checking") : "—";
     public string PlanDescription => _plan.Description;
     public string OutputFile => _outputPath is null
         ? _plannedOutputFile
@@ -137,7 +159,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         ?? (_media.VideoPath is null
             ? AppText.Get("Common_Undetermined")
             : Path.Combine(Folder, _plannedOutputFile));
-    public bool NeedsMediaInspection => _media.VideoPath is not null && _mediaInspection is null;
+    public bool NeedsMediaInspection => _media.VideoPath is not null && !_mediaInspectionCompleted;
     public string InputSummary
     {
         get
@@ -153,30 +175,36 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 return AppText.Get("Queue_NoVideo");
             }
 
-            if (_mediaInspection is null)
+            if (!_mediaInspectionCompleted)
+            {
+                return _mediaInfoStatus;
+            }
+            if (_mediaInspectionFailed)
             {
                 return _mediaInfoStatus;
             }
 
             var extensionLabel = Path.GetExtension(_media.VideoPath).TrimStart('.').ToUpperInvariant();
-            var containerLabel = string.IsNullOrWhiteSpace(_mediaInspection.ContainerType)
-                ? extensionLabel
-                : _mediaInspection.ContainerType;
+            var containerLabel = !string.IsNullOrWhiteSpace(_displayInspection?.ContainerFormat)
+                ? FormatContainer(_displayInspection.ContainerFormat)
+                : !string.IsNullOrWhiteSpace(_mediaInspection?.ContainerType)
+                    ? FormatContainer(_mediaInspection.ContainerType)
+                    : extensionLabel;
             var parts = new List<string>
             {
                 string.IsNullOrWhiteSpace(extensionLabel)
                     ? containerLabel
                     : $"{containerLabel} ({extensionLabel})"
             };
-            if (_mediaInspection.DurationNanoseconds is > 0)
+            if (GetDisplayDuration() is > 0 and var duration)
             {
-                parts.Add(FormatDuration(_mediaInspection.DurationNanoseconds.Value));
+                parts.Add(FormatDuration(duration));
             }
-            if (_mediaInspection.FileSizeBytes is >= 0)
+            var fileSize = _displayInspection?.FileSizeBytes ?? _mediaInspection?.FileSizeBytes;
+            if (fileSize is >= 0)
             {
-                parts.Add(FormatFileSize(_mediaInspection.FileSizeBytes.Value));
+                parts.Add(FormatFileSize(fileSize.Value));
             }
-
             return string.Join(" · ", parts);
         }
     }
@@ -184,6 +212,22 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     {
         get
         {
+            if (_displayInspection?.VideoStreams.Count > 0)
+            {
+                var stream = _displayInspection.VideoStreams[0];
+                var mediaParts = new List<string> { FormatCodec(stream.Format, stream.CodecId) };
+                if (stream.Width is > 0 && stream.Height is > 0)
+                {
+                    mediaParts.Add($"{stream.Width}×{stream.Height}");
+                }
+                if (stream.FrameRate is > 0)
+                {
+                    mediaParts.Add($"{stream.FrameRate.Value:0.###} fps");
+                }
+
+                return string.Join(" · ", mediaParts);
+            }
+
             if (_mediaInspection is null)
             {
                 return _media.VideoPath is null ? "—" : _mediaInfoStatus;
@@ -205,11 +249,6 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 var fps = 1_000_000_000d / track.DefaultDurationNanoseconds.Value;
                 parts.Add($"{fps:0.###} fps");
             }
-            if (track.Bitrate is > 0)
-            {
-                parts.Add(FormatBitrate(track.Bitrate.Value));
-            }
-
             return string.Join(" · ", parts);
         }
     }
@@ -217,6 +256,29 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     {
         get
         {
+            if (_displayInspection?.AudioStreams.Count > 0)
+            {
+                var streams = _displayInspection.AudioStreams;
+                return string.Join(Environment.NewLine, streams.Select((stream, index) =>
+                {
+                    var parts = new List<string>
+                    {
+                        FormatCodec(stream.Format, stream.CodecId),
+                        FormatLanguage(stream.Language)
+                    };
+                    if (stream.Channels is > 0)
+                    {
+                        parts.Add($"{stream.Channels}ch");
+                    }
+                    if (stream.SamplingRate is > 0)
+                    {
+                        parts.Add($"{stream.SamplingRate.Value / 1000d:0.#} kHz");
+                    }
+                    var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
+                    return prefix + string.Join(" · ", parts);
+                }));
+            }
+
             if (_mediaInspection is null)
             {
                 return _media.VideoPath is null ? "—" : _mediaInfoStatus;
@@ -245,10 +307,223 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 {
                     parts.Add($"{track.AudioSamplingFrequency.Value / 1000d:0.#} kHz");
                 }
-                if (track.Bitrate is > 0)
+                var prefix = tracks.Length > 1 ? $"{index + 1}. " : string.Empty;
+                return prefix + string.Join(" · ", parts);
+            }));
+        }
+    }
+    public string TrackSummary
+    {
+        get
+        {
+            if (!_mediaInspectionCompleted)
+            {
+                return _media.VideoPath is null ? "—" : _mediaInfoStatus;
+            }
+            if (_mediaInspectionFailed)
+            {
+                return _mediaInfoStatus;
+            }
+
+            var audioCount = _mediaInspection?.Tracks.Count(static track =>
+                    string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase))
+                ?? _displayInspection?.AudioStreams.Count
+                ?? 0;
+            var subtitleCount = _mediaInspection?.Tracks.Count(static track =>
+                    string.Equals(track.Type, "subtitles", StringComparison.OrdinalIgnoreCase))
+                ?? _displayInspection?.TextStreams.Count
+                ?? 0;
+            var fontCount = _mediaInspection?.Attachments.Count(MkvMergeClient.IsFontAttachment) ?? 0;
+            var chapterCount = _mediaInspection?.ChapterCount ?? 0;
+            return AppText.Get("Queue_TrackSummary", audioCount, subtitleCount, fontCount, chapterCount);
+        }
+    }
+    public string MediaDetailsPath => _media.VideoPath ?? "—";
+    public string MediaDetailsInputSummary
+    {
+        get
+        {
+            if (!_mediaInspectionCompleted || _mediaInspectionFailed)
+            {
+                return InputSummary;
+            }
+
+            var extension = _media.VideoPath is null
+                ? string.Empty
+                : Path.GetExtension(_media.VideoPath).TrimStart('.').ToUpperInvariant();
+            var container = !string.IsNullOrWhiteSpace(_displayInspection?.ContainerFormat)
+                ? FormatContainer(_displayInspection.ContainerFormat)
+                : !string.IsNullOrWhiteSpace(_mediaInspection?.ContainerType)
+                    ? FormatContainer(_mediaInspection.ContainerType)
+                    : extension;
+            var parts = new List<string>
+            {
+                string.IsNullOrWhiteSpace(extension) ? container : $"{container} ({extension})"
+            };
+            if (!string.IsNullOrWhiteSpace(_displayInspection?.ContainerProfile))
+            {
+                parts.Add(_displayInspection.ContainerProfile);
+            }
+            if (GetDisplayDuration() is > 0 and var duration)
+            {
+                parts.Add(FormatDetailedDuration(duration));
+            }
+            var fileSize = _displayInspection?.FileSizeBytes ?? _mediaInspection?.FileSizeBytes;
+            if (fileSize is >= 0)
+            {
+                parts.Add(FormatFileSize(fileSize.Value));
+            }
+            if (_displayInspection?.OverallBitrate is > 0)
+            {
+                parts.Add(FormatBitrate(_displayInspection.OverallBitrate.Value));
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
+    public string MediaDetailsVideoSummary
+    {
+        get
+        {
+            if (_displayInspection?.VideoStreams.Count is not > 0)
+            {
+                return VideoSummary;
+            }
+
+            var streams = _displayInspection.VideoStreams;
+            return string.Join(Environment.NewLine, streams.Select((stream, index) =>
+            {
+                var parts = new List<string>
                 {
-                    parts.Add(FormatBitrate(track.Bitrate.Value));
+                    FormatCodecWithProfile(stream.Format, stream.CodecId, stream.FormatProfile)
+                };
+                if (stream.Width is > 0 && stream.Height is > 0)
+                {
+                    parts.Add($"{stream.Width}×{stream.Height}");
                 }
+                if (stream.FrameRate is > 0)
+                {
+                    var mode = string.IsNullOrWhiteSpace(stream.FrameRateMode)
+                        ? string.Empty
+                        : $" {stream.FrameRateMode}";
+                    parts.Add($"{stream.FrameRate.Value:0.###} fps{mode}");
+                }
+                if (stream.Bitrate is > 0)
+                {
+                    parts.Add(FormatBitrate(stream.Bitrate.Value));
+                }
+                if (stream.FrameCount is > 0)
+                {
+                    parts.Add(AppText.Get("MediaInfo_FrameCount", stream.FrameCount.Value));
+                }
+                if (stream.BitDepth is > 0)
+                {
+                    parts.Add($"{stream.BitDepth}-bit");
+                }
+                if (!string.IsNullOrWhiteSpace(stream.ScanType))
+                {
+                    parts.Add(stream.ScanType);
+                }
+                if (stream.DurationNanoseconds is > 0)
+                {
+                    parts.Add(FormatDetailedDuration(stream.DurationNanoseconds.Value));
+                }
+
+                var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
+                return prefix + string.Join(" · ", parts);
+            }));
+        }
+    }
+    public string MediaDetailsAudioSummary
+    {
+        get
+        {
+            if (_displayInspection?.AudioStreams.Count is not > 0)
+            {
+                return AudioSummary;
+            }
+
+            var streams = _displayInspection.AudioStreams;
+            return string.Join(Environment.NewLine, streams.Select((stream, index) =>
+            {
+                var parts = new List<string>
+                {
+                    FormatCodecWithProfile(stream.Format, stream.CodecId, stream.FormatProfile),
+                    FormatLanguage(stream.Language)
+                };
+                if (stream.Channels is > 0)
+                {
+                    parts.Add($"{stream.Channels}ch");
+                }
+                if (!string.IsNullOrWhiteSpace(stream.ChannelLayout))
+                {
+                    parts.Add(stream.ChannelLayout);
+                }
+                if (stream.SamplingRate is > 0)
+                {
+                    parts.Add($"{stream.SamplingRate.Value / 1000d:0.#} kHz");
+                }
+                if (stream.Bitrate is > 0)
+                {
+                    parts.Add(FormatBitrate(stream.Bitrate.Value));
+                }
+                if (stream.BitDepth is > 0)
+                {
+                    parts.Add($"{stream.BitDepth}-bit");
+                }
+                if (stream.DurationNanoseconds is > 0)
+                {
+                    parts.Add(FormatDetailedDuration(stream.DurationNanoseconds.Value));
+                }
+                if (!string.IsNullOrWhiteSpace(stream.Title))
+                {
+                    parts.Add(stream.Title);
+                }
+
+                var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
+                return prefix + string.Join(" · ", parts);
+            }));
+        }
+    }
+    public string MediaDetailsSubtitleSummary
+    {
+        get
+        {
+            if (_displayInspection?.TextStreams.Count > 0)
+            {
+                var streams = _displayInspection.TextStreams;
+                return string.Join(Environment.NewLine, streams.Select((stream, index) =>
+                {
+                    var parts = new List<string>
+                    {
+                        FormatCodec(stream.Format, stream.CodecId),
+                        FormatLanguage(stream.Language)
+                    };
+                    if (!string.IsNullOrWhiteSpace(stream.Title))
+                    {
+                        parts.Add(stream.Title);
+                    }
+
+                    var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
+                    return prefix + string.Join(" · ", parts);
+                }));
+            }
+
+            var tracks = _mediaInspection?.Tracks
+                .Where(static track => string.Equals(track.Type, "subtitles", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (tracks is not { Length: > 0 })
+            {
+                return AppText.Get("Common_None");
+            }
+
+            return string.Join(Environment.NewLine, tracks.Select((track, index) =>
+            {
+                var parts = new List<string>
+                {
+                    FormatCodec(track),
+                    FormatLanguage(track.LanguageIetf ?? track.Language)
+                };
                 if (!string.IsNullOrWhiteSpace(track.TrackName))
                 {
                     parts.Add(track.TrackName);
@@ -259,24 +534,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             }));
         }
     }
-    public string TrackSummary
-    {
-        get
-        {
-            if (_mediaInspection is null)
-            {
-                return _media.VideoPath is null ? "—" : _mediaInfoStatus;
-            }
-
-            var audioCount = _mediaInspection.Tracks.Count(static track =>
-                string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase));
-            var subtitleCount = _mediaInspection.Tracks.Count(static track =>
-                string.Equals(track.Type, "subtitles", StringComparison.OrdinalIgnoreCase));
-            var fontCount = _mediaInspection.Attachments.Count(MkvMergeClient.IsFontAttachment);
-            var chapterCount = _mediaInspection.ChapterCount ?? 0;
-            return AppText.Get("Queue_TrackSummary", audioCount, subtitleCount, fontCount, chapterCount);
-        }
-    }
+    public string MediaDetailsStructureSummary => TrackSummary;
     public string IssuesText
     {
         get
@@ -417,7 +675,19 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     public void SetMediaInspection(MkvInspection inspection)
     {
         _mediaInspection = inspection;
+        _displayInspection = null;
         _mediaInspectionFailed = false;
+        _mediaInspectionCompleted = true;
+        _mediaInfoStatus = string.Empty;
+        RaiseMediaInfoChanged();
+    }
+
+    public void SetMediaInspections(MkvInspection? inspection, MediaInfoInspection? displayInspection)
+    {
+        _mediaInspection = inspection;
+        _displayInspection = displayInspection;
+        _mediaInspectionFailed = inspection is null && displayInspection is null;
+        _mediaInspectionCompleted = true;
         _mediaInfoStatus = string.Empty;
         RaiseMediaInfoChanged();
     }
@@ -425,7 +695,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     public void SetMediaInspectionError(string message)
     {
         _mediaInspection = null;
+        _displayInspection = null;
         _mediaInspectionFailed = true;
+        _mediaInspectionCompleted = true;
         _mediaInfoStatus = AppText.Get("MediaInfo_Failed", message);
         RaiseMediaInfoChanged();
     }
@@ -437,7 +709,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         if (!string.Equals(previousVideoPath, _media.VideoPath, StringComparison.OrdinalIgnoreCase))
         {
             _mediaInspection = null;
+            _displayInspection = null;
             _mediaInspectionFailed = false;
+            _mediaInspectionCompleted = false;
             _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
             RaiseMediaInfoChanged();
         }
@@ -494,6 +768,12 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(VideoSummary));
         OnPropertyChanged(nameof(AudioSummary));
         OnPropertyChanged(nameof(TrackSummary));
+        OnPropertyChanged(nameof(MediaDetailsPath));
+        OnPropertyChanged(nameof(MediaDetailsInputSummary));
+        OnPropertyChanged(nameof(MediaDetailsVideoSummary));
+        OnPropertyChanged(nameof(MediaDetailsAudioSummary));
+        OnPropertyChanged(nameof(MediaDetailsSubtitleSummary));
+        OnPropertyChanged(nameof(MediaDetailsStructureSummary));
     }
 
     private static MkvTrackInfo[] GetVideoTracks(MkvInspection inspection) =>
@@ -527,6 +807,47 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         return string.IsNullOrWhiteSpace(track.CodecName) ? track.CodecId : track.CodecName;
     }
 
+    private static string FormatCodecWithProfile(string? format, string? codecId, string? profile)
+    {
+        var codec = FormatCodec(format, codecId);
+        return string.IsNullOrWhiteSpace(profile)
+            ? codec
+            : $"{codec} {profile}";
+    }
+
+    private static string FormatCodec(string? format, string? codecId)
+    {
+        var id = string.Join(' ', new[] { format, codecId }
+            .Where(static value => !string.IsNullOrWhiteSpace(value)));
+        if (id.Contains("HEVC", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("H.265", StringComparison.OrdinalIgnoreCase)) return "HEVC/H.265";
+        if (id.Contains("AVC", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("H.264", StringComparison.OrdinalIgnoreCase)) return "H.264/AVC";
+        if (id.Contains("AV1", StringComparison.OrdinalIgnoreCase)) return "AV1";
+        if (id.Contains("VP9", StringComparison.OrdinalIgnoreCase)) return "VP9";
+        if (id.Contains("OPUS", StringComparison.OrdinalIgnoreCase)) return "Opus";
+        if (id.Contains("AAC", StringComparison.OrdinalIgnoreCase)) return "AAC";
+        if (id.Contains("FLAC", StringComparison.OrdinalIgnoreCase)) return "FLAC";
+        if (id.Contains("E-AC-3", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("EAC3", StringComparison.OrdinalIgnoreCase)) return "E-AC-3";
+        if (id.Contains("AC-3", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("AC3", StringComparison.OrdinalIgnoreCase)) return "AC-3";
+        if (id.Contains("DTS", StringComparison.OrdinalIgnoreCase)) return "DTS";
+        return string.IsNullOrWhiteSpace(format) ? codecId ?? "—" : format;
+    }
+
+    private static string FormatContainer(string container)
+    {
+        if (container.Contains("WebM", StringComparison.OrdinalIgnoreCase)) return "WebM";
+        if (container.Contains("Matroska", StringComparison.OrdinalIgnoreCase)) return "MKV";
+        if (container.Contains("MPEG-4", StringComparison.OrdinalIgnoreCase)
+            || container.Contains("QuickTime", StringComparison.OrdinalIgnoreCase)) return "MP4";
+        if (container.Contains("MPEG-TS", StringComparison.OrdinalIgnoreCase)
+            || container.Contains("transport stream", StringComparison.OrdinalIgnoreCase)) return "MPEG-TS";
+        if (container.Contains("AVI", StringComparison.OrdinalIgnoreCase)) return "AVI";
+        return container;
+    }
+
     private static string FormatLanguage(string? language)
     {
         if (string.IsNullOrWhiteSpace(language) || string.Equals(language, "und", StringComparison.OrdinalIgnoreCase))
@@ -537,17 +858,28 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         var primary = language.Split('-', StringSplitOptions.RemoveEmptyEntries)[0];
         return primary.ToLowerInvariant() switch
         {
-            "ko" or "kor" => AppText.Get("Language_Korean"),
-            "ja" or "jpn" => AppText.Get("Language_Japanese"),
-            "en" or "eng" => AppText.Get("Language_English"),
+            "ko" or "kor" or "korean" => AppText.Get("Language_Korean"),
+            "ja" or "jpn" or "japanese" => AppText.Get("Language_Japanese"),
+            "en" or "eng" or "english" => AppText.Get("Language_English"),
             _ => language
         };
     }
+
+    private long? GetDisplayDuration() =>
+        _displayInspection?.DurationNanoseconds
+        ?? _displayInspection?.VideoStreams.FirstOrDefault()?.DurationNanoseconds
+        ?? _mediaInspection?.DurationNanoseconds;
 
     private static string FormatDuration(long nanoseconds)
     {
         var duration = TimeSpan.FromTicks(nanoseconds / 100);
         return $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string FormatDetailedDuration(long nanoseconds)
+    {
+        var duration = TimeSpan.FromTicks(nanoseconds / 100);
+        return $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}.{duration.Milliseconds:000}";
     }
 
     private static string FormatFileSize(long bytes)

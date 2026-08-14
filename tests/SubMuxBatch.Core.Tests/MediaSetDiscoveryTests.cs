@@ -42,7 +42,7 @@ public sealed class MediaSetDiscoveryTests : IDisposable
     }
 
     [Fact]
-    public async Task RecursiveScanDoesNotFollowOutputFiles()
+    public async Task RecursiveScanIncludesPrefixNamedMkvFiles()
     {
         var child = Directory.CreateDirectory(Path.Combine(_root, "Child")).FullName;
         File.WriteAllBytes(Path.Combine(child, "Episode.mkv"), [1]);
@@ -51,8 +51,9 @@ public sealed class MediaSetDiscoveryTests : IDisposable
 
         var result = await new MediaSetDiscovery().DiscoverAsync([_root], true);
 
-        Assert.Single(result);
-        Assert.Equal("Episode", result[0].Key.Stem);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, item => item.Key.Stem == "Episode");
+        Assert.Contains(result, item => item.Key.Stem == "SubMux_Episode");
     }
 
     [Theory]
@@ -299,7 +300,7 @@ public sealed class MediaSetDiscoveryTests : IDisposable
         Assert.Contains("영상", ConversionPlanFactory.Create(merged).Error);
     }
     [Fact]
-    public async Task PrefixNamedNonMkvIsInputWhileGeneratedMkvIsSkipped()
+    public async Task PrefixNamedVideosAreAlwaysInputsRegardlessOfContainer()
     {
         var video = Touch("SubMux_Movie.mp4");
         Touch("SubMux_Movie.srt");
@@ -307,8 +308,9 @@ public sealed class MediaSetDiscoveryTests : IDisposable
 
         var result = await new MediaSetDiscovery().DiscoverAsync([_root], false);
 
-        var media = Assert.Single(result);
-        Assert.Equal(Path.GetFullPath(video), media.VideoPath);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, media => media.VideoPath == Path.GetFullPath(video));
+        Assert.Contains(result, media => media.VideoPath == Path.GetFullPath(Path.Combine(_root, "SubMux_Skipped.mkv")));
     }
     private string Touch(string name)
     {

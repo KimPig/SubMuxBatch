@@ -2,9 +2,7 @@ using SubMuxBatch.Core.Domain;
 
 namespace SubMuxBatch.Core.Discovery;
 
-public sealed class MediaSetDiscovery(
-    string outputPrefix = OutputFileNaming.DefaultPrefix,
-    bool allowSubtitleSuffixMatch = false)
+public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
 {
 
     public Task<IReadOnlyList<MediaSet>> DiscoverAsync(
@@ -87,11 +85,6 @@ public sealed class MediaSetDiscovery(
             return BuildExactMediaSets(files, cancellationToken);
         }
 
-        if (IsGeneratedOutputMkv(fullInputPath))
-        {
-            return [];
-        }
-
         var directory = Path.GetDirectoryName(fullInputPath)!;
         if (!suffixDirectoryCache.TryGetValue(directory, out var snapshot))
         {
@@ -137,11 +130,6 @@ public sealed class MediaSetDiscovery(
         foreach (var file in NormalizeFiles(files))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsGeneratedOutputMkv(file))
-            {
-                continue;
-            }
-
             var key = MediaKey.FromPath(file);
             GetOrCreateBuilder(groups, key).Add(file);
         }
@@ -184,7 +172,6 @@ public sealed class MediaSetDiscovery(
 
     private string[] GetInputVideos(IEnumerable<string> files) => files
         .Where(MediaInputFormats.IsVideo)
-        .Where(file => !IsGeneratedOutputMkv(file))
         .OrderBy(static file => file, StringComparer.Ordinal)
         .ToArray();
 
@@ -208,10 +195,6 @@ public sealed class MediaSetDiscovery(
             .ThenBy(static video => video, StringComparer.Ordinal)
             .FirstOrDefault();
     }
-
-    private bool IsGeneratedOutputMkv(string path) =>
-        Path.GetExtension(path).Equals(".mkv", StringComparison.OrdinalIgnoreCase)
-        && Path.GetFileNameWithoutExtension(path).StartsWith(outputPrefix, StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<string> NormalizeFiles(IEnumerable<string> files) => files
         .Select(Path.GetFullPath)
