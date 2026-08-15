@@ -5,20 +5,43 @@ using SubMuxBatch.Core.Localization;
 namespace SubMuxBatch.Core.Media;
 
 public sealed record MediaInfoVideoStream(
+    string? Id,
+    string? StreamOrder,
     string? Format,
     string? FormatProfile,
+    string? FormatLevel,
+    string? FormatTier,
     string? CodecId,
+    string? Title,
+    string? Language,
     int? Width,
     int? Height,
+    double? DisplayAspectRatio,
+    double? PixelAspectRatio,
     double? FrameRate,
     string? FrameRateMode,
     long? Bitrate,
+    string? BitrateMode,
+    long? MaximumBitrate,
     long? FrameCount,
     long? DurationNanoseconds,
     int? BitDepth,
-    string? ScanType);
+    string? ColorSpace,
+    string? ChromaSubsampling,
+    string? ColorRange,
+    string? ColorPrimaries,
+    string? TransferCharacteristics,
+    string? MatrixCoefficients,
+    string? HdrFormat,
+    string? HdrCompatibility,
+    string? ScanType,
+    string? ScanOrder,
+    bool? Default,
+    bool? Forced);
 
 public sealed record MediaInfoAudioStream(
+    string? Id,
+    string? StreamOrder,
     string? Format,
     string? FormatProfile,
     string? CodecId,
@@ -28,21 +51,40 @@ public sealed record MediaInfoAudioStream(
     string? ChannelLayout,
     double? SamplingRate,
     long? Bitrate,
+    string? BitrateMode,
+    long? MaximumBitrate,
     long? DurationNanoseconds,
-    int? BitDepth);
+    int? BitDepth,
+    string? CompressionMode,
+    double? DelayMilliseconds,
+    bool? Default,
+    bool? Forced);
 
 public sealed record MediaInfoTextStream(
+    string? Id,
+    string? StreamOrder,
     string? Format,
+    string? FormatProfile,
     string? CodecId,
     string? Language,
-    string? Title);
+    string? Title,
+    long? DurationNanoseconds,
+    long? ElementCount,
+    bool? Default,
+    bool? Forced);
 
 public sealed record MediaInfoInspection(
     string? ContainerFormat,
     string? ContainerProfile,
+    string? ContainerVersion,
     long? DurationNanoseconds,
     long? FileSizeBytes,
     long? OverallBitrate,
+    string? OverallBitrateMode,
+    string? WritingApplication,
+    string? WritingLibrary,
+    string? EncodedDate,
+    string? TaggedDate,
     IReadOnlyList<MediaInfoVideoStream> VideoStreams,
     IReadOnlyList<MediaInfoAudioStream> AudioStreams,
     IReadOnlyList<MediaInfoTextStream> TextStreams,
@@ -116,9 +158,15 @@ public sealed class MediaInfoClient
             return new MediaInfoInspection(
                 NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Format")),
                 NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Format_Profile")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Format_Version")),
                 duration,
                 fileSize,
                 ParseLong(Get(mediaInfo, StreamKind.General, 0, "OverallBitRate")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "OverallBitRate_Mode")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Encoded_Application")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Encoded_Library")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Encoded_Date")),
+                NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Tagged_Date")),
                 videoStreams,
                 audioStreams,
                 textStreams,
@@ -131,20 +179,43 @@ public sealed class MediaInfoClient
     }
 
     private static MediaInfoVideoStream ReadVideoStream(MediaInfo mediaInfo, int index) => new(
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ID")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "StreamOrder")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Format")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Format_Profile")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Format_Level")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Format_Tier")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "CodecID")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Title")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "Language")),
         ParseInt(Get(mediaInfo, StreamKind.Video, index, "Width")),
         ParseInt(Get(mediaInfo, StreamKind.Video, index, "Height")),
+        ParseDouble(Get(mediaInfo, StreamKind.Video, index, "DisplayAspectRatio")),
+        ParseDouble(Get(mediaInfo, StreamKind.Video, index, "PixelAspectRatio")),
         ParseDouble(Get(mediaInfo, StreamKind.Video, index, "FrameRate")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "FrameRate_Mode")),
         ParseLong(Get(mediaInfo, StreamKind.Video, index, "BitRate")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "BitRate_Mode")),
+        ParseLong(Get(mediaInfo, StreamKind.Video, index, "BitRate_Maximum")),
         ParseLong(Get(mediaInfo, StreamKind.Video, index, "FrameCount")),
         ParseDuration(Get(mediaInfo, StreamKind.Video, index, "Duration")),
         ParseInt(Get(mediaInfo, StreamKind.Video, index, "BitDepth")),
-        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ScanType")));
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ColorSpace")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ChromaSubsampling")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "colour_range")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "colour_primaries")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "transfer_characteristics")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "matrix_coefficients")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "HDR_Format")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "HDR_Format_Compatibility")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ScanType")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ScanOrder")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Video, index, "Default")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Video, index, "Forced")));
 
     private static MediaInfoAudioStream ReadAudioStream(MediaInfo mediaInfo, int index) => new(
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "ID")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "StreamOrder")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "Format")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "Format_Profile")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "CodecID")),
@@ -154,14 +225,27 @@ public sealed class MediaInfoClient
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "ChannelLayout")),
         ParseDouble(Get(mediaInfo, StreamKind.Audio, index, "SamplingRate")),
         ParseLong(Get(mediaInfo, StreamKind.Audio, index, "BitRate")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "BitRate_Mode")),
+        ParseLong(Get(mediaInfo, StreamKind.Audio, index, "BitRate_Maximum")),
         ParseDuration(Get(mediaInfo, StreamKind.Audio, index, "Duration")),
-        ParseInt(Get(mediaInfo, StreamKind.Audio, index, "BitDepth")));
+        ParseInt(Get(mediaInfo, StreamKind.Audio, index, "BitDepth")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "Compression_Mode")),
+        ParseDouble(Get(mediaInfo, StreamKind.Audio, index, "Delay")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Audio, index, "Default")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Audio, index, "Forced")));
 
     private static MediaInfoTextStream ReadTextStream(MediaInfo mediaInfo, int index) => new(
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "ID")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "StreamOrder")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "Format")),
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "Format_Profile")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "CodecID")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "Language")),
-        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "Title")));
+        NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "Title")),
+        ParseDuration(Get(mediaInfo, StreamKind.Text, index, "Duration")),
+        ParseLong(Get(mediaInfo, StreamKind.Text, index, "ElementCount")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Text, index, "Default")),
+        ParseBoolean(Get(mediaInfo, StreamKind.Text, index, "Forced")));
 
     private static string Get(MediaInfo mediaInfo, StreamKind kind, int index, string parameter) =>
         mediaInfo.Get(kind, index, parameter).Trim();
@@ -197,6 +281,21 @@ public sealed class MediaInfoClient
             && double.IsFinite(parsed)
             ? parsed
             : null;
+    }
+
+    private static bool? ParseBoolean(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim() switch
+        {
+            "Yes" or "yes" or "1" => true,
+            "No" or "no" or "0" => false,
+            _ => null
+        };
     }
 
     private static long? ParseDuration(string? milliseconds)

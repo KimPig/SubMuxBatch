@@ -38,6 +38,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
     public MediaSet Media => _media;
     public ConversionPlan Plan => _plan;
+    public MkvInspection? MkvInspection => _mediaInspection;
+    public MediaInfoInspection? DisplayInspection => _displayInspection;
     public string Key => _media.Key.Canonical;
     public string Name => _media.Key.Stem;
     public string Folder => _media.Key.DirectoryPath;
@@ -774,6 +776,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(MediaDetailsAudioSummary));
         OnPropertyChanged(nameof(MediaDetailsSubtitleSummary));
         OnPropertyChanged(nameof(MediaDetailsStructureSummary));
+        OnPropertyChanged(nameof(MkvInspection));
+        OnPropertyChanged(nameof(DisplayInspection));
     }
 
     private static MkvTrackInfo[] GetVideoTracks(MkvInspection inspection) =>
