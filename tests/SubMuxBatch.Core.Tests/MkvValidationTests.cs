@@ -445,6 +445,43 @@ public sealed class MkvValidationTests
     }
 
     [Fact]
+    public async Task MuxAddsGlobalTagsFileWhenRequested()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-global-tags-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var tags = Path.Combine(root, "submux-tags.xml");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Family,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+            await File.WriteAllTextAsync(tags, "<Tags />");
+
+            var runner = new MuxArgumentRunner(output);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                globalTagsPath: tags);
+
+            Assert.NotNull(runner.MuxArguments);
+            var tagsIndex = runner.MuxArguments!.IndexOf("--global-tags");
+            Assert.True(tagsIndex >= 0);
+            Assert.Equal(tags, runner.MuxArguments[tagsIndex + 1]);
+            Assert.True(tagsIndex < runner.MuxArguments.IndexOf(source));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MuxCanRemoveOldFontsAndAttachCurrentStyleFontTogether()
     {
         var root = Path.Combine(Path.GetTempPath(), $"submux-batch-replace-font-args-{Guid.NewGuid():N}");

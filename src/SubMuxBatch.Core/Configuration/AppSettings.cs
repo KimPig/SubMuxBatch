@@ -47,6 +47,7 @@ public sealed class AppSettings
     public bool RemoveExistingFontAttachments { get; set; } = false;
     public bool RemoveChapters { get; set; } = false;
     public bool AttachAssStyleFonts { get; set; } = true;
+    public bool AddSubMuxTag { get; set; } = true;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
     public int ConcurrentJobCount { get; set; } = MinConcurrentJobCount;
@@ -172,6 +173,7 @@ public sealed class AppSettings
         RemoveExistingFontAttachments = RemoveExistingFontAttachments,
         RemoveChapters = RemoveChapters,
         AttachAssStyleFonts = AttachAssStyleFonts,
+        AddSubMuxTag = AddSubMuxTag,
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,
         ConcurrentJobCount = ConcurrentJobCount,

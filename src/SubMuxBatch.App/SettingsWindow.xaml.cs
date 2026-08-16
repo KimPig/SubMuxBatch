@@ -60,6 +60,7 @@ public partial class SettingsWindow : Window
         RemoveExistingFontAttachmentsCheckBox.IsChecked = settings.RemoveExistingFontAttachments;
         RemoveChaptersCheckBox.IsChecked = settings.RemoveChapters;
         AttachAssStyleFontsCheckBox.IsChecked = settings.AttachAssStyleFonts;
+        AddSubMuxTagCheckBox.IsChecked = settings.AddSubMuxTag;
         FilterAudioTracksByLanguageCheckBox.IsChecked = settings.FilterAudioTracksByLanguage;
         AudioLanguageComboBox.SelectedValue = settings.SelectedAudioLanguage.ToString();
         if (AudioLanguageComboBox.SelectedIndex < 0)
@@ -163,6 +164,7 @@ public partial class SettingsWindow : Window
             updated.RemoveExistingFontAttachments = RemoveExistingFontAttachmentsCheckBox.IsChecked == true;
             updated.RemoveChapters = RemoveChaptersCheckBox.IsChecked == true;
             updated.AttachAssStyleFonts = AttachAssStyleFontsCheckBox.IsChecked == true;
+            updated.AddSubMuxTag = AddSubMuxTagCheckBox.IsChecked == true;
             updated.FilterAudioTracksByLanguage = FilterAudioTracksByLanguageCheckBox.IsChecked == true;
             if (AudioLanguageComboBox.SelectedValue is not string selectedAudioLanguage
                 || !Enum.TryParse(selectedAudioLanguage, out AudioTrackLanguage audioLanguage)

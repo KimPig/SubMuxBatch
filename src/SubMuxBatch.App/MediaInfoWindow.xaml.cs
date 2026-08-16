@@ -14,7 +14,7 @@ public partial class MediaInfoWindow : Window
         InitializeComponent();
         _viewModel = new MediaInfoDetailsViewModel(item);
         DataContext = _viewModel;
-        HeadingText.Text = AppText.Get("MediaDetails_Title", item.Name);
+        HeadingText.Text = AppText.Get("MediaDetails_Title", item.FileName);
         Title = $"SubMux Batch - {HeadingText.Text}";
         Loaded += (_, _) => WindowPlacementHelper.FitToCurrentWorkingArea(this);
         Closed += (_, _) => _viewModel.Dispose();

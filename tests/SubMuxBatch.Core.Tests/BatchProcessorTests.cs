@@ -3,6 +3,7 @@ using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Planning;
 using SubMuxBatch.Core.Processing;
 using System.Text.Json;
@@ -29,12 +30,21 @@ public sealed class BatchProcessorTests : IDisposable
         var dependencies = new DependencyReport(
             new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
             new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
+        bool? workspaceExistsWhenCompleted = null;
+        var progress = new InlineProgress<JobProgress>(update =>
+        {
+            if (update.State is JobState.Succeeded or JobState.SucceededWithWarnings)
+            {
+                workspaceExistsWhenCompleted = Directory.EnumerateDirectories(_root, ".submuxbatch-*").Any();
+            }
+        });
 
         var result = await new BatchProcessor(runner).ProcessAsync(
             media,
             plan,
             new AppSettings { AttachAssStyleFonts = false },
-            dependencies);
+            dependencies,
+            progress);
 
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.NotNull(result.OutputPath);
@@ -42,7 +52,10 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(2, runner.SeConvCalls.Count);
         Assert.Contains(runner.SeConvCalls, args => args.Contains("subrip"));
         Assert.Contains(runner.SeConvCalls, args => args.Contains("assa"));
+        Assert.Contains(SubMuxMetadata.VersionTagName, runner.MuxedGlobalTagsText);
+        Assert.Contains(SubMuxMetadata.CommentValue, runner.MuxedGlobalTagsText);
         Assert.True(File.Exists(mkv));
+        Assert.False(workspaceExistsWhenCompleted);
         Assert.Empty(Directory.EnumerateDirectories(_root, ".submuxbatch-*"));
     }
 
@@ -242,6 +255,49 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.All(results, result => Assert.True(File.Exists(result.OutputPath)));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SubMuxGlobalTagFollowsSetting(bool addSubMuxTag)
+    {
+        var mkv = Path.Combine(_root, $"Tag-{addSubMuxTag}.mkv");
+        var srt = Path.Combine(_root, $"Tag-{addSubMuxTag}.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, $"Tag-{addSubMuxTag}"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                AddSubMuxTag = addSubMuxTag
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Equal(addSubMuxTag, runner.MuxedGlobalTagsText is not null);
+    }
+
+    [Fact]
+    public async Task FinalOutputFileMustExistAndKeepItsVerifiedSize()
+    {
+        var valid = Path.Combine(_root, "valid-final.mkv");
+        var empty = Path.Combine(_root, "empty-final.mkv");
+        await File.WriteAllBytesAsync(valid, [1, 2, 3]);
+        await File.WriteAllBytesAsync(empty, []);
+
+        BatchProcessor.ValidateCommittedOutputFile(valid, 3);
+        Assert.Throws<InvalidOperationException>(() =>
+            BatchProcessor.ValidateCommittedOutputFile(empty, 3));
+        Assert.Throws<InvalidOperationException>(() =>
+            BatchProcessor.ValidateCommittedOutputFile(valid, 4));
+        Assert.Throws<InvalidOperationException>(() =>
+            BatchProcessor.ValidateCommittedOutputFile(Path.Combine(_root, "missing.mkv"), 3));
+    }
+
     [Fact]
     public async Task MatchingAssFontIsAttachedAndJobSucceeds()
     {
@@ -311,6 +367,11 @@ public sealed class BatchProcessorTests : IDisposable
         new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
         new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
 
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
     private sealed class SkipProcessRunner : IProcessRunner
     {
         public Task<ProcessResult> RunAsync(
@@ -330,6 +391,7 @@ public sealed class BatchProcessorTests : IDisposable
         public List<IReadOnlyList<string>> SeConvCalls { get; } = [];
         public List<IReadOnlyList<string>> MuxCalls { get; } = [];
         public string? MuxedAssText { get; private set; }
+        public string? MuxedGlobalTagsText { get; private set; }
 
         public Task<ProcessResult> RunAsync(
             ProcessRequest request,
@@ -380,12 +442,19 @@ public sealed class BatchProcessorTests : IDisposable
 
             if (request.Arguments[0] == "-J")
             {
-                var isOutput = request.Arguments[1].Contains("output.partial", StringComparison.OrdinalIgnoreCase);
+                var inspectedPath = request.Arguments[1];
+                var isOutput = File.Exists(inspectedPath)
+                               && File.ReadAllBytes(inspectedPath).SequenceEqual(new byte[] { 7, 8, 9 });
                 return Task.FromResult(new ProcessResult(0, isOutput ? CreateOutputJson() : SourceJson, string.Empty));
             }
 
             MuxCalls.Add(request.Arguments);
             _muxAttachments = ReadMuxAttachments(request.Arguments);
+            var globalTagsIndex = request.Arguments.ToList().IndexOf("--global-tags");
+            if (globalTagsIndex >= 0)
+            {
+                MuxedGlobalTagsText = File.ReadAllText(request.Arguments[globalTagsIndex + 1]);
+            }
             var outputIndex = request.Arguments.ToList().IndexOf("-o") + 1;
             var assInput = request.Arguments.FirstOrDefault(static argument =>
                 Path.GetExtension(argument).Equals(".ass", StringComparison.OrdinalIgnoreCase));

@@ -31,7 +31,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private const string QueueItemsDragFormat = "SubMuxBatch.QueueItems";
     private const double MinimumDragDistance = 6;
-    private const double MinimumQueueColumnWidth = 72;
+    private const double MinimumQueueColumnWidth = 48;
     private readonly DependencyLocator _dependencyLocator = new();
     private AppSettings _settings = new();
     private DependencyReport? _dependencies;
@@ -105,6 +105,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<QueueItemViewModel> Jobs { get; } = [];
     public ObservableCollection<object> QueueRows { get; } = [];
+    public bool QueueHeaderCommandsEnabled => !IsInteractionLocked;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void Jobs_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -525,7 +526,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void QueueColumnResizeThumb_DragDelta(object sender, DragDeltaEventArgs e)
     {
-        if (IsInteractionLocked || sender is not Thumb { Tag: string propertyName })
+        if (sender is not Thumb { Tag: string propertyName })
         {
             return;
         }
@@ -646,7 +647,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Func<QueueItemViewModel, string> keySelector = propertyName switch
         {
-            nameof(QueueItemViewModel.Name) => static job => job.Name,
+            nameof(QueueItemViewModel.Name) => static job => job.FileName,
             nameof(QueueItemViewModel.DetectedFiles) => static job => job.DetectedFiles,
             nameof(QueueItemViewModel.MediaFormatText) => static job => job.MediaFormatText,
             nameof(QueueItemViewModel.DurationText) => static job => job.DurationText,
@@ -2129,12 +2130,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         EmptyDropPanel.Visibility = Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var locked = IsInteractionLocked;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueHeaderCommandsEnabled)));
         var hasRunnable = Jobs.Any(static job => job.IsValid);
         StartButton.IsEnabled = !locked && hasRunnable && _dependencies?.IsReady == true;
         AddFilesButton.IsEnabled = !locked;
         AddFolderButton.IsEnabled = !locked;
         SettingsButton.IsEnabled = !locked;
-        QueueHeader.IsEnabled = !locked;
         RemoveButton.IsEnabled = !locked && JobsList.SelectedItems.Count > 0;
         ClearButton.IsEnabled = !locked && Jobs.Count > 0;
         CancelButton.IsEnabled = _isBusy && _processingCancellation?.IsCancellationRequested == false;

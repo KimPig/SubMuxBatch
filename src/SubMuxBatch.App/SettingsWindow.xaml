@@ -412,8 +412,16 @@
                                              MinWidth="180"
                                              Margin="0" />
                                 </Grid>
-                                <CheckBox x:Name="RemoveExistingSubtitlesCheckBox"
+                                <CheckBox x:Name="AddSubMuxTagCheckBox"
                                           Margin="0,16,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_AddSubMuxTag}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AddSubMuxTagHelp}" />
+                                <CheckBox x:Name="RemoveExistingSubtitlesCheckBox"
+                                          Margin="0,14,0,0">
                                     <TextBlock Text="{loc:Loc Settings_RemoveSubtitles}" TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"

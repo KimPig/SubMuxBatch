@@ -126,7 +126,8 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         bool removeExistingFontAttachments = false,
         bool removeChapters = false,
         AudioTrackLanguage? keepOnlyAudioLanguage = null,
-        IReadOnlyList<FontAttachmentFile>? fontAttachments = null)
+        IReadOnlyList<FontAttachmentFile>? fontAttachments = null,
+        string? globalTagsPath = null)
     {
         var arguments = new List<string>
         {
@@ -136,6 +137,17 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             "-o",
             outputPath
         };
+
+        if (!string.IsNullOrWhiteSpace(globalTagsPath))
+        {
+            if (!File.Exists(globalTagsPath))
+            {
+                throw new FileNotFoundException(CoreText.Get("Mkv_GlobalTagsMissing"), globalTagsPath);
+            }
+
+            arguments.Add("--global-tags");
+            arguments.Add(globalTagsPath);
+        }
 
         MkvInspection? sourceInspection = null;
         if (!removeExistingSubtitles || removeExistingFontAttachments || keepOnlyAudioLanguage.HasValue)

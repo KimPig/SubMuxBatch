@@ -15,6 +15,7 @@ public sealed class AssStyleTemplateTests
         Assert.False(settings.RemoveExistingFontAttachments);
         Assert.False(settings.RemoveChapters);
         Assert.True(settings.AttachAssStyleFonts);
+        Assert.True(settings.AddSubMuxTag);
         Assert.Equal(
             "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1",
             settings.AssStyleLine);
@@ -130,6 +131,7 @@ public sealed class AssStyleTemplateTests
             RemoveExistingFontAttachments = true,
             RemoveChapters = true,
             AttachAssStyleFonts = false,
+            AddSubMuxTag = false,
             AssStyleLine = "saved for later"
         };
 
@@ -141,6 +143,7 @@ public sealed class AssStyleTemplateTests
         Assert.True(copy.RemoveExistingFontAttachments);
         Assert.True(copy.RemoveChapters);
         Assert.False(copy.AttachAssStyleFonts);
+        Assert.False(copy.AddSubMuxTag);
         Assert.Equal("saved for later", copy.AssStyleLine);
     }
 
@@ -164,6 +167,7 @@ public sealed class AssStyleTemplateTests
         Assert.Equal(720, migrated.PlayResY);
         Assert.Equal(AppSettings.DefaultAssStyleLine, migrated.AssStyleLine);
         Assert.True(migrated.AttachAssStyleFonts);
+        Assert.True(migrated.AddSubMuxTag);
         Assert.False(migrated.RemoveChapters);
     }
 

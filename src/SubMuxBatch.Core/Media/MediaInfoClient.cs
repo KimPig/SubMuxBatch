@@ -73,6 +73,8 @@ public sealed record MediaInfoTextStream(
     bool? Default,
     bool? Forced);
 
+public sealed record MediaInfoMetadataTag(string Name, string Value);
+
 public sealed record MediaInfoInspection(
     string? ContainerFormat,
     string? ContainerProfile,
@@ -88,10 +90,35 @@ public sealed record MediaInfoInspection(
     IReadOnlyList<MediaInfoVideoStream> VideoStreams,
     IReadOnlyList<MediaInfoAudioStream> AudioStreams,
     IReadOnlyList<MediaInfoTextStream> TextStreams,
-    int MenuCount);
+    int MenuCount,
+    IReadOnlyList<MediaInfoMetadataTag> MetadataTags,
+    string? SubMuxBatchVersion,
+    string? Comment,
+    bool ProcessedBySubMux);
 
 public sealed class MediaInfoClient
 {
+    private static readonly HashSet<string> ExactTechnicalGeneralFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Count", "StreamCount", "StreamKind", "StreamOrder", "ID", "UniqueID",
+        "VideoCount", "AudioCount", "TextCount", "OtherCount", "ImageCount", "MenuCount",
+        "Encoded_Date", "Tagged_Date", "IsStreamable", "InternetMediaType",
+        "MD5", "SHA1", "SHA256"
+    };
+
+    private static readonly string[] TechnicalGeneralFieldPrefixes =
+    [
+        "CompleteName", "FolderName", "FileName", "FileExtension", "File_Created_Date",
+        "File_Modified_Date", "StreamKind", "StreamOrder", "UniqueID", "ID/String",
+        "Format", "CodecID", "FileSize", "Duration", "OverallBitRate",
+        "BitRate", "MaximumBitRate", "FrameRate", "FrameCount", "StreamSize", "Source_StreamSize",
+        "Source_Duration", "HeaderSize", "DataSize", "FooterSize", "MuxingMode", "Delay",
+        "Encoded_Application", "Encoded_Library", "Encoded_OperatingSystem", "BufferSize", "PacketSize",
+        "Video_Format", "Video_Codec", "Video_Language", "Audio_Format", "Audio_Codec",
+        "Audio_Language", "Text_Format", "Text_Codec", "Text_Language", "Other_Format",
+        "Image_Format", "Menu_Format", "Chapters_Pos_", "Attachments", "Cover_Data"
+    ];
+
     public Task<MediaInfoInspection> InspectAsync(
         string path,
         CancellationToken cancellationToken = default) =>
@@ -155,6 +182,16 @@ public sealed class MediaInfoClient
                 }
             }
 
+            var subMuxVersion = GetFirst(
+                mediaInfo,
+                StreamKind.General,
+                0,
+                SubMuxMetadata.VersionTagName,
+                "SubMuxBatchVersion",
+                "SubMux Batch Version");
+            var comment = NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Comment"));
+            var metadataTags = ReadMetadataTags(mediaInfo, comment);
+
             return new MediaInfoInspection(
                 NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Format")),
                 NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Format_Profile")),
@@ -170,12 +207,90 @@ public sealed class MediaInfoClient
                 videoStreams,
                 audioStreams,
                 textStreams,
-                mediaInfo.Count_Get(StreamKind.Menu));
+                mediaInfo.Count_Get(StreamKind.Menu),
+                metadataTags,
+                subMuxVersion,
+                comment,
+                SubMuxMetadata.IsProcessed(subMuxVersion, comment));
         }
         finally
         {
             mediaInfo.Close();
         }
+    }
+
+    private static IReadOnlyList<MediaInfoMetadataTag> ReadMetadataTags(
+        MediaInfo mediaInfo,
+        string? comment)
+    {
+        var tags = new List<MediaInfoMetadataTag>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var count = mediaInfo.Count_Get(StreamKind.General, 0);
+        for (var index = 0; index < count; index++)
+        {
+            var name = NullIfWhiteSpace(mediaInfo.Get(
+                StreamKind.General,
+                0,
+                index,
+                InfoKind.Name));
+            var value = NullIfWhiteSpace(mediaInfo.Get(
+                StreamKind.General,
+                0,
+                index,
+                InfoKind.Text));
+            if (name is null
+                || value is null
+                || !IsGeneralMetadataTagName(name)
+                || !names.Add(name))
+            {
+                continue;
+            }
+
+            if (name.Equals(SubMuxMetadata.CommentTagName, StringComparison.OrdinalIgnoreCase)
+                && SubMuxMetadata.IsProcessed(null, comment))
+            {
+                continue;
+            }
+
+            tags.Add(new MediaInfoMetadataTag(name, value));
+        }
+
+        return tags;
+    }
+
+    internal static bool IsGeneralMetadataTagName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Equals(SubMuxMetadata.VersionTagName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (ExactTechnicalGeneralFields.Contains(name))
+        {
+            return false;
+        }
+
+        return !TechnicalGeneralFieldPrefixes.Any(prefix =>
+            name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? GetFirst(
+        MediaInfo mediaInfo,
+        StreamKind streamKind,
+        int streamIndex,
+        params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = NullIfWhiteSpace(Get(mediaInfo, streamKind, streamIndex, name));
+            if (value is not null)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static MediaInfoVideoStream ReadVideoStream(MediaInfo mediaInfo, int index) => new(

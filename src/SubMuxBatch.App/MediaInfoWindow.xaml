@@ -122,9 +122,28 @@
                 BorderBrush="#D1D1D1" BorderThickness="0,0,0,1">
             <StackPanel>
                 <TextBlock x:Name="HeadingText" Text="{loc:Loc MediaDetails_Heading}"
-                           FontSize="21" FontWeight="SemiBold" />
+                           FontSize="21"
+                           FontWeight="SemiBold"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                 <TextBlock Margin="0,3,0,0" Text="{loc:Loc MediaDetails_Description}"
                            Foreground="{StaticResource SecondaryTextBrush}" />
+                <TextBlock Margin="0,6,0,0"
+                           Text="{loc:Loc MediaDetails_ProcessedBySubMux}"
+                           Foreground="#107C10"
+                           FontWeight="SemiBold">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsProcessedBySubMux}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </Border>
 

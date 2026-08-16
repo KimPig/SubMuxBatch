@@ -40,8 +40,32 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     public ConversionPlan Plan => _plan;
     public MkvInspection? MkvInspection => _mediaInspection;
     public MediaInfoInspection? DisplayInspection => _displayInspection;
+    public bool IsProcessedBySubMux => _displayInspection?.ProcessedBySubMux == true;
     public string Key => _media.Key.Canonical;
     public string Name => _media.Key.Stem;
+    public string FileName
+    {
+        get
+        {
+            var videoNames = _media.CandidateVideoPaths
+                .Select(Path.GetFileName)
+                .OfType<string>()
+                .ToArray();
+            if (videoNames.Length > 0)
+            {
+                return string.Join(" / ", videoNames);
+            }
+
+            var subtitleNames = new[] { _media.AssPath, _media.SrtPath, _media.SmiPath }
+                .Where(static path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFileName)
+                .OfType<string>()
+                .ToArray();
+            return subtitleNames.Length > 0
+                ? string.Join(" / ", subtitleNames)
+                : Name;
+        }
+    }
     public string Folder => _media.Key.DirectoryPath;
     public string DetectedFiles
     {
@@ -186,7 +210,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 return _mediaInfoStatus;
             }
 
-            var extensionLabel = Path.GetExtension(_media.VideoPath).TrimStart('.').ToUpperInvariant();
+            var extensionLabel = Path.GetExtension(_media.VideoPath).TrimStart('.');
             var containerLabel = !string.IsNullOrWhiteSpace(_displayInspection?.ContainerFormat)
                 ? FormatContainer(_displayInspection.ContainerFormat)
                 : !string.IsNullOrWhiteSpace(_mediaInspection?.ContainerType)
@@ -194,9 +218,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                     : extensionLabel;
             var parts = new List<string>
             {
-                string.IsNullOrWhiteSpace(extensionLabel)
-                    ? containerLabel
-                    : $"{containerLabel} ({extensionLabel})"
+                FormatContainerWithExtension(containerLabel, extensionLabel)
             };
             if (GetDisplayDuration() is > 0 and var duration)
             {
@@ -352,7 +374,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
             var extension = _media.VideoPath is null
                 ? string.Empty
-                : Path.GetExtension(_media.VideoPath).TrimStart('.').ToUpperInvariant();
+                : Path.GetExtension(_media.VideoPath).TrimStart('.');
             var container = !string.IsNullOrWhiteSpace(_displayInspection?.ContainerFormat)
                 ? FormatContainer(_displayInspection.ContainerFormat)
                 : !string.IsNullOrWhiteSpace(_mediaInspection?.ContainerType)
@@ -360,7 +382,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                     : extension;
             var parts = new List<string>
             {
-                string.IsNullOrWhiteSpace(extension) ? container : $"{container} ({extension})"
+                FormatContainerWithExtension(container, extension)
             };
             if (!string.IsNullOrWhiteSpace(_displayInspection?.ContainerProfile))
             {
@@ -726,6 +748,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(Media));
         OnPropertyChanged(nameof(Plan));
         OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(FileName));
         OnPropertyChanged(nameof(Folder));
         OnPropertyChanged(nameof(DetectedFiles));
         OnPropertyChanged(nameof(InputSummary));
@@ -778,6 +801,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(MediaDetailsStructureSummary));
         OnPropertyChanged(nameof(MkvInspection));
         OnPropertyChanged(nameof(DisplayInspection));
+        OnPropertyChanged(nameof(IsProcessedBySubMux));
     }
 
     private static MkvTrackInfo[] GetVideoTracks(MkvInspection inspection) =>
@@ -851,6 +875,11 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         if (container.Contains("AVI", StringComparison.OrdinalIgnoreCase)) return "AVI";
         return container;
     }
+
+    private static string FormatContainerWithExtension(string container, string extension) =>
+        string.IsNullOrWhiteSpace(extension)
+            ? AppText.Get("MediaInfo_ContainerOnly", container)
+            : AppText.Get("MediaInfo_ContainerWithExtension", container, extension.ToLowerInvariant());
 
     private static string FormatLanguage(string? language)
     {

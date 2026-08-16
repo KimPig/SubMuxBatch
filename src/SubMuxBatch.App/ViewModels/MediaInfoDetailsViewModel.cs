@@ -20,6 +20,7 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
     private readonly QueueItemViewModel _source;
     private IReadOnlyList<MediaInfoDetailSection> _sections = [];
     private string _copyText = string.Empty;
+    private bool _isProcessedBySubMux;
 
     public MediaInfoDetailsViewModel(QueueItemViewModel source)
     {
@@ -33,6 +34,7 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
     public string Path => _source.MediaDetailsPath;
     public IReadOnlyList<MediaInfoDetailSection> Sections => _sections;
     public string CopyText => _copyText;
+    public bool IsProcessedBySubMux => _isProcessedBySubMux;
 
     public void Dispose() => _source.PropertyChanged -= Source_PropertyChanged;
 
@@ -52,6 +54,7 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
         var mkvInfo = _source.MkvInspection;
         var sections = new List<MediaInfoDetailSection>();
 
+        _isProcessedBySubMux = mediaInfo?.ProcessedBySubMux == true;
         sections.Add(BuildGeneralSection(mediaInfo, mkvInfo));
         AddVideoSections(sections, mediaInfo, mkvInfo);
         AddAudioSections(sections, mediaInfo, mkvInfo);
@@ -61,12 +64,49 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
         {
             sections.Add(BuildAttachmentsSection(mkvInfo.Attachments));
         }
+        if (mediaInfo?.MetadataTags.Count > 0)
+        {
+            sections.Add(BuildMetadataTagsSection(mediaInfo.MetadataTags));
+        }
+        if (_isProcessedBySubMux)
+        {
+            sections.Add(BuildSubMuxTagsSection(mediaInfo!));
+        }
 
         _sections = sections;
-        _copyText = BuildCopyText(sections);
+        _copyText = BuildCopyText(sections, _isProcessedBySubMux);
         OnPropertyChanged(nameof(Path));
         OnPropertyChanged(nameof(Sections));
         OnPropertyChanged(nameof(CopyText));
+        OnPropertyChanged(nameof(IsProcessedBySubMux));
+    }
+
+    private static MediaInfoDetailSection BuildMetadataTagsSection(
+        IReadOnlyList<MediaInfoMetadataTag> tags) =>
+        new(
+            AppText.Get("MediaDetails_MetadataTags"),
+            tags.Select(static tag => new MediaInfoDetailRow(tag.Name, tag.Value)).ToArray(),
+            false);
+
+    private static MediaInfoDetailSection BuildSubMuxTagsSection(MediaInfoInspection mediaInfo)
+    {
+        var rows = new List<MediaInfoDetailRow>();
+        if (!string.IsNullOrWhiteSpace(mediaInfo.SubMuxBatchVersion))
+        {
+            rows.Add(new MediaInfoDetailRow(
+                SubMuxMetadata.VersionTagName,
+                mediaInfo.SubMuxBatchVersion));
+        }
+
+        if (!string.IsNullOrWhiteSpace(mediaInfo.Comment))
+        {
+            rows.Add(new MediaInfoDetailRow(
+                SubMuxMetadata.CommentTagName,
+                mediaInfo.Comment));
+        }
+
+        EnsureNotEmpty(rows);
+        return new MediaInfoDetailSection(AppText.Get("MediaDetails_SubMuxTags"), rows, true);
     }
 
     private MediaInfoDetailSection BuildGeneralSection(
@@ -248,11 +288,17 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
         return new MediaInfoDetailSection(AppText.Get("MediaDetails_Attachments"), rows, false);
     }
 
-    private string BuildCopyText(IEnumerable<MediaInfoDetailSection> sections)
+    private string BuildCopyText(
+        IEnumerable<MediaInfoDetailSection> sections,
+        bool isProcessedBySubMux)
     {
         var builder = new StringBuilder();
         builder.AppendLine(AppText.Get("MediaDetails_Title", _source.Name));
         builder.AppendLine($"{AppText.Get("MediaDetails_Path")}: {Path}");
+        if (isProcessedBySubMux)
+        {
+            builder.AppendLine(AppText.Get("MediaDetails_ProcessedBySubMux"));
+        }
         foreach (var section in sections)
         {
             builder.AppendLine();

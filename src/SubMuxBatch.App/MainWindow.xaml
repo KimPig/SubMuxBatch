@@ -133,6 +133,7 @@
             </Setter>
         </Style>
         <Style x:Key="QueueHeaderButtonStyle" TargetType="Button">
+            <Setter Property="IsEnabled" Value="{Binding QueueHeaderCommandsEnabled}" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="Padding" Value="12,0" />
             <Setter Property="Background" Value="Transparent" />
@@ -174,19 +175,21 @@
             </Setter>
         </Style>
         <Style x:Key="QueueColumnResizeThumbStyle" TargetType="{x:Type primitives:Thumb}">
-            <Setter Property="Width" Value="10" />
+            <Setter Property="Width" Value="12" />
             <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Margin" Value="0,0,-5,0" />
+            <Setter Property="Margin" Value="0,0,-6,0" />
             <Setter Property="Cursor" Value="SizeWE" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="ToolTip" Value="{loc:Loc Queue_ResizeColumn}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type primitives:Thumb}">
-                        <Border x:Name="ResizeSurface"
-                                Width="1"
-                                HorizontalAlignment="Center"
-                                Background="Transparent" />
+                        <Grid Background="Transparent">
+                            <Border x:Name="ResizeSurface"
+                                    Width="1"
+                                    HorizontalAlignment="Center"
+                                    Background="Transparent" />
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ResizeSurface" Property="Background" Value="{StaticResource AccentBrush}" />
@@ -507,7 +510,7 @@
                                             <Border Grid.Column="0" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0"
                                                     Visibility="{Binding DataContext.FileColumnVisibility, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
                                                 <StackPanel Margin="12,5" ToolTip="{Binding Folder}">
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                                     <TextBlock Text="{Binding Folder}" Margin="0,3,0,0" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
                                             </Border>
@@ -696,12 +699,36 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Name, Mode=OneWay}"
-                                               FontWeight="SemiBold"
-                                               FontSize="13"
-                                               VerticalAlignment="Center"
-                                               ToolTip="{Binding Name}"
-                                               TextTrimming="CharacterEllipsis" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding FileName, Mode=OneWay}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="{Binding FileName}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1"
+                                                   Margin="12,0,0,0"
+                                                   Text="{loc:Loc MediaDetails_ProcessedBySubMux}"
+                                                   Foreground="#107C10"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsProcessedBySubMux}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
                                     <Button Grid.Column="1"
                                             Margin="12,-2,0,-2"
                                             Padding="9,2"
@@ -723,8 +750,11 @@
 
                             <Grid Grid.Row="1"
                                   Margin="12,7,8,8">
-                                <StackPanel>
-                                    <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" ClipToBounds="True">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="20" />
@@ -767,17 +797,19 @@
                                                 <RowDefinition Height="Auto" />
                                             </Grid.RowDefinitions>
                                             <TextBlock Text="{loc:Loc Detail_VideoFile}" Foreground="{StaticResource SecondaryTextBrush}" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding VideoFileNamesDisplay}"
-                                                       ToolTip="{Binding VideoPathDisplay}"
-                                                       TextWrapping="Wrap" />
+                                             <TextBlock Grid.Column="1"
+                                                        Text="{Binding VideoFileNamesDisplay}"
+                                                        ToolTip="{Binding VideoPathDisplay}"
+                                                        TextWrapping="NoWrap"
+                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Row="1" Margin="0,3,0,0"
                                                        Text="{loc:Loc Detail_ExternalSubtitles}"
                                                        Foreground="{StaticResource SecondaryTextBrush}" />
-                                            <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,3,0,0"
-                                                       Text="{Binding SubtitlePathsDisplay}"
-                                                       ToolTip="{Binding SubtitlePathDisplay}"
-                                                       TextWrapping="Wrap" />
+                                             <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,3,0,0"
+                                                        Text="{Binding SubtitlePathsDisplay}"
+                                                        ToolTip="{Binding SubtitlePathDisplay}"
+                                                        TextWrapping="NoWrap"
+                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Row="2" Margin="0,3,0,0"
                                                        Text="{loc:Loc Detail_Action}"
                                                        Foreground="{StaticResource SecondaryTextBrush}" />
@@ -785,8 +817,9 @@
                                                        Text="{Binding PlanDescription}"
                                                        TextWrapping="Wrap" />
                                         </Grid>
-                                    </Grid>
-                                    <TextBlock Margin="0,5,0,0"
+                                </Grid>
+                                <TextBlock Grid.Row="1"
+                                           Margin="0,5,0,0"
                                                Text="{Binding IssuesText}"
                                                ToolTip="{Binding IssuesText}"
                                                Foreground="{Binding StatusForeground}"
@@ -803,8 +836,7 @@
                                                 </Style.Triggers>
                                             </Style>
                                         </TextBlock.Style>
-                                    </TextBlock>
-                                </StackPanel>
+                                </TextBlock>
                             </Grid>
                         </Grid>
                     </Grid>

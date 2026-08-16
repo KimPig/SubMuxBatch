@@ -1,9 +1,11 @@
 using System.Text;
+using System.Xml.Linq;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Planning;
 using SubMuxBatch.Core.Processing;
 using Xunit.Abstractions;
@@ -38,6 +40,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var ass = Path.Combine(root, "new.ass");
             var srt = Path.Combine(root, "new.srt");
             var font = Path.Combine(root, "test-family.ttf");
+            var globalTags = Path.Combine(root, "submux-tags.xml");
             var outputPath = Path.Combine(root, "output.mkv");
             await File.WriteAllTextAsync(sourceSubtitle, "1\n00:00:00,000 --> 00:00:01,000\nSource\n");
             await File.WriteAllTextAsync(
@@ -45,6 +48,12 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Test Family,40,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,20,20,30,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Test\n");
             await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
             await File.WriteAllBytesAsync(font, [1, 2, 3, 4, 5]);
+            var tagDocument = XDocument.Parse(SubMuxMetadata.CreateGlobalTagsXml("2026.08.17"));
+            tagDocument.Root?.Element("Tag")?.Add(
+                new XElement("Simple",
+                    new XElement("Name", "TITLE"),
+                    new XElement("String", "Metadata smoke title")));
+            await File.WriteAllTextAsync(globalTags, tagDocument.ToString());
 
             var runner = new ExternalProcessRunner();
             var sourceResult = await runner.RunAsync(new ProcessRequest(
@@ -60,7 +69,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 ass,
                 srt,
                 outputPath,
-                fontAttachments: [attachment]);
+                fontAttachments: [attachment],
+                globalTagsPath: globalTags);
 
             var sourceInspection = await client.InspectAsync(source);
             var outputInspection = await client.InspectAsync(outputPath);
@@ -71,6 +81,13 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var added = Assert.Single(outputInspection.Attachments);
             Assert.Equal("test-family.ttf", added.FileName);
             Assert.Equal("font/ttf", added.ContentType);
+            var mediaInfo = new MediaInfoClient().Inspect(outputPath);
+            Assert.True(mediaInfo.ProcessedBySubMux);
+            Assert.Equal("2026.08.17", mediaInfo.SubMuxBatchVersion);
+            Assert.Equal(SubMuxMetadata.CommentValue, mediaInfo.Comment);
+            var metadataTag = Assert.Single(mediaInfo.MetadataTags);
+            Assert.Equal("Title", metadataTag.Name, ignoreCase: true);
+            Assert.Equal("Metadata smoke title", metadataTag.Value);
         }
         finally
         {

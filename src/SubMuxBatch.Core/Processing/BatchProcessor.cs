@@ -5,6 +5,7 @@ using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
 using SubMuxBatch.Core.Localization;
+using SubMuxBatch.Core.Media;
 
 namespace SubMuxBatch.Core.Processing;
 
@@ -67,6 +68,16 @@ public sealed class BatchProcessor(
             await using var workspace = JobWorkspace.Create(media.Key.DirectoryPath);
             var seConv = new SeConvClient(dependencies.SeConv.Path, processRunner);
             var mkvMerge = new MkvMergeClient(dependencies.MkvMerge.Path, processRunner);
+            string? globalTagsPath = null;
+            if (settings.AddSubMuxTag)
+            {
+                globalTagsPath = Path.Combine(workspace.Path, "submux-tags.xml");
+                await File.WriteAllTextAsync(
+                    globalTagsPath,
+                    SubMuxMetadata.CreateGlobalTagsXml(),
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -208,7 +219,8 @@ public sealed class BatchProcessor(
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
-                fontAttachments: fontAttachments).ConfigureAwait(false);
+                fontAttachments: fontAttachments,
+                globalTagsPath: globalTagsPath).ConfigureAwait(false);
 
             Report(JobState.Verifying, 94, CoreText.Get("Batch_VerifyOutput"));
             var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
@@ -235,9 +247,37 @@ public sealed class BatchProcessor(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            var partialLength = new FileInfo(partialPath).Length;
             // Commit with an atomic, non-overwriting move. Selecting the candidate
             // here keeps concurrent jobs from silently replacing one another.
             var outputPath = CommitToAvailableOutput(partialPath, preferredOutputPath);
+
+            Report(JobState.Verifying, 98, CoreText.Get("Batch_VerifyCommittedOutput"));
+            ValidateCommittedOutputFile(outputPath, partialLength);
+            var committedInspection = await mkvMerge.InspectAsync(
+                    outputPath,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var committedValidationErrors = MkvMergeClient.ValidateOutput(
+                sourceInspection,
+                committedInspection,
+                removeExistingSubtitles: settings.RemoveExistingSubtitles,
+                removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
+                removeChapters: settings.RemoveChapters,
+                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                    ? settings.SelectedAudioLanguage
+                    : null,
+                addedFontAttachments: fontAttachments);
+            if (committedValidationErrors.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    CoreText.Get("Batch_OutputValidationFailed")
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, committedValidationErrors));
+            }
+
+            Report(JobState.Verifying, 99, CoreText.Get("Batch_CleanupWorkspace"));
+            await workspace.DisposeAsync().ConfigureAwait(false);
 
             var finalState = warnings.Count > 0 ? JobState.SucceededWithWarnings : JobState.Succeeded;
             Report(finalState, 100, CoreText.Get("Batch_Completed", outputPath));
@@ -411,9 +451,25 @@ public sealed class BatchProcessor(
         throw new IOException("No available output filename could be allocated.");
     }
 
+    internal static void ValidateCommittedOutputFile(string outputPath, long expectedLength)
+    {
+        var file = new FileInfo(outputPath);
+        if (!file.Exists || file.Length == 0)
+        {
+            throw new InvalidOperationException(CoreText.Get("Batch_CommittedOutputMissing", outputPath));
+        }
+
+        if (file.Length != expectedLength)
+        {
+            throw new InvalidOperationException(
+                CoreText.Get("Batch_CommittedOutputSizeMismatch", expectedLength, file.Length));
+        }
+    }
+
     private sealed class JobWorkspace : IAsyncDisposable
     {
         private readonly string _parent;
+        private int _disposed;
 
         private JobWorkspace(string parent, string path)
         {
@@ -433,6 +489,11 @@ public sealed class BatchProcessor(
 
         public ValueTask DisposeAsync()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return ValueTask.CompletedTask;
+            }
+
             try
             {
                 var resolved = System.IO.Path.GetFullPath(Path);
