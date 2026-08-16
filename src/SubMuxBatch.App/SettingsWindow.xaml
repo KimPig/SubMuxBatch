@@ -420,6 +420,14 @@
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_RemoveSubtitlesHelp}" />
+                                <CheckBox x:Name="RemoveChaptersCheckBox"
+                                          Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_RemoveChapters}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_RemoveChaptersHelp}" />
                                 <CheckBox x:Name="RemoveExistingFontAttachmentsCheckBox"
                                           Margin="0,14,0,0">
                                     <TextBlock Text="{loc:Loc Settings_RemoveFonts}" TextWrapping="Wrap" />

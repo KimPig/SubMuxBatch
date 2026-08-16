@@ -226,6 +226,8 @@
   "Settings_OutputPrefix": "출력 파일 접두사",
   "Settings_RemoveSubtitles": "원본 영상의 내장 자막을 모두 제거",
   "Settings_RemoveSubtitlesHelp": "해제하면 기존 자막 형식과 트랙은 그대로 보존하고, 새 ASS와 SRT를 마지막에 추가합니다. 새 ASS가 기본 자막이 되도록 기존 자막의 기본 플래그만 해제합니다.",
+  "Settings_RemoveChapters": "원본 영상의 챕터 제거",
+  "Settings_RemoveChaptersHelp": "원본 영상에 포함된 챕터 정보를 결과에서 제외합니다.",
   "Settings_RemoveFonts": "원본 영상의 기존 폰트 첨부 파일을 제거",
   "Settings_RemoveFontsHelp": "원본 영상에 포함된 글꼴 첨부 파일을 결과에서 제외합니다. 폰트가 아닌 다른 첨부파일은 보존합니다.",
   "Settings_AttachFonts": "ASS 스타일 폰트 파일 첨부",

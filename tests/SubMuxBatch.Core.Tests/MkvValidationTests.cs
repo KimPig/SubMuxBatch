@@ -173,6 +173,67 @@ public sealed class MkvValidationTests
     }
 
     [Fact]
+    public void ChapterRemovalRequiresAnOutputWithoutChapters()
+    {
+        var source = new MkvInspection(
+            [Track("video", "V_MPEGH/ISO/HEVC")],
+            [],
+            4);
+        var outputWithoutChapters = new MkvInspection(
+            [
+                Track("video", "V_MPEGH/ISO/HEVC"),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor"),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor")
+            ],
+            [],
+            0);
+        var outputWithChapters = outputWithoutChapters with { ChapterCount = 1 };
+
+        Assert.Empty(MkvMergeClient.ValidateOutput(
+            source,
+            outputWithoutChapters,
+            removeChapters: true));
+        Assert.NotEmpty(MkvMergeClient.ValidateOutput(
+            source,
+            outputWithChapters,
+            removeChapters: true));
+    }
+
+    [Fact]
+    public async Task MuxChapterRemovalUsesInputOptionBeforeSourceFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-chapter-args-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Arial,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            var runner = new MuxArgumentRunner(output);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                removeChapters: true);
+
+            Assert.NotNull(runner.MuxArguments);
+            var chapterOptionIndex = runner.MuxArguments!.IndexOf("--no-chapters");
+            Assert.True(chapterOptionIndex >= 0);
+            Assert.True(chapterOptionIndex < runner.MuxArguments.IndexOf(source));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FontRemovalPreservesOnlyNonFontAttachments()
     {
         var source = new MkvInspection(

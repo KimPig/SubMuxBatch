@@ -204,6 +204,7 @@ public sealed class BatchProcessor(
                 cancellationToken,
                 removeExistingSubtitles: settings.RemoveExistingSubtitles,
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
+                removeChapters: settings.RemoveChapters,
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
@@ -217,6 +218,7 @@ public sealed class BatchProcessor(
                 outputInspection,
                 removeExistingSubtitles: settings.RemoveExistingSubtitles,
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
+                removeChapters: settings.RemoveChapters,
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,

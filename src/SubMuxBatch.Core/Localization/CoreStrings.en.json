@@ -68,6 +68,7 @@
   "Mkv_ValidationPreservedAttachment": "Information for preserved attachment {0} differs from the output.",
   "Mkv_ValidationAddedFont": "Information for the new ASS font attachment '{0}' differs from the output.",
   "Mkv_ValidationChapterCount": "The source chapter count was not preserved.",
+  "Mkv_ValidationChaptersRemoved": "Chapters remain in the output even though chapter removal is enabled.",
   "Mkv_ValidationSubtitleCount": "The output should contain {0} subtitle tracks, but contains {1}.",
   "Mkv_AddedAssLabel": "Added ASS",
   "Mkv_AddedSrtLabel": "Added SRT",

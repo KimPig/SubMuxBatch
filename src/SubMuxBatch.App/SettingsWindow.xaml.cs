@@ -58,6 +58,7 @@ public partial class SettingsWindow : Window
         AllowSubtitleSuffixMatchCheckBox.IsChecked = settings.AllowSubtitleSuffixMatch;
         RemoveExistingSubtitlesCheckBox.IsChecked = settings.RemoveExistingSubtitles;
         RemoveExistingFontAttachmentsCheckBox.IsChecked = settings.RemoveExistingFontAttachments;
+        RemoveChaptersCheckBox.IsChecked = settings.RemoveChapters;
         AttachAssStyleFontsCheckBox.IsChecked = settings.AttachAssStyleFonts;
         FilterAudioTracksByLanguageCheckBox.IsChecked = settings.FilterAudioTracksByLanguage;
         AudioLanguageComboBox.SelectedValue = settings.SelectedAudioLanguage.ToString();
@@ -160,6 +161,7 @@ public partial class SettingsWindow : Window
             updated.AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatchCheckBox.IsChecked == true;
             updated.RemoveExistingSubtitles = RemoveExistingSubtitlesCheckBox.IsChecked == true;
             updated.RemoveExistingFontAttachments = RemoveExistingFontAttachmentsCheckBox.IsChecked == true;
+            updated.RemoveChapters = RemoveChaptersCheckBox.IsChecked == true;
             updated.AttachAssStyleFonts = AttachAssStyleFontsCheckBox.IsChecked == true;
             updated.FilterAudioTracksByLanguage = FilterAudioTracksByLanguageCheckBox.IsChecked == true;
             if (AudioLanguageComboBox.SelectedValue is not string selectedAudioLanguage

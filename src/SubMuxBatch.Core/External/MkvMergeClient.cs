@@ -124,6 +124,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         CancellationToken cancellationToken = default,
         bool removeExistingSubtitles = true,
         bool removeExistingFontAttachments = false,
+        bool removeChapters = false,
         AudioTrackLanguage? keepOnlyAudioLanguage = null,
         IReadOnlyList<FontAttachmentFile>? fontAttachments = null)
     {
@@ -162,6 +163,11 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                 arguments.Add("--default-track-flag");
                 arguments.Add($"{track.Id}:no");
             }
+        }
+
+        if (removeChapters)
+        {
+            arguments.Add("--no-chapters");
         }
 
         if (removeExistingFontAttachments && sourceInspection is not null)
@@ -300,6 +306,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         MkvInspection output,
         bool removeExistingSubtitles = true,
         bool removeExistingFontAttachments = false,
+        bool removeChapters = false,
         AudioTrackLanguage? keepOnlyAudioLanguage = null,
         IReadOnlyList<FontAttachmentFile>? addedFontAttachments = null)
     {
@@ -399,8 +406,15 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             }
         }
 
-        if (source.ChapterCount.HasValue && output.ChapterCount.HasValue
-            && source.ChapterCount.Value != output.ChapterCount.Value)
+        if (removeChapters)
+        {
+            if (output.ChapterCount is > 0)
+            {
+                errors.Add(CoreText.Get("Mkv_ValidationChaptersRemoved"));
+            }
+        }
+        else if (source.ChapterCount.HasValue && output.ChapterCount.HasValue
+                 && source.ChapterCount.Value != output.ChapterCount.Value)
         {
             errors.Add(CoreText.Get("Mkv_ValidationChapterCount"));
         }

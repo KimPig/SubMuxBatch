@@ -226,6 +226,8 @@
   "Settings_OutputPrefix": "Output file prefix",
   "Settings_RemoveSubtitles": "Remove all embedded subtitles from the source video",
   "Settings_RemoveSubtitlesHelp": "When disabled, existing subtitle tracks are preserved and the new ASS and SRT tracks are appended. Existing default flags are cleared so the new ASS track can be the default.",
+  "Settings_RemoveChapters": "Remove chapters from the source video",
+  "Settings_RemoveChaptersHelp": "Excludes chapter information contained in the source video from the result.",
   "Settings_RemoveFonts": "Remove existing font attachments from the source video",
   "Settings_RemoveFontsHelp": "Excludes font attachments from the source video while preserving non-font attachments.",
   "Settings_AttachFonts": "Attach ASS style font files",

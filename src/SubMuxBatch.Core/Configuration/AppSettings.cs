@@ -45,6 +45,7 @@ public sealed class AppSettings
     public bool AllowSubtitleSuffixMatch { get; set; }
     public bool RemoveExistingSubtitles { get; set; } = true;
     public bool RemoveExistingFontAttachments { get; set; } = false;
+    public bool RemoveChapters { get; set; } = false;
     public bool AttachAssStyleFonts { get; set; } = true;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
@@ -169,6 +170,7 @@ public sealed class AppSettings
         AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatch,
         RemoveExistingSubtitles = RemoveExistingSubtitles,
         RemoveExistingFontAttachments = RemoveExistingFontAttachments,
+        RemoveChapters = RemoveChapters,
         AttachAssStyleFonts = AttachAssStyleFonts,
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,

@@ -68,6 +68,7 @@
   "Mkv_ValidationPreservedAttachment": "보존 대상인 {0}번째 첨부 파일 정보가 결과와 다릅니다.",
   "Mkv_ValidationAddedFont": "새 ASS 폰트 첨부 파일 '{0}'의 정보가 결과와 다릅니다.",
   "Mkv_ValidationChapterCount": "원본 챕터 수가 보존되지 않았습니다.",
+  "Mkv_ValidationChaptersRemoved": "챕터 제거 설정을 사용했지만 결과에 챕터가 남아 있습니다.",
   "Mkv_ValidationSubtitleCount": "결과의 자막 트랙은 {0}개여야 하지만 {1}개입니다.",
   "Mkv_AddedAssLabel": "추가된 ASS",
   "Mkv_AddedSrtLabel": "추가된 SRT",
