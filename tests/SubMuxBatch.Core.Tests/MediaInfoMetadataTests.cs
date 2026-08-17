@@ -19,6 +19,7 @@ public sealed class MediaInfoMetadataTests
     [InlineData("OverallBitRate")]
     [InlineData("Encoded_Application")]
     [InlineData("SUBMUX_BATCH_VERSION")]
+    [InlineData("SUBMUX_BATCH_PROCESSED")]
     public void ExcludesTechnicalAndSubMuxFields(string name) =>
         Assert.False(MediaInfoClient.IsGeneralMetadataTagName(name));
 }

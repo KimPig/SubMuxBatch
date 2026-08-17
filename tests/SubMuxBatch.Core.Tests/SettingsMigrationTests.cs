@@ -43,6 +43,8 @@ public sealed class SettingsMigrationTests : IDisposable
             Path.Combine(_root, "legacy", "settings.json"));
 
         Assert.Equal("SubMux_", loaded.OutputPrefix);
+        Assert.False(loaded.RemoveExistingSubtitles);
+        Assert.False(AppSettings.Deserialize("{}").RemoveExistingSubtitles);
     }
 
     [Fact]

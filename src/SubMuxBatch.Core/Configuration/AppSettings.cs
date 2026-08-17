@@ -43,7 +43,7 @@ public sealed class AppSettings
     public string OutputPrefix { get; set; } = OutputFileNaming.DefaultPrefix;
     public bool IncludeSubdirectories { get; set; }
     public bool AllowSubtitleSuffixMatch { get; set; }
-    public bool RemoveExistingSubtitles { get; set; } = true;
+    public bool RemoveExistingSubtitles { get; set; } = false;
     public bool RemoveExistingFontAttachments { get; set; } = false;
     public bool RemoveChapters { get; set; } = false;
     public bool AttachAssStyleFonts { get; set; } = true;

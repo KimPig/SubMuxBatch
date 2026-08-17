@@ -53,7 +53,9 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(runner.SeConvCalls, args => args.Contains("subrip"));
         Assert.Contains(runner.SeConvCalls, args => args.Contains("assa"));
         Assert.Contains(SubMuxMetadata.VersionTagName, runner.MuxedGlobalTagsText);
-        Assert.Contains(SubMuxMetadata.CommentValue, runner.MuxedGlobalTagsText);
+        Assert.Contains(SubMuxMetadata.ProcessedTagName, runner.MuxedGlobalTagsText);
+        Assert.Contains(SubMuxMetadata.ProcessedValue, runner.MuxedGlobalTagsText);
+        Assert.DoesNotContain(SubMuxMetadata.LegacyCommentTagName, runner.MuxedGlobalTagsText);
         Assert.True(File.Exists(mkv));
         Assert.False(workspaceExistsWhenCompleted);
         Assert.Empty(Directory.EnumerateDirectories(_root, ".submuxbatch-*"));

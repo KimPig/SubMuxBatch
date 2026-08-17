@@ -98,10 +98,18 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
                 mediaInfo.SubMuxBatchVersion));
         }
 
-        if (!string.IsNullOrWhiteSpace(mediaInfo.Comment))
+        if (!string.IsNullOrWhiteSpace(mediaInfo.SubMuxProcessedMarker))
         {
             rows.Add(new MediaInfoDetailRow(
-                SubMuxMetadata.CommentTagName,
+                SubMuxMetadata.ProcessedTagName,
+                mediaInfo.SubMuxProcessedMarker));
+        }
+        else if (mediaInfo.Comment?.Contains(
+                     SubMuxMetadata.ProcessedValue,
+                     StringComparison.OrdinalIgnoreCase) == true)
+        {
+            rows.Add(new MediaInfoDetailRow(
+                SubMuxMetadata.LegacyCommentTagName,
                 mediaInfo.Comment));
         }
 

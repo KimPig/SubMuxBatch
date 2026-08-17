@@ -6,8 +6,9 @@ namespace SubMuxBatch.Core.Media;
 public static class SubMuxMetadata
 {
     public const string VersionTagName = "SUBMUX_BATCH_VERSION";
-    public const string CommentTagName = "COMMENT";
-    public const string CommentValue = "Processed by SubMux Batch";
+    public const string ProcessedTagName = "SUBMUX_BATCH_PROCESSED";
+    public const string ProcessedValue = "Processed by SubMux Batch";
+    public const string LegacyCommentTagName = "COMMENT";
 
     public static string CreateGlobalTagsXml(string? version = null) => new XDocument(
         new XDeclaration("1.0", "UTF-8", "yes"),
@@ -18,8 +19,8 @@ public static class SubMuxMetadata
                     new XElement("Name", VersionTagName),
                     new XElement("String", NormalizeVersion(version) ?? GetApplicationVersion())),
                 new XElement("Simple",
-                    new XElement("Name", CommentTagName),
-                    new XElement("String", CommentValue)))))
+                    new XElement("Name", ProcessedTagName),
+                    new XElement("String", ProcessedValue)))))
         .ToString();
 
     public static string GetApplicationVersion()
@@ -35,9 +36,13 @@ public static class SubMuxMetadata
                ?? "Unknown";
     }
 
-    public static bool IsProcessed(string? version, string? comment) =>
+    public static bool IsProcessed(
+        string? version,
+        string? processedMarker,
+        string? legacyComment = null) =>
         !string.IsNullOrWhiteSpace(version)
-        || comment?.Contains(CommentValue, StringComparison.OrdinalIgnoreCase) == true;
+        || !string.IsNullOrWhiteSpace(processedMarker)
+        || legacyComment?.Contains(ProcessedValue, StringComparison.OrdinalIgnoreCase) == true;
 
     private static string? GetInformationalVersion(Assembly? assembly) =>
         NormalizeVersion(assembly?

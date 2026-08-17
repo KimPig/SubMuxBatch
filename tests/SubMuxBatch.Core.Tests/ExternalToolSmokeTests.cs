@@ -84,7 +84,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var mediaInfo = new MediaInfoClient().Inspect(outputPath);
             Assert.True(mediaInfo.ProcessedBySubMux);
             Assert.Equal("2026.08.17", mediaInfo.SubMuxBatchVersion);
-            Assert.Equal(SubMuxMetadata.CommentValue, mediaInfo.Comment);
+            Assert.Equal(SubMuxMetadata.ProcessedValue, mediaInfo.SubMuxProcessedMarker);
+            Assert.Null(mediaInfo.Comment);
             var metadataTag = Assert.Single(mediaInfo.MetadataTags);
             Assert.Equal("Title", metadataTag.Name, ignoreCase: true);
             Assert.Equal("Metadata smoke title", metadataTag.Value);
@@ -193,6 +194,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 AssStyleLine = ArialStyleLine,
                 PlayResX = 1280,
                 PlayResY = 720,
+                RemoveExistingSubtitles = true,
                 AttachAssStyleFonts = false
             };
 
@@ -358,7 +360,13 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var result = await new BatchProcessor(runner).ProcessAsync(
                 media,
                 ConversionPlanFactory.Create(media),
-                new AppSettings { OutputPrefix = "result_", AssStyleLine = ArialStyleLine, AttachAssStyleFonts = false },
+                new AppSettings
+                {
+                    OutputPrefix = "result_",
+                    AssStyleLine = ArialStyleLine,
+                    RemoveExistingSubtitles = true,
+                    AttachAssStyleFonts = false
+                },
                 new DependencyReport(
                     new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"),
                     new ToolDependency("Subtitle Edit seconv", "seconv.exe", seConvPath, "smoke")));

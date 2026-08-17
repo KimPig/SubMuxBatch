@@ -93,6 +93,7 @@ public sealed record MediaInfoInspection(
     int MenuCount,
     IReadOnlyList<MediaInfoMetadataTag> MetadataTags,
     string? SubMuxBatchVersion,
+    string? SubMuxProcessedMarker,
     string? Comment,
     bool ProcessedBySubMux);
 
@@ -189,6 +190,13 @@ public sealed class MediaInfoClient
                 SubMuxMetadata.VersionTagName,
                 "SubMuxBatchVersion",
                 "SubMux Batch Version");
+            var subMuxProcessedMarker = GetFirst(
+                mediaInfo,
+                StreamKind.General,
+                0,
+                SubMuxMetadata.ProcessedTagName,
+                "SubMuxBatchProcessed",
+                "SubMux Batch Processed");
             var comment = NullIfWhiteSpace(Get(mediaInfo, StreamKind.General, 0, "Comment"));
             var metadataTags = ReadMetadataTags(mediaInfo, comment);
 
@@ -210,8 +218,9 @@ public sealed class MediaInfoClient
                 mediaInfo.Count_Get(StreamKind.Menu),
                 metadataTags,
                 subMuxVersion,
+                subMuxProcessedMarker,
                 comment,
-                SubMuxMetadata.IsProcessed(subMuxVersion, comment));
+                SubMuxMetadata.IsProcessed(subMuxVersion, subMuxProcessedMarker, comment));
         }
         finally
         {
@@ -246,8 +255,8 @@ public sealed class MediaInfoClient
                 continue;
             }
 
-            if (name.Equals(SubMuxMetadata.CommentTagName, StringComparison.OrdinalIgnoreCase)
-                && SubMuxMetadata.IsProcessed(null, comment))
+            if (name.Equals(SubMuxMetadata.LegacyCommentTagName, StringComparison.OrdinalIgnoreCase)
+                && SubMuxMetadata.IsProcessed(null, null, comment))
             {
                 continue;
             }
@@ -261,7 +270,8 @@ public sealed class MediaInfoClient
     internal static bool IsGeneralMetadataTagName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)
-            || name.Equals(SubMuxMetadata.VersionTagName, StringComparison.OrdinalIgnoreCase))
+            || name.Equals(SubMuxMetadata.VersionTagName, StringComparison.OrdinalIgnoreCase)
+            || name.Equals(SubMuxMetadata.ProcessedTagName, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
