@@ -40,6 +40,7 @@ public sealed class AppSettings
     public string? MkvMergePath { get; set; }
     public string? SeConvPath { get; set; }
     public AppLanguage Language { get; set; } = AppLanguage.System;
+    public bool CheckForUpdatesAutomatically { get; set; } = true;
     public string OutputPrefix { get; set; } = OutputFileNaming.DefaultPrefix;
     public bool IncludeSubdirectories { get; set; }
     public bool AllowSubtitleSuffixMatch { get; set; }
@@ -166,6 +167,7 @@ public sealed class AppSettings
         MkvMergePath = MkvMergePath,
         SeConvPath = SeConvPath,
         Language = Language,
+        CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,
         OutputPrefix = OutputPrefix,
         IncludeSubdirectories = IncludeSubdirectories,
         AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatch,

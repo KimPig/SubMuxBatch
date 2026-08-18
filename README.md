@@ -12,6 +12,12 @@ MKVToolNix and Subtitle Edit's command-line converter are external dependencies 
 
 The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
 
+### Automatic updates
+
+**Check for updates when the application starts** is enabled by default. You can also use **Check now** beside this option in Settings. SubMux Batch checks the latest public GitHub Release without requiring a GitHub account. When a newer date version and a matching Windows package are available, it asks before downloading anything. Choosing **Update** downloads the release ZIP, verifies its size and GitHub-provided SHA-256 digest when available, safely extracts it below `%LocalAppData%\SubMuxBatch\updates`, replaces the application files after the current process exits, and starts SubMux Batch again.
+
+Update-check or network failures never prevent the current application from starting. The updater overwrites only files supplied by the SubMux Batch release package; unrelated files such as separately installed `mkvmerge.exe` and `seconv.exe` are left untouched. If the application directory requires administrator permission, Windows displays the standard elevation prompt when applying the update.
+
 ## Supported video inputs
 
 Supported input containers are **MKV, MP4, M4V, MOV, AVI, TS, MTS, M2TS, and WebM**. Output is always MKV. Container conversion is performed by `mkvmerge` without re-encoding the video or audio streams.
@@ -37,7 +43,7 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 - **Remove all existing subtitle tracks from the source video** is disabled by default. When enabled, existing tracks are replaced by the selected ASS and SRT. When disabled, every existing subtitle track is retained and the new ASS/SRT tracks are appended. The subtitle codec or representation may change when a source-container format is remuxed into Matroska; for example, MP4 Timed Text is stored as an SRT-compatible text track. Existing subtitle default flags are cleared so that only the new ASS is the default.
 - When **Remove chapters from the source video** is enabled, all source chapter information is excluded from the result. Chapters are preserved by default.
 - When **Remove font attachments from the source video** is enabled, font attachments are removed while cover art and other attachments are preserved.
-- When **Attach ASS style font files** is enabled, SubMux Batch reads the font families used by the final ASS, finds matching TTF/OTF font files installed on Windows by their internal family metadata, and attaches the available family variants to the result. If any required font cannot be found, the job is skipped without creating an output file and a warning is logged. This can be enabled together with font removal: old source fonts are removed first and the fonts required by the current ASS are then attached.
+- When **Attach ASS style font files** is enabled, SubMux Batch analyzes the font face actually referenced by visible `Dialogue` text, including inline font, weight, italic, reset, transform, and drawing-mode tags. It selects the closest installed TTF/OTF/TTC/OTC face by OpenType names and Windows font registration instead of attaching every style or family variant. If a required font cannot be found, the job is skipped without creating an output file and a warning is logged. This can be enabled together with font removal: old source fonts are removed first and the fonts required by the current ASS are then attached.
 - Video, audio, attachments, and chapters are preserved by default unless their corresponding removal or filtering option is enabled. When **Keep only audio tracks in the selected language** is enabled for a multi-audio file, all English, Japanese, or Korean tracks in the selected language are retained and other audio tracks are removed. A single audio track is always preserved. If the selected language is absent, that job is skipped without creating a silent output file.
 - The finished MKV structure is inspected before the temporary output is committed to its final filename.
 - New subtitle tracks use the Korean language tag (`kor`). ASS is the default track, SRT is non-default, and neither track is forced.
@@ -102,7 +108,9 @@ Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1
 
 **Attach ASS style font files** is enabled by default for portable MKV output.
 
-SubMux Batch matches the ASS `Fontname` against the internal family-name metadata of installed Windows fonts instead of guessing from filenames. It attaches matching `.ttf`, `.otf`, `.ttc`, and `.otc` files with an appropriate font MIME type. Available regular, bold, italic, and bold-italic family files are included so ASS inline styling remains usable.
+SubMux Batch matches ASS `Fontname` values against OpenType full, PostScript, WWS, legacy, and typographic family names before falling back to Windows registered font names. Legacy family names are checked before broader typographic groups because common Windows ASS names such as Arial and Malgun Gothic otherwise include Narrow, Light, or Semilight designs. Family matches use the requested weight and italic state to select one face; full or PostScript names directly identify a face. Only faces referenced by actual `Dialogue` text are selected. New files are deduplicated by SHA-256, and different fonts with the same filename receive unique MKV attachment names.
+
+When a font is found only through a Windows registered name, it is still attached and the job continues. A warning explains that players on other operating systems might not associate that Windows alias with the font's different internal name. SubMux Batch does not rewrite the ASS or attempt to predict player glyph fallback.
 
 Font files can have separate redistribution terms. **The user is responsible for verifying that each attached font's license permits redistribution.** SubMux Batch does not make or enforce that licensing decision.
 

@@ -428,13 +428,13 @@ public sealed class MkvValidationTests
                 ass,
                 srt,
                 output,
-                fontAttachments: [new FontAttachmentFile(font, "font/otf")]);
+                fontAttachments: [new FontAttachmentFile(font, "font/otf", "family-bold-a1b2c3d4.otf")]);
 
             Assert.NotNull(runner.MuxArguments);
             Assert.Contains("--attachment-mime-type", runner.MuxArguments!);
             Assert.Contains("font/otf", runner.MuxArguments!);
             Assert.Contains("--attachment-name", runner.MuxArguments!);
-            Assert.Contains("family-bold.otf", runner.MuxArguments!);
+            Assert.Contains("family-bold-a1b2c3d4.otf", runner.MuxArguments!);
             Assert.Contains("--attach-file", runner.MuxArguments!);
             Assert.Contains(font, runner.MuxArguments!);
         }

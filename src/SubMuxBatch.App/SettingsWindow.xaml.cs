@@ -43,6 +43,7 @@ public partial class SettingsWindow : Window
         {
             LanguageComboBox.SelectedValue = AppLanguage.System.ToString();
         }
+        CheckForUpdatesAutomaticallyCheckBox.IsChecked = settings.CheckForUpdatesAutomatically;
 
         detectedDependencies ??= new DependencyLocator().Locate(
             settings.MkvMergePath,
@@ -86,6 +87,28 @@ public partial class SettingsWindow : Window
     }
 
     public AppSettings Settings { get; private set; }
+    public Func<Window, Task>? UpdateCheckRequested { get; set; }
+
+    private async void CheckForUpdatesNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (UpdateCheckRequested is null)
+        {
+            return;
+        }
+
+        CheckForUpdatesNowButton.IsEnabled = false;
+        var originalContent = CheckForUpdatesNowButton.Content;
+        CheckForUpdatesNowButton.Content = AppText.Get("Settings_CheckingForUpdates");
+        try
+        {
+            await UpdateCheckRequested(this);
+        }
+        finally
+        {
+            CheckForUpdatesNowButton.Content = originalContent;
+            CheckForUpdatesNowButton.IsEnabled = true;
+        }
+    }
 
     private void BrowseMkvMerge_Click(object sender, RoutedEventArgs e) =>
         BrowseExecutable(MkvMergePathTextBox, $"mkvmerge.exe|mkvmerge.exe|{AppText.Get("Common_Executable")}|*.exe");
@@ -155,6 +178,7 @@ public partial class SettingsWindow : Window
                 throw new InvalidOperationException(AppText.Get("Settings_SelectLanguageError"));
             }
             updated.Language = language;
+            updated.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyCheckBox.IsChecked == true;
             updated.MkvMergePath = EmptyToNull(MkvMergePathTextBox.Text);
             updated.SeConvPath = EmptyToNull(SeConvPathTextBox.Text);
             updated.OutputPrefix = OutputPrefixTextBox.Text.Trim();

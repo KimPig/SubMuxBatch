@@ -306,12 +306,18 @@ public sealed class BatchProcessorTests : IDisposable
         var mkv = Path.Combine(_root, "FontMatch.mkv");
         var srt = Path.Combine(_root, "FontMatch.srt");
         var font = Path.Combine(_root, "test-family-bold.otf");
+        var alternateFont = Path.Combine(_root, "test-family-bold-alternate.otf");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
         await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         await File.WriteAllBytesAsync(font, [10, 20, 30, 40]);
+        await File.WriteAllBytesAsync(alternateFont, [50, 60, 70, 80]);
         var media = new MediaSet(new MediaKey(_root, "FontMatch"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
-        var resolver = new StaticFontResolver([new FontAttachmentFile(font, "font/otf")]);
+        var resolver = new StaticFontResolver(
+        [
+            new FontAttachmentFile(font, "font/otf"),
+            new FontAttachmentFile(alternateFont, "font/otf")
+        ]);
 
         var result = await new BatchProcessor(runner, resolver).ProcessAsync(
             media,
@@ -331,6 +337,7 @@ public sealed class BatchProcessorTests : IDisposable
         var muxArguments = Assert.Single(runner.MuxCalls);
         Assert.Contains("--attach-file", muxArguments);
         Assert.Contains(font, muxArguments);
+        Assert.DoesNotContain(alternateFont, muxArguments);
         Assert.Contains("font/otf", muxArguments);
     }
 
@@ -355,6 +362,37 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Empty(runner.MuxCalls);
         Assert.Null(result.OutputPath);
         Assert.Contains("건너뜁니다", result.Error);
+    }
+
+    [Fact]
+    public async Task FontAttachmentsAreContentDeduplicatedAndFilenameCollisionsAreRenamed()
+    {
+        var firstFolder = Path.Combine(_root, "first-font");
+        var secondFolder = Path.Combine(_root, "second-font");
+        var duplicateFolder = Path.Combine(_root, "duplicate-font");
+        Directory.CreateDirectory(firstFolder);
+        Directory.CreateDirectory(secondFolder);
+        Directory.CreateDirectory(duplicateFolder);
+        var first = Path.Combine(firstFolder, "Regular.ttf");
+        var second = Path.Combine(secondFolder, "Regular.ttf");
+        var duplicate = Path.Combine(duplicateFolder, "ZCopy.ttf");
+        await File.WriteAllBytesAsync(first, [1, 2, 3]);
+        await File.WriteAllBytesAsync(second, [4, 5, 6]);
+        await File.WriteAllBytesAsync(duplicate, [1, 2, 3]);
+
+        var result = await BatchProcessor.DeduplicateAndNameFontAttachmentsAsync(
+            [
+                new FontAttachmentFile(first, "font/ttf"),
+                new FontAttachmentFile(second, "font/ttf"),
+                new FontAttachmentFile(duplicate, "font/ttf")
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, static attachment => attachment.FileName == "Regular.ttf");
+        Assert.Contains(result, static attachment =>
+            attachment.FileName.StartsWith("Regular-", StringComparison.OrdinalIgnoreCase)
+            && attachment.FileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase));
     }
 
     public void Dispose()

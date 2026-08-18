@@ -70,6 +70,71 @@ public sealed class MkvMergeWarningTests
         }
     }
 
+    [Theory]
+    [InlineData("#GUI#warning 'secondary.srt' track 0: Warning in line 348: The start timestamp is smaller than that of the previous entry. All entries from this file will be sorted by their start time.\n")]
+    [InlineData("#GUI#warning 'secondary.srt' 트랙 0: 348번째 경고: 시작 시간 타임코드가 이전 항목의 타임코드보다 작습니다. 파일의 모든 항목은 시작 시간으로 정렬됩니다.\n")]
+    public async Task IgnoresSubtitleOrderingNotice(string warningOutput)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-ordering-notice-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[Script Info]\n[V4+ Styles]\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            var runner = new WarningRunner(output, 1, warningOutput, string.Empty);
+            var result = await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output);
+
+            Assert.False(result.HadWarnings);
+            Assert.Empty(result.Warnings);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task KeepsWarningWhenInvalidSubtitleEntryIsSkipped()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-invalid-subtitle-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[Script Info]\n[V4+ Styles]\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            const string warning = "SSA/ASS: The following line will be skipped as the end timestamp is less than the start timestamp.";
+            var runner = new WarningRunner(output, 1, $"#GUI#warning {warning}\n", string.Empty);
+            var result = await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output);
+
+            Assert.True(result.HadWarnings);
+            Assert.Equal(warning, Assert.Single(result.Warnings));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class WarningRunner(
         string outputPath,
         int exitCode,

@@ -24,6 +24,7 @@ using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Processing;
+using SubMuxBatch.Core.Updates;
 
 namespace SubMuxBatch.App;
 
@@ -33,6 +34,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const double MinimumDragDistance = 6;
     private const double MinimumQueueColumnWidth = 48;
     private readonly DependencyLocator _dependencyLocator = new();
+    private readonly GitHubReleaseClient _releaseClient = new();
     private AppSettings _settings = new();
     private DependencyReport? _dependencies;
     private CancellationTokenSource? _processingCancellation;
@@ -213,7 +215,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static Visibility ToVisibility(bool visible) =>
         visible ? Visibility.Visible : Visibility.Collapsed;
 
-    private void Window_Loaded(object sender, RoutedEventArgs e)
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         WindowPlacementHelper.FitToCurrentWorkingArea(this);
         _settings = AppSettings.Load();
@@ -222,6 +224,86 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AppendLog(AppText.Get("Log_AppStarted"));
         RefreshDependencies(persistResolvedPaths: true);
         UpdateControls();
+        if (_settings.CheckForUpdatesAutomatically)
+        {
+            await CheckForUpdatesAsync(this, showResult: false);
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(Window owner, bool showResult)
+    {
+        var informationalVersion = typeof(MainWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!UpdateVersion.TryParse(informationalVersion, out var currentVersion))
+        {
+            AppendLog(AppText.Get("Log_UpdateCheckFailed", informationalVersion ?? "unknown"));
+            return;
+        }
+
+        try
+        {
+            AppendLog(AppText.Get("Log_UpdateCheckStarted"));
+            var release = await _releaseClient.GetNewerReleaseAsync(
+                currentVersion,
+                UpdateRuntime.Current);
+            if (release is null)
+            {
+                AppendLog(AppText.Get("Log_UpdateNotAvailable"));
+                if (showResult)
+                {
+                    new UpdateStatusWindow(
+                        AppText.Get("Update_UpToDateTitle"),
+                        AppText.Get("Update_UpToDateHeading"),
+                        AppText.Get("Update_UpToDate", currentVersion))
+                    {
+                        Owner = owner
+                    }.ShowDialog();
+                }
+                return;
+            }
+
+            AppendLog(AppText.Get("Log_UpdateAvailable", release.Version));
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+            {
+                throw new InvalidOperationException(AppText.Get("Dialog_RestartPathMissing"));
+            }
+
+            var dialog = new UpdateWindow(
+                currentVersion,
+                release,
+                async (progress, cancellationToken) =>
+                {
+                    var prepared = await _releaseClient.DownloadAndPrepareAsync(
+                        release,
+                        progress,
+                        cancellationToken);
+                    SelfUpdateCoordinator.LaunchUpdater(prepared, executablePath);
+                })
+            {
+                Owner = owner
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                Application.Current.Shutdown();
+            }
+        }
+        catch (Exception exception)
+        {
+            AppendLog(AppText.Get("Log_UpdateCheckFailed", exception.Message));
+            if (showResult)
+            {
+                new UpdateStatusWindow(
+                    AppText.Get("Update_CheckFailedTitle"),
+                    AppText.Get("Update_CheckFailedHeading"),
+                    AppText.Get("Update_CheckFailedDescription"),
+                    exception.Message,
+                    isError: true)
+                {
+                    Owner = owner
+                }.ShowDialog();
+            }
+        }
     }
 
     private async void AddFilesButton_Click(object sender, RoutedEventArgs e)
@@ -1432,7 +1514,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var dialog = new SettingsWindow(_settings.Copy(), _dependencies) { Owner = this };
+        var dialog = new SettingsWindow(_settings.Copy(), _dependencies)
+        {
+            Owner = this,
+            UpdateCheckRequested = owner => CheckForUpdatesAsync(owner, showResult: true)
+        };
         if (dialog.ShowDialog() == true)
         {
             var matchingChanged = _settings.AllowSubtitleSuffixMatch != dialog.Settings.AllowSubtitleSuffixMatch;

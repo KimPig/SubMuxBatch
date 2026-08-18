@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
@@ -192,6 +193,7 @@ public sealed class BatchProcessor(
                     plan,
                     settings,
                     warnings,
+                    LogToolOutput,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -341,19 +343,34 @@ public sealed class BatchProcessor(
         ConversionPlan plan,
         AppSettings settings,
         ICollection<string> warnings,
+        Action<string> log,
         CancellationToken cancellationToken)
     {
         var assText = await ReadSubtitleTextAsync(assPath, cancellationToken).ConfigureAwait(false);
-        var fontNames = AssFontNameExtractor.Extract(assText).ToList();
-        if (fontNames.Count == 0
+        IReadOnlyList<AssFontRequirement> requirements;
+        try
+        {
+            requirements = AssFontNameExtractor.ExtractRequirements(assText);
+        }
+        catch (AssFontAnalysisException exception)
+        {
+            var warning = CoreText.Get("Batch_FontAnalysisError", exception.Message);
+            warnings.Add(warning);
+            throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+        }
+
+        if (requirements.Count == 0
             && plan.AssSource == AssSourceKind.ConvertFromSrt
             && settings.UseCustomAssStyle
             && AssStyleDefinition.TryParse(settings.AssStyleLine, out var configuredStyle))
         {
-            fontNames.Add(configuredStyle!.FontName);
+            requirements = [new AssFontRequirement(
+                configuredStyle!.FontName,
+                configuredStyle.Bold ? 700 : 400,
+                configuredStyle.Italic)];
         }
 
-        if (fontNames.Count == 0)
+        if (requirements.Count == 0)
         {
             var warning = CoreText.Get("Batch_FontNameMissing");
             warnings.Add(warning);
@@ -361,35 +378,104 @@ public sealed class BatchProcessor(
         }
 
         var attachments = new List<FontAttachmentFile>();
-        foreach (var fontName in fontNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var requirement in requirements)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            IReadOnlyList<FontAttachmentFile> matches;
+            InstalledFontMatch? match;
             try
             {
-                matches = _installedFontResolver.FindByFamilyName(fontName);
+                match = _installedFontResolver.Resolve(requirement);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
-                var warning = CoreText.Get("Batch_FontSearchError", fontName, exception.Message);
+                var warning = CoreText.Get("Batch_FontSearchError", requirement.FamilyName, exception.Message);
                 warnings.Add(warning);
                 throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
             }
 
-            if (matches.Count == 0)
+            if (match is null)
             {
-                var warning = CoreText.Get("Batch_FontNotFound", fontName);
+                var warning = CoreText.Get("Batch_FontNotFound", requirement.FamilyName);
                 warnings.Add(warning);
                 throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
             }
 
-            attachments.AddRange(matches);
+            var matchLabel = CoreText.Get($"FontMatch_{match.MatchKind}");
+            log(CoreText.Get(
+                "Batch_FontSelected",
+                requirement.FamilyName,
+                requirement.Weight,
+                requirement.Italic ? CoreText.Get("Font_Italic") : CoreText.Get("Font_Upright"),
+                match.File.FilePath,
+                matchLabel));
+            if (match.MatchKind == InstalledFontMatchKind.RegistryAlias)
+            {
+                warnings.Add(CoreText.Get(
+                    "Batch_FontRegistryAlias",
+                    requirement.FamilyName,
+                    match.InternalName));
+            }
+
+            attachments.Add(match.File);
         }
 
-        return attachments
-            .DistinctBy(static attachment => attachment.FileName, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static attachment => attachment.FileName, StringComparer.OrdinalIgnoreCase)
+        return await DeduplicateAndNameFontAttachmentsAsync(attachments, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal static async Task<IReadOnlyList<FontAttachmentFile>> DeduplicateAndNameFontAttachmentsAsync(
+        IEnumerable<FontAttachmentFile> attachments,
+        CancellationToken cancellationToken)
+    {
+        var candidates = attachments
+            .DistinctBy(static attachment => Path.GetFullPath(attachment.FilePath), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static attachment => attachment.SourceFileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static attachment => attachment.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var unique = new List<(FontAttachmentFile Attachment, string Hash)>();
+        var hashes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var attachment in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var stream = new FileStream(
+                attachment.FilePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
+            var contentKey = $"{stream.Length}:{hash}";
+            if (hashes.Add(contentKey))
+            {
+                unique.Add((attachment, hash));
+            }
+        }
+
+        var result = new List<FontAttachmentFile>(unique.Count);
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (attachment, hash) in unique)
+        {
+            var name = attachment.SourceFileName;
+            if (!usedNames.Add(name))
+            {
+                var stem = Path.GetFileNameWithoutExtension(name);
+                var extension = Path.GetExtension(name);
+                var prefixLength = 8;
+                do
+                {
+                    name = $"{stem}-{hash[..Math.Min(prefixLength, hash.Length)].ToLowerInvariant()}{extension}";
+                    prefixLength += 4;
+                }
+                while (!usedNames.Add(name));
+            }
+
+            result.Add(name.Equals(attachment.SourceFileName, StringComparison.OrdinalIgnoreCase)
+                ? attachment
+                : attachment with { AttachmentName = name });
+        }
+
+        return result;
     }
 
     private static async Task<string> ReadSubtitleTextAsync(

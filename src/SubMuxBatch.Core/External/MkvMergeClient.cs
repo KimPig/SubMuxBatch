@@ -279,7 +279,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
     private static IReadOnlyList<string> ExtractWarnings(ProcessResult result)
     {
-        var warnings = ReadLines(result.StandardOutput)
+        var reportedWarnings = ReadLines(result.StandardOutput)
             .Concat(ReadLines(result.StandardError))
             .Select(static line => line.TrimStart())
             .Where(static line => line.StartsWith(WarningPrefix, StringComparison.Ordinal))
@@ -288,13 +288,25 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        if (result.ExitCode == 1 && warnings.Count == 0)
+        var warnings = reportedWarnings
+            .Where(static warning => !IsSubtitleOrderingNotice(warning))
+            .ToList();
+
+        if (result.ExitCode == 1 && reportedWarnings.Count == 0)
         {
             warnings.Add(CoreText.Get("Mkv_WarningWithoutDetails"));
         }
 
         return warnings;
     }
+
+    private static bool IsSubtitleOrderingNotice(string warning) =>
+        warning.Contains(
+            "All entries from this file will be sorted by their start time.",
+            StringComparison.OrdinalIgnoreCase)
+        || warning.Contains(
+            "파일의 모든 항목은 시작 시간으로 정렬됩니다.",
+            StringComparison.Ordinal);
 
     private static string GetUiLanguageCode() =>
         string.Equals(
