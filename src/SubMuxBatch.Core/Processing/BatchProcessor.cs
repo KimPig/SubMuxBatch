@@ -39,6 +39,21 @@ public sealed class BatchProcessor(
         var currentState = JobState.Ready;
         var currentPercent = 0;
 
+        void AddNegativeTimestampWarnings(
+            string format,
+            IReadOnlyList<NegativeSubtitleTimestampAdjustment> adjustments)
+        {
+            foreach (var adjustment in adjustments)
+            {
+                warnings.Add(CoreText.Get(
+                    "Batch_NegativeSubtitleTimestampAdjusted",
+                    format,
+                    adjustment.LineNumber,
+                    adjustment.OriginalRange,
+                    adjustment.AdjustedRange));
+            }
+        }
+
         void LogToolOutput(string line)
         {
             var trimmedLine = line.TrimStart();
@@ -107,8 +122,14 @@ public sealed class BatchProcessor(
                 case SrtSourceKind.ConvertFromSmi:
                     Report(JobState.ConvertingSmiToSrt, 8, CoreText.Get("Batch_ConvertSmiToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
-                    var smiToSrtResult = await seConv.ConvertAsync(
+                    var normalizedSmi = Path.Combine(workspace.Path, "normalized.smi");
+                    var smiTimestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSmiTimestampsAsync(
                         media.SmiPath!,
+                        normalizedSmi,
+                        cancellationToken).ConfigureAwait(false);
+                    AddNegativeTimestampWarnings("SMI", smiTimestampAdjustments);
+                    var smiToSrtResult = await seConv.ConvertAsync(
+                        normalizedSmi,
                         finalSrt,
                         SubtitleOutputFormat.SubRip,
                         null,
@@ -125,11 +146,28 @@ public sealed class BatchProcessor(
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            var normalizedSrt = Path.Combine(workspace.Path, "normalized.srt");
+            var timestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSrtTimestampsAsync(
+                finalSrt,
+                normalizedSrt,
+                cancellationToken).ConfigureAwait(false);
+            if (plan.SrtSource != SrtSourceKind.ConvertFromAss)
+            {
+                AddNegativeTimestampWarnings("SRT", timestampAdjustments);
+            }
+
+            finalSrt = normalizedSrt;
+
             string finalAss;
             switch (plan.AssSource)
             {
                 case AssSourceKind.Existing:
-                    finalAss = media.AssPath!;
+                    finalAss = Path.Combine(workspace.Path, "normalized.ass");
+                    var assTimestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeAssTimestampsAsync(
+                        media.AssPath!,
+                        finalAss,
+                        cancellationToken).ConfigureAwait(false);
+                    AddNegativeTimestampWarnings("ASS", assTimestampAdjustments);
                     break;
 
                 case AssSourceKind.ConvertFromSrt:

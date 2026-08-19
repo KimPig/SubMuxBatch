@@ -137,6 +137,87 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(@"{\fs40\pos(320,72)}테스트", runner.MuxedAssText);
     }
 
+    [Fact]
+    public async Task NegativeSrtTimestampIsClampedForBothSubtitleTracksAndAddsWarning()
+    {
+        var mkv = Path.Combine(_root, "NegativeTimestamp.mkv");
+        var srt = Path.Combine(_root, "NegativeTimestamp.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "1\n-00:00:02,000 --> 00:00:05,000\nTest\n";
+        await File.WriteAllTextAsync(srt, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "NegativeTimestamp"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, static warning =>
+            warning.Contains("음수 타임스탬프", StringComparison.Ordinal)
+            && warning.Contains("00:00:00,000 --> 00:00:05,000", StringComparison.Ordinal));
+        Assert.Contains("00:00:00,000 --> 00:00:05,000", runner.SeConvAssInputText);
+        Assert.Contains("00:00:00,000 --> 00:00:05,000", runner.MuxedSrtText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(srt));
+    }
+
+    [Fact]
+    public async Task NegativeAssTimestampIsClampedInMuxedCopyAndAddsWarning()
+    {
+        var mkv = Path.Combine(_root, "NegativeAss.mkv");
+        var ass = Path.Combine(_root, "NegativeAss.ass");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "[Events]\n"
+                                  + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                  + "Dialogue: 0,0:00:-01.00,0:00:05.00,Default,,0,0,0,,Test\n";
+        await File.WriteAllTextAsync(ass, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "NegativeAss"), mkv, ass, null, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, static warning =>
+            warning.Contains("ASS", StringComparison.Ordinal)
+            && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
+        Assert.Contains("0:00:00.00,0:00:05.00", runner.MuxedAssText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(ass));
+    }
+
+    [Fact]
+    public async Task NegativeSmiTimestampIsClampedBeforeConversionAndAddsWarning()
+    {
+        var mkv = Path.Combine(_root, "NegativeSmi.mkv");
+        var smi = Path.Combine(_root, "NegativeSmi.smi");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "<SAMI>\n<BODY>\n"
+                                  + "<SYNC Start=-1000><P>Test\n"
+                                  + "<SYNC Start=5000><P>&nbsp;\n"
+                                  + "</BODY>\n</SAMI>\n";
+        await File.WriteAllTextAsync(smi, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "NegativeSmi"), mkv, null, null, smi);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, static warning =>
+            warning.Contains("SMI", StringComparison.Ordinal)
+            && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
+        Assert.Contains("<SYNC Start=0><P>Test", runner.SeConvSmiInputText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(smi));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -431,6 +512,9 @@ public sealed class BatchProcessorTests : IDisposable
         public List<IReadOnlyList<string>> SeConvCalls { get; } = [];
         public List<IReadOnlyList<string>> MuxCalls { get; } = [];
         public string? MuxedAssText { get; private set; }
+        public string? MuxedSrtText { get; private set; }
+        public string? SeConvAssInputText { get; private set; }
+        public string? SeConvSmiInputText { get; private set; }
         public string? MuxedGlobalTagsText { get; private set; }
 
         public Task<ProcessResult> RunAsync(
@@ -445,6 +529,11 @@ public sealed class BatchProcessorTests : IDisposable
                 var outputFolder = ValueOf(request.Arguments, "--output-folder:");
                 var outputName = ValueOf(request.Arguments, "--output-filename:");
                 var workingDirectory = request.WorkingDirectory ?? Environment.CurrentDirectory;
+                var stagedInputPath = Path.Combine(workingDirectory, request.Arguments[0]);
+                if (Path.GetExtension(stagedInputPath).Equals(".smi", StringComparison.OrdinalIgnoreCase))
+                {
+                    SeConvSmiInputText = File.ReadAllText(stagedInputPath);
+                }
                 var output = Path.GetFullPath(Path.Combine(workingDirectory, outputFolder, outputName));
                 if (request.Arguments.Contains("subrip"))
                 {
@@ -452,6 +541,7 @@ public sealed class BatchProcessorTests : IDisposable
                 }
                 else
                 {
+                    SeConvAssInputText = File.ReadAllText(Path.Combine(workingDirectory, request.Arguments[0]));
                     File.WriteAllText(
                         output,
                         "[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Test Family,40\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
@@ -501,6 +591,12 @@ public sealed class BatchProcessorTests : IDisposable
             if (assInput is not null)
             {
                 MuxedAssText = File.ReadAllText(assInput);
+            }
+            var srtInput = request.Arguments.FirstOrDefault(static argument =>
+                Path.GetExtension(argument).Equals(".srt", StringComparison.OrdinalIgnoreCase));
+            if (srtInput is not null)
+            {
+                MuxedSrtText = File.ReadAllText(srtInput);
             }
 
             File.WriteAllBytes(request.Arguments[outputIndex], [7, 8, 9]);
