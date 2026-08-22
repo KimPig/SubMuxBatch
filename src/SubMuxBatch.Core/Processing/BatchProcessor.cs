@@ -45,18 +45,31 @@ public sealed class BatchProcessor(
         {
             foreach (var adjustment in adjustments)
             {
-                warnings.Add(adjustment.Removed
-                    ? CoreText.Get(
-                        "Batch_NegativeSubtitleTimestampRemoved",
-                        format,
-                        adjustment.LineNumber,
-                        adjustment.OriginalRange)
-                    : CoreText.Get(
+                warnings.Add(adjustment.Kind switch
+                {
+                    SubtitleTimestampAdjustmentKind.Adjusted => CoreText.Get(
                         "Batch_NegativeSubtitleTimestampAdjusted",
                         format,
                         adjustment.LineNumber,
                         adjustment.OriginalRange,
-                        adjustment.AdjustedRange));
+                        adjustment.AdjustedRange),
+                    SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart => CoreText.Get(
+                        "Batch_NegativeSubtitleTimestampRemoved",
+                        format,
+                        adjustment.LineNumber,
+                        adjustment.OriginalRange),
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidRange => CoreText.Get(
+                        "Batch_InvalidSubtitleTimestampRangeRemoved",
+                        format,
+                        adjustment.LineNumber,
+                        adjustment.OriginalRange),
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidTimestamp => CoreText.Get(
+                        "Batch_InvalidSubtitleTimestampRemoved",
+                        format,
+                        adjustment.LineNumber,
+                        adjustment.OriginalRange),
+                    _ => throw new ArgumentOutOfRangeException(nameof(adjustment.Kind))
+                });
             }
         }
 
@@ -103,6 +116,19 @@ public sealed class BatchProcessor(
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            string? normalizedExistingAss = null;
+            if (media.AssPath is not null
+                && (plan.AssSource == AssSourceKind.Existing
+                    || plan.SrtSource == SrtSourceKind.ConvertFromAss))
+            {
+                normalizedExistingAss = Path.Combine(workspace.Path, "source-normalized.ass");
+                var sourceAssAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeAssTimestampsAsync(
+                    media.AssPath,
+                    normalizedExistingAss,
+                    cancellationToken).ConfigureAwait(false);
+                AddNegativeTimestampWarnings("ASS", sourceAssAdjustments);
+            }
+
             string finalSrt;
             switch (plan.SrtSource)
             {
@@ -114,7 +140,7 @@ public sealed class BatchProcessor(
                     Report(JobState.ConvertingAssToSrt, 8, CoreText.Get("Batch_ConvertAssToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
                     var assToSrtResult = await seConv.ConvertAsync(
-                        media.AssPath!,
+                        normalizedExistingAss!,
                         finalSrt,
                         SubtitleOutputFormat.SubRip,
                         null,
@@ -157,23 +183,19 @@ public sealed class BatchProcessor(
                 finalSrt,
                 normalizedSrt,
                 cancellationToken).ConfigureAwait(false);
-            if (plan.SrtSource != SrtSourceKind.ConvertFromAss)
-            {
-                AddNegativeTimestampWarnings("SRT", timestampAdjustments);
-            }
+            AddNegativeTimestampWarnings("SRT", timestampAdjustments);
 
             finalSrt = normalizedSrt;
+            if (new FileInfo(finalSrt).Length == 0)
+            {
+                throw new JobSkippedException(CoreText.Get("Batch_SkipNoValidSubtitleCues"));
+            }
 
             string finalAss;
             switch (plan.AssSource)
             {
                 case AssSourceKind.Existing:
-                    finalAss = Path.Combine(workspace.Path, "normalized.ass");
-                    var assTimestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeAssTimestampsAsync(
-                        media.AssPath!,
-                        finalAss,
-                        cancellationToken).ConfigureAwait(false);
-                    AddNegativeTimestampWarnings("ASS", assTimestampAdjustments);
+                    finalAss = normalizedExistingAss!;
                     break;
 
                 case AssSourceKind.ConvertFromSrt:
@@ -228,6 +250,14 @@ public sealed class BatchProcessor(
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            var verifiedAss = Path.Combine(workspace.Path, "verified.ass");
+            var finalAssAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeAssTimestampsAsync(
+                finalAss,
+                verifiedAss,
+                cancellationToken).ConfigureAwait(false);
+            AddNegativeTimestampWarnings("ASS", finalAssAdjustments);
+            finalAss = verifiedAss;
+
             IReadOnlyList<FontAttachmentFile> fontAttachments = [];
             if (settings.AttachAssStyleFonts)
             {

@@ -67,7 +67,7 @@ public sealed class BatchProcessorTests : IDisposable
         var mkv = Path.Combine(_root, "Invalid.mkv");
         var srt = Path.Combine(_root, "Invalid.srt");
         await File.WriteAllBytesAsync(mkv, [1]);
-        await File.WriteAllTextAsync(srt, "test");
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         var media = new MediaSet(new MediaKey(_root, "Invalid"), mkv, null, srt, null);
         var dependencies = new DependencyReport(
             new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
@@ -169,12 +169,14 @@ public sealed class BatchProcessorTests : IDisposable
         var mkv = Path.Combine(_root, "NegativeMilliseconds.mkv");
         var srt = Path.Combine(_root, "NegativeMilliseconds.srt");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
-        const string sourceText = "1\n"
-                                  + "00:00:00,-340 --> 00:00:00,-340\n"
-                                  + "Intro\n\n"
-                                  + "2\n"
-                                  + "00:00:00,-160 --> 00:00:19,610\n"
-                                  + "뭐든 잘하고 우수\n";
+        const string sourceText = "5\n"
+                                  + "00:00:-3,-900 --> 00:00:00,-140\n"
+                                  + "등장인물들은 모두 18세 이상입니다\n"
+                                  + "5\n"
+                                  + "00:00:00,-90 --> 00:00:03,340\n"
+                                  + "가져가 주세요\n"
+                                  + "00:00:09,370 --> 00:00:13,280\n"
+                                  + "번호 없는 자막\n";
         await File.WriteAllTextAsync(srt, sourceText);
         var media = new MediaSet(new MediaKey(_root, "NegativeMilliseconds"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
@@ -189,9 +191,34 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(2, result.Warnings.Count(static warning =>
             warning.Contains("음수 타임스탬프", StringComparison.Ordinal)
             || warning.Contains("영상 시작 전에 끝나", StringComparison.Ordinal)));
-        Assert.DoesNotContain("Intro", runner.MuxedSrtText);
+        Assert.DoesNotContain("등장인물들은", runner.MuxedSrtText);
         Assert.DoesNotContain(",-", runner.MuxedSrtText);
-        Assert.Contains("00:00:00,000 --> 00:00:19,610", runner.MuxedSrtText);
+        Assert.DoesNotContain("00:00:-", runner.MuxedSrtText);
+        Assert.Contains("1\r\n00:00:00,000 --> 00:00:03,340", runner.MuxedSrtText);
+        Assert.Contains("2\r\n00:00:09,370 --> 00:00:13,280", runner.MuxedSrtText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(srt));
+    }
+
+    [Fact]
+    public async Task SkipsJobWhenEverySrtCueEndsBeforeTheVideoStarts()
+    {
+        var mkv = Path.Combine(_root, "OnlyPreroll.mkv");
+        var srt = Path.Combine(_root, "OnlyPreroll.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "9\n00:00:-3,-900 --> 00:00:00,-140\nIntro\n";
+        await File.WriteAllTextAsync(srt, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "OnlyPreroll"), mkv, null, srt, null);
+
+        var result = await new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Skipped, result.State);
+        Assert.Null(result.OutputPath);
+        Assert.Contains("유효한 자막 항목이 남지 않아", result.Error);
+        Assert.Contains(result.Warnings, static warning => warning.Contains("영상 시작 전에 끝나", StringComparison.Ordinal));
         Assert.Equal(sourceText, await File.ReadAllTextAsync(srt));
     }
 
@@ -219,7 +246,38 @@ public sealed class BatchProcessorTests : IDisposable
             warning.Contains("ASS", StringComparison.Ordinal)
             && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
         Assert.Contains("0:00:00.00,0:00:05.00", runner.MuxedAssText);
+        Assert.Contains("0:00:00.00,0:00:05.00", runner.SeConvSubRipInputText);
         Assert.Equal(sourceText, await File.ReadAllTextAsync(ass));
+    }
+
+    [Fact]
+    public async Task GeneratedAssIsValidatedAgainBeforeMuxing()
+    {
+        var mkv = Path.Combine(_root, "GeneratedAssValidation.mkv");
+        var srt = Path.Combine(_root, "GeneratedAssValidation.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:03,990\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "GeneratedAssValidation"), mkv, null, srt, null);
+        const string generatedAss = "[Script Info]\n"
+                                    + "[V4+ Styles]\n"
+                                    + "Format: Name, Fontname, Fontsize\n"
+                                    + "Style: Default,Test Family,40\n"
+                                    + "[Events]\n"
+                                    + "Dialogue: 0,0:00:-04.00,0:00:03.99,Default,,0,0,0,,Test\n";
+        var runner = new FakeProcessRunner(generatedAss);
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, static warning =>
+            warning.Contains("ASS", StringComparison.Ordinal)
+            && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
+        Assert.DoesNotContain("0:00:-04.00", runner.MuxedAssText);
+        Assert.Contains("0:00:00.00,0:00:03.99", runner.MuxedAssText);
     }
 
     [Fact]
@@ -290,7 +348,7 @@ public sealed class BatchProcessorTests : IDisposable
         var existingBase = Path.Combine(_root, "result_Collision.mkv");
         var existingNumbered = Path.Combine(_root, "result_Collision (1).mkv");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
-        await File.WriteAllTextAsync(srt, "test");
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         await File.WriteAllBytesAsync(existingBase, [10, 11]);
         await File.WriteAllBytesAsync(existingNumbered, [20, 21]);
 
@@ -324,7 +382,7 @@ public sealed class BatchProcessorTests : IDisposable
         var video = Path.Combine(_root, stem + extension);
         var srt = Path.Combine(_root, stem + ".srt");
         await File.WriteAllBytesAsync(video, [1, 2, 3]);
-        await File.WriteAllTextAsync(srt, "test");
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         var media = new MediaSet(new MediaKey(_root, stem), video, null, srt, null);
         var runner = new FakeProcessRunner();
 
@@ -345,7 +403,7 @@ public sealed class BatchProcessorTests : IDisposable
         var mkv = Path.Combine(_root, "Concurrent.mkv");
         var srt = Path.Combine(_root, "Concurrent.srt");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
-        await File.WriteAllTextAsync(srt, "test");
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
 
         var media = new MediaSet(new MediaKey(_root, "Concurrent"), mkv, null, srt, null);
         var plan = ConversionPlanFactory.Create(media);
@@ -539,13 +597,14 @@ public sealed class BatchProcessorTests : IDisposable
         public IReadOnlyList<FontAttachmentFile> FindByFamilyName(string familyName) => files;
     }
 
-    private sealed class FakeProcessRunner : IProcessRunner
+    private sealed class FakeProcessRunner(string? assOutputText = null) : IProcessRunner
     {
         public List<IReadOnlyList<string>> SeConvCalls { get; } = [];
         public List<IReadOnlyList<string>> MuxCalls { get; } = [];
         public string? MuxedAssText { get; private set; }
         public string? MuxedSrtText { get; private set; }
         public string? SeConvAssInputText { get; private set; }
+        public string? SeConvSubRipInputText { get; private set; }
         public string? SeConvSmiInputText { get; private set; }
         public string? MuxedGlobalTagsText { get; private set; }
 
@@ -569,6 +628,7 @@ public sealed class BatchProcessorTests : IDisposable
                 var output = Path.GetFullPath(Path.Combine(workingDirectory, outputFolder, outputName));
                 if (request.Arguments.Contains("subrip"))
                 {
+                    SeConvSubRipInputText = File.ReadAllText(stagedInputPath);
                     File.WriteAllText(output, "1\n00:00:00,000 --> 00:00:01,000\n테스트\n");
                 }
                 else
@@ -576,7 +636,8 @@ public sealed class BatchProcessorTests : IDisposable
                     SeConvAssInputText = File.ReadAllText(Path.Combine(workingDirectory, request.Arguments[0]));
                     File.WriteAllText(
                         output,
-                        "[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Test Family,40\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
+                        assOutputText
+                        ?? "[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Test Family,40\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
                 }
 
                 var json = JsonSerializer.Serialize(new

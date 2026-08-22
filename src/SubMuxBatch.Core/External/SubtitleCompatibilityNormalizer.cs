@@ -4,11 +4,22 @@ using System.Text.RegularExpressions;
 
 namespace SubMuxBatch.Core.External;
 
+public enum SubtitleTimestampAdjustmentKind
+{
+    Adjusted,
+    RemovedBeforeVideoStart,
+    RemovedInvalidRange,
+    RemovedInvalidTimestamp
+}
+
 public sealed record NegativeSubtitleTimestampAdjustment(
     int LineNumber,
     string OriginalRange,
     string AdjustedRange,
-    bool Removed = false);
+    SubtitleTimestampAdjustmentKind Kind = SubtitleTimestampAdjustmentKind.Adjusted)
+{
+    public bool Removed => Kind != SubtitleTimestampAdjustmentKind.Adjusted;
+}
 
 public static partial class SubtitleCompatibilityNormalizer
 {
@@ -20,65 +31,114 @@ public static partial class SubtitleCompatibilityNormalizer
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
         var text = DecodeSubtitle(bytes);
         var adjustments = new List<NegativeSubtitleTimestampAdjustment>();
-        var currentLine = 1;
-        var scannedIndex = 0;
-        var edits = new List<TextEdit>();
-        var separators = SrtBlankLineRegex().Matches(text).Cast<Match>().ToArray();
-        var separatorIndex = 0;
-        var currentCueStart = 0;
-        foreach (Match match in SrtTimestampLineRegex().Matches(text))
+        var lines = NormalizeLineEndings(text).Split('\n');
+        var candidates = new List<SrtCueCandidate>();
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
-            while (separatorIndex < separators.Length
-                   && separators[separatorIndex].Index + separators[separatorIndex].Length <= match.Index)
+            var match = SrtTimestampLineRegex().Match(lines[lineIndex]);
+            if (!match.Success)
             {
-                currentCueStart = separators[separatorIndex].Index + separators[separatorIndex].Length;
-                separatorIndex++;
+                continue;
             }
 
-            AdvanceLineNumber(text, match.Index, ref currentLine, ref scannedIndex);
             var originalStart = match.Groups["start"].Value;
             var originalEnd = match.Groups["end"].Value;
-            if (!TryParseSrtTimestamp(originalStart, out var startMilliseconds, out var startHasNegativeComponent)
-                || !TryParseSrtTimestamp(originalEnd, out var endMilliseconds, out var endHasNegativeComponent)
-                || (!startHasNegativeComponent && !endHasNegativeComponent))
-            {
-                continue;
-            }
-
-            var originalRange = $"{originalStart} --> {originalEnd}";
-            if (endMilliseconds <= 0)
-            {
-                var cueEnd = separatorIndex < separators.Length
-                    ? separators[separatorIndex].Index + separators[separatorIndex].Length
-                    : text.Length;
-                edits.Add(new TextEdit(currentCueStart, cueEnd - currentCueStart, string.Empty));
-                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
-                    currentLine,
-                    originalRange,
-                    string.Empty,
-                    Removed: true));
-                continue;
-            }
-
-            var adjustedStart = FormatSrtTimestamp(Math.Max(0, startMilliseconds));
-            var adjustedEnd = FormatSrtTimestamp(endMilliseconds);
-            var adjustedRange = $"{adjustedStart} --> {adjustedEnd}";
-            adjustments.Add(new NegativeSubtitleTimestampAdjustment(
-                currentLine,
-                originalRange,
-                adjustedRange));
-
-            edits.Add(new TextEdit(
-                match.Index,
-                match.Length,
-                $"{match.Groups["indent"].Value}{adjustedRange}{match.Groups["suffix"].Value}{match.Groups["cr"].Value}"));
+            var startParsed = TryParseSrtTimestamp(
+                originalStart,
+                out var startMilliseconds,
+                out var startHasNegativeComponent);
+            var endParsed = TryParseSrtTimestamp(
+                originalEnd,
+                out var endMilliseconds,
+                out var endHasNegativeComponent);
+            var parsed = startParsed && endParsed;
+            var cueStartLine = lineIndex > 0 && SrtSequenceNumberRegex().IsMatch(lines[lineIndex - 1])
+                ? lineIndex - 1
+                : lineIndex;
+            candidates.Add(new SrtCueCandidate(
+                cueStartLine,
+                lineIndex,
+                lineIndex + 1,
+                originalStart,
+                originalEnd,
+                match.Groups["suffix"].Value,
+                parsed,
+                startMilliseconds,
+                endMilliseconds,
+                startHasNegativeComponent || endHasNegativeComponent));
         }
 
-        var normalized = ApplyTextEdits(text, edits);
+        var output = new StringBuilder();
+        var outputSequence = 1;
+        for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidate = candidates[candidateIndex];
+            var bodyEndLine = candidateIndex + 1 < candidates.Count
+                ? candidates[candidateIndex + 1].CueStartLine
+                : lines.Length;
+            while (bodyEndLine > candidate.BodyStartLine
+                   && string.IsNullOrWhiteSpace(lines[bodyEndLine - 1]))
+            {
+                bodyEndLine--;
+            }
+
+            var originalRange = $"{candidate.OriginalStart} --> {candidate.OriginalEnd}";
+            if (!candidate.Parsed)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    candidate.TimestampLine + 1,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidTimestamp));
+                continue;
+            }
+
+            if (candidate.EndMilliseconds <= 0)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    candidate.TimestampLine + 1,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart));
+                continue;
+            }
+
+            var adjustedStartMilliseconds = Math.Max(0, candidate.StartMilliseconds);
+            if (candidate.EndMilliseconds <= adjustedStartMilliseconds)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    candidate.TimestampLine + 1,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidRange));
+                continue;
+            }
+
+            var adjustedStart = FormatSrtTimestamp(adjustedStartMilliseconds);
+            var adjustedEnd = FormatSrtTimestamp(candidate.EndMilliseconds);
+            var adjustedRange = $"{adjustedStart} --> {adjustedEnd}";
+            if (candidate.HasNegativeComponent)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    candidate.TimestampLine + 1,
+                    originalRange,
+                    adjustedRange));
+            }
+
+            output.Append(outputSequence++).Append("\r\n");
+            output.Append(adjustedRange).Append(candidate.Suffix).Append("\r\n");
+            for (var bodyLine = candidate.BodyStartLine; bodyLine < bodyEndLine; bodyLine++)
+            {
+                output.Append(lines[bodyLine]).Append("\r\n");
+            }
+
+            output.Append("\r\n");
+        }
 
         await File.WriteAllTextAsync(
             outputPath,
-            normalized,
+            output.ToString(),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken).ConfigureAwait(false);
         return adjustments;
@@ -99,16 +159,53 @@ public static partial class SubtitleCompatibilityNormalizer
             AdvanceLineNumber(text, match.Index, ref currentLine, ref scannedIndex);
             var originalStart = match.Groups["start"].Value.Trim();
             var originalEnd = match.Groups["end"].Value.Trim();
-            if (!TryParseAssTimestamp(originalStart, out var startMilliseconds)
-                || !TryParseAssTimestamp(originalEnd, out var endMilliseconds)
-                || (startMilliseconds >= 0 && endMilliseconds >= 0))
+            var startParsed = TryParseAssTimestamp(
+                originalStart,
+                out var startMilliseconds,
+                out var startHasNegativeComponent);
+            var endParsed = TryParseAssTimestamp(
+                originalEnd,
+                out var endMilliseconds,
+                out var endHasNegativeComponent);
+            var originalRange = $"{originalStart} --> {originalEnd}";
+            if (!startParsed || !endParsed)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    currentLine,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidTimestamp));
+                return match.Groups["cr"].Value;
+            }
+
+            if (endMilliseconds <= 0)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    currentLine,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart));
+                return match.Groups["cr"].Value;
+            }
+
+            var adjustedStartMilliseconds = Math.Max(0, startMilliseconds);
+            if (endMilliseconds <= adjustedStartMilliseconds)
+            {
+                adjustments.Add(new NegativeSubtitleTimestampAdjustment(
+                    currentLine,
+                    originalRange,
+                    string.Empty,
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidRange));
+                return match.Groups["cr"].Value;
+            }
+
+            if (!startHasNegativeComponent && !endHasNegativeComponent)
             {
                 return match.Value;
             }
 
             var adjustedStart = startMilliseconds < 0 ? "0:00:00.00" : originalStart;
-            var adjustedEnd = endMilliseconds < 0 ? "0:00:00.00" : originalEnd;
-            var originalRange = $"{originalStart} --> {originalEnd}";
+            var adjustedEnd = originalEnd;
             var adjustedRange = $"{adjustedStart} --> {adjustedEnd}";
             adjustments.Add(new NegativeSubtitleTimestampAdjustment(
                 currentLine,
@@ -206,12 +303,16 @@ public static partial class SubtitleCompatibilityNormalizer
     {
         milliseconds = 0;
         hasNegativeComponent = false;
-        var negative = false;
-        var timestamp = value;
+        var overallNegative = false;
+        var timestamp = value.Trim();
         if (timestamp.StartsWith("-", StringComparison.Ordinal))
         {
-            negative = true;
+            overallNegative = true;
             hasNegativeComponent = true;
+            timestamp = timestamp[1..];
+        }
+        else if (timestamp.StartsWith("+", StringComparison.Ordinal))
+        {
             timestamp = timestamp[1..];
         }
 
@@ -221,52 +322,34 @@ public static partial class SubtitleCompatibilityNormalizer
             return false;
         }
 
-        if (components[2].StartsWith("-", StringComparison.Ordinal))
-        {
-            if (negative)
-            {
-                return false;
-            }
-
-            negative = true;
-            hasNegativeComponent = true;
-            components[2] = components[2][1..];
-        }
-
         var secondsAndMilliseconds = components[2].Split([',', '.']);
-        var fractionIsNegative = secondsAndMilliseconds.Length == 2
-                                 && secondsAndMilliseconds[1].StartsWith("-", StringComparison.Ordinal);
-        if (fractionIsNegative)
-        {
-            hasNegativeComponent = true;
-            secondsAndMilliseconds[1] = secondsAndMilliseconds[1][1..];
-        }
-
-        if (secondsAndMilliseconds.Length != 2
+        if (secondsAndMilliseconds.Length is < 1 or > 2
             || !long.TryParse(components[0], out var hours)
             || !long.TryParse(components[1], out var minutes)
             || !long.TryParse(secondsAndMilliseconds[0], out var seconds)
-            || !long.TryParse(secondsAndMilliseconds[1], out var parsedMilliseconds)
-            || minutes is < 0 or > 59
-            || seconds is < 0 or > 59
-            || parsedMilliseconds is < 0 or > 999)
+            || !TryParseSrtFraction(
+                secondsAndMilliseconds.Length == 2 ? secondsAndMilliseconds[1] : null,
+                out var parsedMilliseconds)
+            || minutes is < -59 or > 59
+            || seconds is < -59 or > 59)
         {
             return false;
         }
 
+        var componentNegative = hours < 0 || minutes < 0 || seconds < 0;
+        hasNegativeComponent |= componentNegative || parsedMilliseconds < 0;
+
         try
         {
-            var wholeSeconds = checked(((hours * 60) + minutes) * 60 + seconds);
-            if (negative)
+            if (overallNegative || componentNegative)
             {
-                milliseconds = checked(-(wholeSeconds * 1000 + parsedMilliseconds));
-            }
-            else if (fractionIsNegative)
-            {
-                milliseconds = checked(wholeSeconds * 1000 - parsedMilliseconds);
+                var magnitudeSeconds = checked(
+                    ((Math.Abs(hours) * 60) + Math.Abs(minutes)) * 60 + Math.Abs(seconds));
+                milliseconds = checked(-(magnitudeSeconds * 1000 + Math.Abs(parsedMilliseconds)));
             }
             else
             {
+                var wholeSeconds = checked(((hours * 60) + minutes) * 60 + seconds);
                 milliseconds = checked(wholeSeconds * 1000 + parsedMilliseconds);
             }
 
@@ -279,31 +362,51 @@ public static partial class SubtitleCompatibilityNormalizer
         }
     }
 
-    private static string ApplyTextEdits(string text, IReadOnlyList<TextEdit> edits)
-    {
-        if (edits.Count == 0)
-        {
-            return text;
-        }
-
-        var builder = new StringBuilder(text);
-        foreach (var edit in edits.OrderByDescending(static edit => edit.Start))
-        {
-            builder.Remove(edit.Start, edit.Length);
-            builder.Insert(edit.Start, edit.Replacement);
-        }
-
-        return builder.ToString();
-    }
-
-    private static bool TryParseAssTimestamp(string value, out long milliseconds)
+    private static bool TryParseSrtFraction(string? value, out long milliseconds)
     {
         milliseconds = 0;
-        var timestamp = value.Replace(',', '.');
-        var negative = false;
+        if (string.IsNullOrEmpty(value))
+        {
+            return true;
+        }
+
+        var negative = value.StartsWith("-", StringComparison.Ordinal);
+        var digits = value.TrimStart('+', '-');
+        if (digits.Length is < 1 or > 3 || !long.TryParse(digits, out var parsed))
+        {
+            return false;
+        }
+
+        if (negative)
+        {
+            milliseconds = -parsed;
+            return true;
+        }
+
+        milliseconds = long.Parse(digits.PadRight(3, '0'));
+        return true;
+    }
+
+    private static string NormalizeLineEndings(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    private static bool TryParseAssTimestamp(
+        string value,
+        out long milliseconds,
+        out bool hasNegativeComponent)
+    {
+        milliseconds = 0;
+        hasNegativeComponent = false;
+        var timestamp = value.Trim().Replace(',', '.');
+        var overallNegative = false;
         if (timestamp.StartsWith("-", StringComparison.Ordinal))
         {
-            negative = true;
+            overallNegative = true;
+            hasNegativeComponent = true;
+            timestamp = timestamp[1..];
+        }
+        else if (timestamp.StartsWith("+", StringComparison.Ordinal))
+        {
             timestamp = timestamp[1..];
         }
 
@@ -313,36 +416,35 @@ public static partial class SubtitleCompatibilityNormalizer
             return false;
         }
 
-        if (components[2].StartsWith("-", StringComparison.Ordinal))
-        {
-            if (negative)
-            {
-                return false;
-            }
-
-            negative = true;
-            components[2] = components[2][1..];
-        }
-
         var secondsAndFraction = components[2].Split('.');
-        if (secondsAndFraction.Length != 2
-            || secondsAndFraction[1].Length is < 1 or > 3
+        if (secondsAndFraction.Length is < 1 or > 2
             || !long.TryParse(components[0], out var hours)
             || !long.TryParse(components[1], out var minutes)
             || !long.TryParse(secondsAndFraction[0], out var seconds)
-            || !long.TryParse(secondsAndFraction[1].PadRight(3, '0'), out var parsedMilliseconds)
-            || minutes is < 0 or > 59
-            || seconds is < 0 or > 59)
+            || !TryParseAssFraction(
+                secondsAndFraction.Length == 2 ? secondsAndFraction[1] : null,
+                out var parsedMilliseconds)
+            || minutes is < -59 or > 59
+            || seconds is < -59 or > 59)
         {
             return false;
         }
 
+        var componentNegative = hours < 0 || minutes < 0 || seconds < 0;
+        hasNegativeComponent |= componentNegative || parsedMilliseconds < 0;
+
         try
         {
-            milliseconds = checked((((hours * 60) + minutes) * 60 + seconds) * 1000 + parsedMilliseconds);
-            if (negative)
+            if (overallNegative || componentNegative)
             {
-                milliseconds = -milliseconds;
+                var magnitudeSeconds = checked(
+                    ((Math.Abs(hours) * 60) + Math.Abs(minutes)) * 60 + Math.Abs(seconds));
+                milliseconds = checked(-(magnitudeSeconds * 1000 + Math.Abs(parsedMilliseconds)));
+            }
+            else
+            {
+                var wholeSeconds = checked(((hours * 60) + minutes) * 60 + seconds);
+                milliseconds = checked(wholeSeconds * 1000 + parsedMilliseconds);
             }
 
             return true;
@@ -352,6 +454,30 @@ public static partial class SubtitleCompatibilityNormalizer
             milliseconds = 0;
             return false;
         }
+    }
+
+    private static bool TryParseAssFraction(string? value, out long milliseconds)
+    {
+        milliseconds = 0;
+        if (string.IsNullOrEmpty(value))
+        {
+            return true;
+        }
+
+        var negative = value.StartsWith("-", StringComparison.Ordinal);
+        var digits = value.TrimStart('+', '-');
+        if (digits.Length is < 1 or > 3 || !long.TryParse(digits, out var parsed))
+        {
+            return false;
+        }
+
+        milliseconds = long.Parse(digits.PadRight(3, '0'));
+        if (negative)
+        {
+            milliseconds = -milliseconds;
+        }
+
+        return true;
     }
 
     private static string FormatSrtTimestamp(long milliseconds)
@@ -440,12 +566,11 @@ public static partial class SubtitleCompatibilityNormalizer
     private static partial Regex AnyHtmlTagRegex();
 
     [GeneratedRegex(
-        @"^(?<indent>[ \t]*)(?<start>(?:-?\d+:\d{2}:\d{2}|\d+:\d{2}:-\d{2})[,.]-?\d{3})[ \t]*-->[ \t]*(?<end>(?:-?\d+:\d{2}:\d{2}|\d+:\d{2}:-\d{2})[,.]-?\d{3})(?<suffix>[^\r\n]*)(?<cr>\r?)$",
-        RegexOptions.Multiline)]
+        @"^[ \t]*(?<start>\S+:\S+:\S+)[ \t]*-->[ \t]*(?<end>\S+:\S+:\S+)(?<suffix>[^\r\n]*)$")]
     private static partial Regex SrtTimestampLineRegex();
 
-    [GeneratedRegex(@"(?:\r?\n){2,}")]
-    private static partial Regex SrtBlankLineRegex();
+    [GeneratedRegex(@"^[ \t]*[+-]?\d+[ \t]*$")]
+    private static partial Regex SrtSequenceNumberRegex();
 
     [GeneratedRegex(
         @"^(?<prefix>[ \t]*Dialogue[ \t]*:[^,\r\n]*,)(?<start>[^,\r\n]*),(?<end>[^,\r\n]*)(?<suffix>,[^\r\n]*)(?<cr>\r?)$",
@@ -457,5 +582,15 @@ public static partial class SubtitleCompatibilityNormalizer
         RegexOptions.IgnoreCase)]
     private static partial Regex SmiSyncTagRegex();
 
-    private sealed record TextEdit(int Start, int Length, string Replacement);
+    private sealed record SrtCueCandidate(
+        int CueStartLine,
+        int TimestampLine,
+        int BodyStartLine,
+        string OriginalStart,
+        string OriginalEnd,
+        string Suffix,
+        bool Parsed,
+        long StartMilliseconds,
+        long EndMilliseconds,
+        bool HasNegativeComponent);
 }
