@@ -45,12 +45,18 @@ public sealed class BatchProcessor(
         {
             foreach (var adjustment in adjustments)
             {
-                warnings.Add(CoreText.Get(
-                    "Batch_NegativeSubtitleTimestampAdjusted",
-                    format,
-                    adjustment.LineNumber,
-                    adjustment.OriginalRange,
-                    adjustment.AdjustedRange));
+                warnings.Add(adjustment.Removed
+                    ? CoreText.Get(
+                        "Batch_NegativeSubtitleTimestampRemoved",
+                        format,
+                        adjustment.LineNumber,
+                        adjustment.OriginalRange)
+                    : CoreText.Get(
+                        "Batch_NegativeSubtitleTimestampAdjusted",
+                        format,
+                        adjustment.LineNumber,
+                        adjustment.OriginalRange,
+                        adjustment.AdjustedRange));
             }
         }
 

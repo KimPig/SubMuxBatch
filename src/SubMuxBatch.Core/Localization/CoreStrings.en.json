@@ -18,6 +18,7 @@
   "Batch_ConvertSmiToSrt": "Converting SMI to SRT.",
   "Batch_ConvertSrtToAss": "Converting SRT to ASS with the default style.",
   "Batch_NegativeSubtitleTimestampAdjusted": "{0} line {1} contained a negative timestamp; the portion before the start of the video was discarded: {2} → {3}",
+  "Batch_NegativeSubtitleTimestampRemoved": "The subtitle at {0} line {1} ends before the video starts and was removed from the working subtitle: {2}",
   "Batch_FindFonts": "Finding installed fonts required by the ASS styles.",
   "Batch_InspectSource": "Inspecting the source video structure.",
   "Batch_MuxSubtitles": "Muxing ASS and SRT into MKV.",

@@ -164,6 +164,38 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task NegativeSrtMillisecondComponentIsHandledBeforeMuxing()
+    {
+        var mkv = Path.Combine(_root, "NegativeMilliseconds.mkv");
+        var srt = Path.Combine(_root, "NegativeMilliseconds.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "1\n"
+                                  + "00:00:00,-340 --> 00:00:00,-340\n"
+                                  + "Intro\n\n"
+                                  + "2\n"
+                                  + "00:00:00,-160 --> 00:00:19,610\n"
+                                  + "뭐든 잘하고 우수\n";
+        await File.WriteAllTextAsync(srt, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "NegativeMilliseconds"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Equal(2, result.Warnings.Count(static warning =>
+            warning.Contains("음수 타임스탬프", StringComparison.Ordinal)
+            || warning.Contains("영상 시작 전에 끝나", StringComparison.Ordinal)));
+        Assert.DoesNotContain("Intro", runner.MuxedSrtText);
+        Assert.DoesNotContain(",-", runner.MuxedSrtText);
+        Assert.Contains("00:00:00,000 --> 00:00:19,610", runner.MuxedSrtText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(srt));
+    }
+
+    [Fact]
     public async Task NegativeAssTimestampIsClampedInMuxedCopyAndAddsWarning()
     {
         var mkv = Path.Combine(_root, "NegativeAss.mkv");

@@ -60,6 +60,39 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
     }
 
     [Fact]
+    public async Task HandlesNegativeMillisecondComponentsAndRemovesFullyPrerollCue()
+    {
+        var source = Path.Combine(_root, "negative-milliseconds.srt");
+        var output = Path.Combine(_root, "normalized.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,-340 --> 00:00:00,-340\r\n"
+                            + "Intro\r\n\r\n"
+                            + "2\r\n"
+                            + "00:00:00,-160 --> 00:00:19,610\r\n"
+                            + "뭐든 잘하고 우수\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        var adjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSrtTimestampsAsync(
+            source,
+            output);
+
+        Assert.Equal(2, adjustments.Count);
+        Assert.Equal(2, adjustments[0].LineNumber);
+        Assert.True(adjustments[0].Removed);
+        Assert.Equal("00:00:00,-340 --> 00:00:00,-340", adjustments[0].OriginalRange);
+        Assert.Equal(6, adjustments[1].LineNumber);
+        Assert.False(adjustments[1].Removed);
+        Assert.Equal("00:00:00,000 --> 00:00:19,610", adjustments[1].AdjustedRange);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.DoesNotContain("Intro", normalized);
+        Assert.DoesNotContain(",-", normalized);
+        Assert.Contains("00:00:00,000 --> 00:00:19,610", normalized);
+        Assert.Contains("뭐든 잘하고 우수", normalized);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
     public async Task ClampsNegativeAssDialogueTimestampAndPreservesSource()
     {
         var source = Path.Combine(_root, "negative.ass");

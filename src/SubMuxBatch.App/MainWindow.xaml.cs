@@ -1805,7 +1805,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 var warnings = targets.Count(static job => job.State == JobState.SucceededWithWarnings);
                 var failed = targets.Count(static job => job.State == JobState.Failed);
                 var skipped = targets.Count(static job => job.State == JobState.Skipped);
-                OverallStatusText.Text = AppText.Get("Main_BatchCompleted", succeeded + warnings, failed, skipped);
+                OverallStatusText.Text = AppText.Get(
+                    "Main_BatchCompleted",
+                    succeeded + warnings,
+                    warnings,
+                    failed,
+                    skipped);
                 SetOverallProgress(
                     100,
                     failed > 0 ? TaskbarItemProgressState.Error : TaskbarItemProgressState.Normal);
@@ -2170,7 +2175,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     : AppText.Get("Notification_Completed");
             var summary = AppText.Get(
                 "Notification_Summary",
-                feedback.Succeeded,
+                feedback.Succeeded + feedback.Warnings,
                 feedback.Warnings,
                 feedback.Failed,
                 feedback.Skipped);

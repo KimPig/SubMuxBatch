@@ -18,6 +18,7 @@
   "Batch_ConvertSmiToSrt": "SMI를 SRT로 변환합니다.",
   "Batch_ConvertSrtToAss": "SRT를 기본 스타일의 ASS로 변환합니다.",
   "Batch_NegativeSubtitleTimestampAdjusted": "{0} {1}번째 행에 음수 타임스탬프가 있어 영상 시작 전 구간을 제외했습니다: {2} → {3}",
+  "Batch_NegativeSubtitleTimestampRemoved": "{0} {1}번째 행의 자막이 영상 시작 전에 끝나 작업용 자막에서 제외했습니다: {2}",
   "Batch_FindFonts": "ASS 스타일에 필요한 설치 폰트를 찾습니다.",
   "Batch_InspectSource": "원본 영상 구조를 확인합니다.",
   "Batch_MuxSubtitles": "ASS와 SRT를 MKV에 병합합니다.",
