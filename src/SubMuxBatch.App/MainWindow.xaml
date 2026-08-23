@@ -495,17 +495,18 @@
                                 <ListBox.Resources>
                                     <DataTemplate DataType="{x:Type viewModels:QueueItemViewModel}">
                                         <Grid MinHeight="48"
-                                              Margin="{Binding DataContext.QueueRowContentMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                              Tag="QueueColumnLayout"
+                                              Loaded="QueueRowGrid_Loaded"
                                               SnapsToDevicePixels="True"
                                               ToolTipService.ShowDuration="12000">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowFileColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowCompositionColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowMediaFormatColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowDurationColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowVideoCodecColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowWorkColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowStatusColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
                                             </Grid.ColumnDefinitions>
                                             <Border Grid.Column="0" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0"
                                                     Visibility="{Binding DataContext.FileColumnVisibility, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
@@ -558,8 +559,24 @@
                                                                Foreground="{Binding StatusForeground}"
                                                                FontWeight="SemiBold"
                                                                TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Margin="0,1,0,0"
+                                                               Text="{Binding ElapsedTimeText}"
+                                                               Foreground="{Binding StatusForeground}"
+                                                               FontSize="10"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Opacity" Value="1" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasElapsedTime}" Value="False">
+                                                                        <Setter Property="Opacity" Value="0" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                     <ProgressBar Height="4"
-                                                                 Margin="0,4,0,0"
+                                                                 Margin="0,3,0,0"
                                                                  Minimum="0"
                                                                  Maximum="100"
                                                                  Value="{Binding Progress}"
@@ -570,18 +587,19 @@
                                     </DataTemplate>
                                     <DataTemplate DataType="{x:Type viewModels:QueueEndSpacerViewModel}">
                                         <Grid Height="48"
-                                              Margin="{Binding DataContext.QueueRowContentMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                              Tag="QueueColumnLayout"
+                                              Loaded="QueueRowGrid_Loaded"
                                               Background="White"
                                               SnapsToDevicePixels="True"
                                               IsHitTestVisible="False">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowFileColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowCompositionColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowMediaFormatColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowDurationColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowVideoCodecColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowWorkColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-                                                <ColumnDefinition Width="{Binding DataContext.QueueRowStatusColumnWidth, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
+                                                <ColumnDefinition />
                                             </Grid.ColumnDefinitions>
                                             <Border Grid.Column="0" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0" />
                                             <Border Grid.Column="1" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0" />
@@ -857,6 +875,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="OverallStatusText"
                            Text="{loc:Loc Main_AddFilesPrompt}"
@@ -870,6 +889,15 @@
                            VerticalAlignment="Center"
                            Margin="12,0,10,0"
                            Text="{loc:Loc Main_OriginalFilesNotice}" />
+                <TextBlock x:Name="OverallElapsedText"
+                           Grid.Column="2"
+                           Width="64"
+                           Margin="8,0,12,0"
+                           Text="00:00:00"
+                           TextAlignment="Right"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           VerticalAlignment="Center"
+                           Visibility="Hidden" />
             </Grid>
             <ProgressBar Grid.Row="1"
                          Grid.Column="0"

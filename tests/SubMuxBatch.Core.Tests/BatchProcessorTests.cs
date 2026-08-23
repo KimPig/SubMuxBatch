@@ -84,6 +84,34 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task AssCommentsStayInAssTrackButAreExcludedFromGeneratedSrt()
+    {
+        var video = Path.Combine(_root, "Comments.mkv");
+        var ass = Path.Combine(_root, "Comments.ass");
+        const string sourceAss = "[Script Info]\n[V4+ Styles]\n[Events]\n"
+                                 + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                 + "Comment: 0,3:08:15.00,0:20:22.45,Default,,0,0,0,,Editor note\n"
+                                 + "Dialogue: 0,0:00:01.00,0:00:04.00,Default,,0,0,0,,Visible subtitle\n";
+        await File.WriteAllBytesAsync(video, [1, 2, 3]);
+        await File.WriteAllTextAsync(ass, sourceAss);
+        var media = new MediaSet(new MediaKey(_root, "Comments"), video, ass, null, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.DoesNotContain("Comment:", runner.SeConvSubRipInputText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Editor note", runner.SeConvSubRipInputText);
+        Assert.Contains("Visible subtitle", runner.SeConvSubRipInputText);
+        Assert.Contains("Editor note", runner.MuxedAssText);
+        Assert.Equal(sourceAss, await File.ReadAllTextAsync(ass));
+    }
+
+    [Fact]
     public async Task SkipSignalReturnsSkippedResult()
     {
         var video = Path.Combine(_root, "Skipped.mkv");

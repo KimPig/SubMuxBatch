@@ -34,6 +34,32 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
     }
 
     [Fact]
+    public async Task RemovesOnlyEventCommentsFromAssPreparedForSrt()
+    {
+        var source = Path.Combine(_root, "source.ass");
+        var output = Path.Combine(_root, "for-srt.ass");
+        const string text = "[Script Info]\r\n"
+                            + "Comment: This is script metadata\r\n"
+                            + "[Events]\r\n"
+                            + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n"
+                            + "  cOmMeNt : 0,3:08:15.00,0:20:22.45,Default,,0,0,0,,Do not export\r\n"
+                            + "Dialogue: 0,0:00:01.00,0:00:04.00,Default,,0,0,0,,Visible\r\n"
+                            + "[Fonts]\r\n"
+                            + "Comment: This line is outside Events\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        var dialogueCount = await SubtitleCompatibilityNormalizer.PrepareAssForSrtAsync(source, output);
+
+        var prepared = await File.ReadAllTextAsync(output);
+        Assert.Equal(1, dialogueCount);
+        Assert.DoesNotContain("Do not export", prepared);
+        Assert.Contains("Visible", prepared);
+        Assert.Contains("Comment: This is script metadata", prepared);
+        Assert.Contains("Comment: This line is outside Events", prepared);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
     public async Task ClampsNegativeTimestampsWithoutExtendingThePositiveEndTime()
     {
         var source = Path.Combine(_root, "negative.srt");

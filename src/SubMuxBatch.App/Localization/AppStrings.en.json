@@ -77,6 +77,8 @@
   "Status_Failed": "Failed",
   "Status_Cancelling": "Cancelling",
   "Status_Cancelled": "Cancelled",
+  "Log_JobElapsed": "{0} · Elapsed {1}",
+  "Log_BatchElapsed": "{0} · Elapsed {1}",
   "MediaInfo_Loading": "Reading media information…",
   "MediaInfo_Failed": "Media information check failed · {0}",
   "MediaInfo_SetMkvMergePath": "Set the mkvmerge path to display this information.",

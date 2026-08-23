@@ -139,8 +139,18 @@ public sealed class BatchProcessor(
                 case SrtSourceKind.ConvertFromAss:
                     Report(JobState.ConvertingAssToSrt, 8, CoreText.Get("Batch_ConvertAssToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
-                    var assToSrtResult = await seConv.ConvertAsync(
+                    var assForSrt = Path.Combine(workspace.Path, "ass-for-srt.ass");
+                    var dialogueCount = await SubtitleCompatibilityNormalizer.PrepareAssForSrtAsync(
                         normalizedExistingAss!,
+                        assForSrt,
+                        cancellationToken).ConfigureAwait(false);
+                    if (dialogueCount == 0)
+                    {
+                        throw new JobSkippedException(CoreText.Get("Batch_SkipNoValidSubtitleCues"));
+                    }
+
+                    var assToSrtResult = await seConv.ConvertAsync(
+                        assForSrt,
                         finalSrt,
                         SubtitleOutputFormat.SubRip,
                         null,

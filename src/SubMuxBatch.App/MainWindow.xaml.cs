@@ -31,6 +31,7 @@ namespace SubMuxBatch.App;
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private const string QueueItemsDragFormat = "SubMuxBatch.QueueItems";
+    private const string QueueColumnLayoutMarker = "QueueColumnLayout";
     private const double MinimumDragDistance = 6;
     private const double MinimumQueueColumnWidth = 48;
     private readonly DependencyLocator _dependencyLocator = new();
@@ -141,19 +142,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public GridLength VideoCodecColumnWidth => CreateQueueColumnWidth(_settings.ShowVideoCodecColumn, _settings.VideoCodecColumnWeight);
     public GridLength WorkColumnWidth => CreateQueueColumnWidth(_settings.ShowWorkColumn, _settings.WorkColumnWeight);
     public GridLength StatusColumnWidth => CreateQueueColumnWidth(_settings.ShowStatusColumn, _settings.StatusColumnWeight);
-    public GridLength QueueRowFileColumnWidth => GetQueueRowColumnWidth(0, FileColumnWidth);
-    public GridLength QueueRowCompositionColumnWidth => GetQueueRowColumnWidth(1, CompositionColumnWidth);
-    public GridLength QueueRowMediaFormatColumnWidth => GetQueueRowColumnWidth(2, MediaFormatColumnWidth);
-    public GridLength QueueRowDurationColumnWidth => GetQueueRowColumnWidth(3, DurationColumnWidth);
-    public GridLength QueueRowVideoCodecColumnWidth => GetQueueRowColumnWidth(4, VideoCodecColumnWidth);
-    public GridLength QueueRowWorkColumnWidth => GetQueueRowColumnWidth(5, WorkColumnWidth);
-    public GridLength QueueRowStatusColumnWidth => GetQueueRowColumnWidth(6, StatusColumnWidth);
-    public Thickness QueueRowContentMargin => new(
-        _queueRowHorizontalOffset,
-        0,
-        -_queueRowHorizontalOffset,
-        0);
-
     public Visibility FileColumnVisibility => ToVisibility(_settings.ShowFileColumn);
     public Visibility CompositionColumnVisibility => ToVisibility(_settings.ShowCompositionColumn);
     public Visibility MediaFormatColumnVisibility => ToVisibility(_settings.ShowMediaFormatColumn);
@@ -208,9 +196,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ? Math.Max(0, QueueHeader.ActualWidth - SystemParameters.VerticalScrollBarWidth)
             : double.NaN;
     }
-
-    private GridLength GetQueueRowColumnWidth(int columnIndex, GridLength fallback) =>
-        columnIndex < _queueRowColumnWidths.Length ? _queueRowColumnWidths[columnIndex] : fallback;
 
     private static Visibility ToVisibility(bool visible) =>
         visible ? Visibility.Visible : Visibility.Collapsed;
@@ -357,6 +342,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _scanCancellation = scanCancellation;
         _isScanning = true;
         SetOverallIndeterminate();
+        HideOverallElapsedTime();
         UpdateControls();
 
         try
@@ -557,6 +543,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         ClearQueueSortIndicators();
         ClearOverallProgress();
+        HideOverallElapsedTime();
         OverallStatusText.Text = Jobs.Count == 0
             ? AppText.Get("Main_AddFilesPrompt")
             : AppText.Get("Main_JobCount", Jobs.Count, Jobs.Count(static job => job.IsValid));
@@ -571,6 +558,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         JobsList.SelectedItem = null;
         OverallStatusText.Text = AppText.Get("Main_AddFilesPrompt");
         ClearOverallProgress();
+        HideOverallElapsedTime();
         UpdateControls();
     }
 
@@ -1272,6 +1260,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return null;
     }
 
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in FindVisualChildren<T>(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
     private void JobsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateControls();
@@ -1322,7 +1328,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _queueRowHorizontalOffset = nextOffset;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowContentMargin)));
+        ApplyQueueLayoutToRealizedRows();
+    }
+
+    private void QueueRowGrid_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Grid rowGrid)
+        {
+            ApplyQueueLayoutToRow(rowGrid);
+        }
     }
 
     private void QueueHeader_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1350,13 +1364,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _queueRowColumnWidths = widths
             .Select(static width => new GridLength(width, GridUnitType.Pixel))
             .ToArray();
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowFileColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowCompositionColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowMediaFormatColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowDurationColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowVideoCodecColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowWorkColumnWidth)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueRowStatusColumnWidth)));
+        ApplyQueueLayoutToRealizedRows();
+    }
+
+    private void ApplyQueueLayoutToRealizedRows()
+    {
+        foreach (var rowGrid in FindVisualChildren<Grid>(JobsList)
+                     .Where(static grid => string.Equals(
+                         grid.Tag as string,
+                         QueueColumnLayoutMarker,
+                         StringComparison.Ordinal)))
+        {
+            ApplyQueueLayoutToRow(rowGrid);
+        }
+    }
+
+    private void ApplyQueueLayoutToRow(Grid rowGrid)
+    {
+        rowGrid.Margin = new Thickness(
+            _queueRowHorizontalOffset,
+            0,
+            -_queueRowHorizontalOffset,
+            0);
+
+        if (_queueRowColumnWidths.Length != QueueColumnProperties.Length
+            || rowGrid.ColumnDefinitions.Count != QueueColumnProperties.Length)
+        {
+            return;
+        }
+
+        for (var index = 0; index < QueueColumnProperties.Length; index++)
+        {
+            rowGrid.ColumnDefinitions[index].Width = _queueRowColumnWidths[index];
+        }
     }
 
     private void EnsureQueueScrollViewer()
@@ -1642,6 +1682,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             target.Progress = 0;
             target.OutputPath = null;
             target.Error = null;
+            target.ResetElapsedTime();
         }
         SetOverallProgress(0);
 
@@ -1651,6 +1692,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var finishedCount = 0;
         var activeCount = 0;
         CompletionFeedback? completionFeedback = null;
+        var batchStopwatch = Stopwatch.StartNew();
+        ShowOverallElapsedTime(batchStopwatch.Elapsed);
+
+        var elapsedTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        elapsedTimer.Tick += (_, _) =>
+        {
+            foreach (var target in targets)
+            {
+                target.RefreshElapsedTime();
+            }
+
+            RefreshBatchStatus();
+        };
+        elapsedTimer.Start();
 
         void RefreshBatchProgress()
         {
@@ -1669,9 +1727,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         void RefreshBatchStatus()
         {
+            ShowOverallElapsedTime(batchStopwatch.Elapsed);
+            if (processingCancellation.IsCancellationRequested)
+            {
+                return;
+            }
+
             var waitingCount = Math.Max(0, targets.Length - Math.Min(nextTargetIndex, targets.Length));
             OverallStatusText.Text =
-                AppText.Get("Main_BatchProgress", finishedCount, targets.Length, activeCount, waitingCount);
+                AppText.Get(
+                    "Main_BatchProgress",
+                    finishedCount,
+                    targets.Length,
+                    activeCount,
+                    waitingCount);
         }
 
         async Task ProcessTargetAsync(int index)
@@ -1679,6 +1748,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var target = targets[index];
             RevealStartedTarget(target);
             activeCount++;
+            target.StartElapsedTime();
             AppendJobLog(target, target.PlanDescription);
             RefreshBatchStatus();
 
@@ -1756,6 +1826,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             finally
             {
+                target.StopElapsedTime();
+                AppendJobLog(
+                    target,
+                    AppText.Get("Log_JobElapsed", target.StatusText, target.ElapsedTimeText));
                 activeCount--;
                 finishedCount++;
                 RefreshBatchProgress();
@@ -1783,6 +1857,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 .Select(_ => RunWorkerAsync())
                 .ToArray();
             await Task.WhenAll(workers);
+            batchStopwatch.Stop();
+            ShowOverallElapsedTime(batchStopwatch.Elapsed);
 
             if (processingCancellation.IsCancellationRequested)
             {
@@ -1797,7 +1873,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
                 OverallStatusText.Text = AppText.Get("Main_BatchCancelled");
                 ClearOverallProgress();
-                AppendLog(OverallStatusText.Text);
+                AppendLog(AppText.Get(
+                    "Log_BatchElapsed",
+                    OverallStatusText.Text,
+                    QueueItemViewModel.FormatElapsedTime(batchStopwatch.Elapsed)));
             }
             else
             {
@@ -1814,19 +1893,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SetOverallProgress(
                     100,
                     failed > 0 ? TaskbarItemProgressState.Error : TaskbarItemProgressState.Normal);
-                AppendLog(OverallStatusText.Text);
+                AppendLog(AppText.Get(
+                    "Log_BatchElapsed",
+                    OverallStatusText.Text,
+                    QueueItemViewModel.FormatElapsedTime(batchStopwatch.Elapsed)));
                 completionFeedback = new CompletionFeedback(succeeded, warnings, failed, skipped);
             }
         }
         catch (Exception exception)
         {
+            batchStopwatch.Stop();
+            ShowOverallElapsedTime(batchStopwatch.Elapsed);
             AppendLog(AppText.Get("Log_BatchFailed", exception.Message));
             OverallStatusText.Text = AppText.Get("Main_BatchError");
+            AppendLog(AppText.Get(
+                "Log_BatchElapsed",
+                OverallStatusText.Text,
+                QueueItemViewModel.FormatElapsedTime(batchStopwatch.Elapsed)));
             SetOverallProgress(100, TaskbarItemProgressState.Error);
             MessageBox.Show(this, exception.Message, AppText.Get("Dialog_BatchFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
+            batchStopwatch.Stop();
+            elapsedTimer.Stop();
             if (ReferenceEquals(_processingCancellation, processingCancellation))
             {
                 _processingCancellation = null;
@@ -2068,6 +2158,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OverallProgressBar.Value = 0;
         TaskbarProgressInfo.ProgressValue = 0;
         TaskbarProgressInfo.ProgressState = TaskbarItemProgressState.None;
+    }
+
+    private void ShowOverallElapsedTime(TimeSpan elapsed)
+    {
+        OverallElapsedText.Text = QueueItemViewModel.FormatElapsedTime(elapsed);
+        OverallElapsedText.Visibility = Visibility.Visible;
+    }
+
+    private void HideOverallElapsedTime()
+    {
+        OverallElapsedText.Text = "00:00:00";
+        OverallElapsedText.Visibility = Visibility.Hidden;
     }
 
     private void RevealStartedTarget(QueueItemViewModel target)

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.IO;
 using SubMuxBatch.App.Localization;
@@ -25,6 +26,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private string _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
     private bool _mediaInspectionFailed;
     private bool _mediaInspectionCompleted;
+    private Stopwatch? _elapsedStopwatch;
+    private TimeSpan _elapsedTime;
+    private bool _hasElapsedTime;
 
     public QueueItemViewModel(MediaSet media, AppSettings settings)
     {
@@ -158,7 +162,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         : string.Join(Environment.NewLine, _media.CandidateVideoPaths);
     public string VideoFileNamesDisplay => _media.CandidateVideoPaths.Count == 0
         ? VideoPathDisplay
-        : string.Join(" · ", _media.CandidateVideoPaths.Select(Path.GetFileName));    public string SubtitlePathsDisplay
+        : string.Join(" · ", _media.CandidateVideoPaths.Select(Path.GetFileName));
+    public string SubtitlePathsDisplay
     {
         get
         {
@@ -181,7 +186,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 .ToArray();
             return paths.Length == 0 ? SubtitlePathsDisplay : string.Join(Environment.NewLine, paths);
         }
-    }    public string OutputPathDisplay => OutputPath
+    }
+    public string OutputPathDisplay => OutputPath
         ?? (_media.VideoPath is null
             ? AppText.Get("Common_Undetermined")
             : Path.Combine(Folder, _plannedOutputFile));
@@ -644,6 +650,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         _ => State.ToString()
     };
 
+    public bool HasElapsedTime => _hasElapsedTime;
+    public string ElapsedTimeText => FormatElapsedTime(ElapsedTime);
+
     public string StatusForeground => State switch
     {
         JobState.Succeeded => "#107C10",
@@ -783,6 +792,51 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         Progress = progress.Percent;
     }
 
+    public void ResetElapsedTime()
+    {
+        _elapsedStopwatch = null;
+        _elapsedTime = TimeSpan.Zero;
+        _hasElapsedTime = false;
+        RaiseElapsedTimeChanged();
+    }
+
+    public void StartElapsedTime()
+    {
+        _elapsedTime = TimeSpan.Zero;
+        _elapsedStopwatch = Stopwatch.StartNew();
+        _hasElapsedTime = true;
+        RaiseElapsedTimeChanged();
+    }
+
+    public void RefreshElapsedTime()
+    {
+        if (_elapsedStopwatch?.IsRunning == true)
+        {
+            RaiseElapsedTimeChanged();
+        }
+    }
+
+    public void StopElapsedTime()
+    {
+        if (_elapsedStopwatch is null)
+        {
+            return;
+        }
+
+        _elapsedStopwatch.Stop();
+        _elapsedTime = _elapsedStopwatch.Elapsed;
+        _elapsedStopwatch = null;
+        RaiseElapsedTimeChanged();
+    }
+
+    private TimeSpan ElapsedTime => _elapsedStopwatch?.Elapsed ?? _elapsedTime;
+
+    private void RaiseElapsedTimeChanged()
+    {
+        OnPropertyChanged(nameof(HasElapsedTime));
+        OnPropertyChanged(nameof(ElapsedTimeText));
+    }
+
     private void RaiseMediaInfoChanged()
     {
         OnPropertyChanged(nameof(NeedsMediaInspection));
@@ -913,6 +967,15 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     {
         var duration = TimeSpan.FromTicks(nanoseconds / 100);
         return $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}.{duration.Milliseconds:000}";
+    }
+
+    internal static string FormatElapsedTime(TimeSpan elapsed)
+    {
+        var totalSeconds = Math.Max(0, (long)elapsed.TotalSeconds);
+        var hours = totalSeconds / 3600;
+        var minutes = totalSeconds / 60 % 60;
+        var seconds = totalSeconds % 60;
+        return $"{hours:00}:{minutes:00}:{seconds:00}";
     }
 
     private static string FormatFileSize(long bytes)

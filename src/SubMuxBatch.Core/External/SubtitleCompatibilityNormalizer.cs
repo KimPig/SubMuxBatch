@@ -268,6 +268,51 @@ public static partial class SubtitleCompatibilityNormalizer
             cancellationToken).ConfigureAwait(false);
     }
 
+    public static async Task<int> PrepareAssForSrtAsync(
+        string sourcePath,
+        string outputPath,
+        CancellationToken cancellationToken = default)
+    {
+        var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+        var text = DecodeSubtitle(bytes);
+        var lines = NormalizeLineEndings(text).Split('\n');
+        var output = new List<string>(lines.Length);
+        var inEventsSection = false;
+        var dialogueCount = 0;
+
+        foreach (var line in lines)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var section = AssSectionLineRegex().Match(line);
+            if (section.Success)
+            {
+                inEventsSection = string.Equals(
+                    section.Groups["name"].Value.Trim(),
+                    "Events",
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (inEventsSection && AssCommentPrefixRegex().IsMatch(line))
+            {
+                continue;
+            }
+
+            if (inEventsSection && AssDialoguePrefixRegex().IsMatch(line))
+            {
+                dialogueCount++;
+            }
+
+            output.Add(line);
+        }
+
+        await File.WriteAllTextAsync(
+            outputPath,
+            string.Join("\r\n", output),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            cancellationToken).ConfigureAwait(false);
+        return dialogueCount;
+    }
+
     private static string DecodeSubtitle(byte[] bytes)
     {
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
@@ -576,6 +621,15 @@ public static partial class SubtitleCompatibilityNormalizer
         @"^(?<prefix>[ \t]*Dialogue[ \t]*:[^,\r\n]*,)(?<start>[^,\r\n]*),(?<end>[^,\r\n]*)(?<suffix>,[^\r\n]*)(?<cr>\r?)$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex AssDialogueLineRegex();
+
+    [GeneratedRegex(@"^[ \t]*\[(?<name>[^\]]+)\][ \t]*$")]
+    private static partial Regex AssSectionLineRegex();
+
+    [GeneratedRegex(@"^[ \t]*Comment[ \t]*:", RegexOptions.IgnoreCase)]
+    private static partial Regex AssCommentPrefixRegex();
+
+    [GeneratedRegex(@"^[ \t]*Dialogue[ \t]*:", RegexOptions.IgnoreCase)]
+    private static partial Regex AssDialoguePrefixRegex();
 
     [GeneratedRegex(
         @"(?<prefix><sync\b[^>]*\bstart\s*=\s*[""']?)(?<value>-\d+)(?<suffix>[""']?[^>]*>)",

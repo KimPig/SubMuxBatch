@@ -77,6 +77,8 @@
   "Status_Failed": "실패",
   "Status_Cancelling": "취소 중",
   "Status_Cancelled": "취소됨",
+  "Log_JobElapsed": "{0} · 소요 시간 {1}",
+  "Log_BatchElapsed": "{0} · 소요 시간 {1}",
   "MediaInfo_Loading": "미디어 정보를 읽는 중…",
   "MediaInfo_Failed": "미디어 정보 확인 실패 · {0}",
   "MediaInfo_SetMkvMergePath": "mkvmerge 경로를 설정하면 표시됩니다.",
