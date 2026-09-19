@@ -51,7 +51,9 @@ public sealed class MetadataBackupService(
         string sourcePath,
         string mkvMergePath,
         MkvIdentification identification,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? onBackupCreated = null,
+        Action<string>? onBackupDirectoryCreated = null)
     {
         var source = ValidateSource(sourcePath, mkvMergePath, identification, cancellationToken);
 
@@ -102,7 +104,7 @@ public sealed class MetadataBackupService(
             tagsXml,
             chaptersXml);
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source);
+        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var destination = GetAvailableFilePath(videoBackupDirectory, "metadata.json");
         var temporaryPath = Path.Combine(
             videoBackupDirectory,
@@ -126,6 +128,7 @@ public sealed class MetadataBackupService(
             }
 
             File.Move(temporaryPath, destination, overwrite: false);
+            onBackupCreated?.Invoke(destination);
             return destination;
         }
         finally
@@ -138,7 +141,9 @@ public sealed class MetadataBackupService(
         string sourcePath,
         string mkvMergePath,
         MkvIdentification identification,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? onBackupCreated = null,
+        Action<string>? onBackupDirectoryCreated = null)
     {
         var source = ValidateSource(sourcePath, mkvMergePath, identification, cancellationToken);
         var subtitleTracks = identification.Inspection.Tracks
@@ -151,7 +156,7 @@ public sealed class MetadataBackupService(
             return [];
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source);
+        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var trackIds = subtitleTracks.Select(static track => track.Id
             ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_TrackIdMissing", "subtitle")));
         var subtitlePath = await CreateTrackSidecarAsync(
@@ -161,6 +166,7 @@ public sealed class MetadataBackupService(
             "subtitles.mks",
             trackIds,
             isAudio: false,
+            onBackupCreated,
             cancellationToken).ConfigureAwait(false);
         return [subtitlePath];
     }
@@ -169,7 +175,9 @@ public sealed class MetadataBackupService(
         string sourcePath,
         string mkvMergePath,
         MkvIdentification identification,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? onBackupCreated = null,
+        Action<string>? onBackupDirectoryCreated = null)
     {
         var source = ValidateSource(sourcePath, mkvMergePath, identification, cancellationToken);
         var attachments = identification.Inspection.Attachments;
@@ -178,7 +186,7 @@ public sealed class MetadataBackupService(
             return [];
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source);
+        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var mkvExtractPath = ResolveMkvExtractPath(mkvMergePath);
         EnsureMkvExtractExists(mkvExtractPath);
         var attachmentSource = source.FullName;
@@ -212,6 +220,8 @@ public sealed class MetadataBackupService(
                 attachmentSource,
                 extractionAttachments,
                 Path.Combine(videoBackupDirectory, "attachments"),
+                onBackupCreated,
+                onBackupDirectoryCreated,
                 cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -228,7 +238,9 @@ public sealed class MetadataBackupService(
         string mkvMergePath,
         MkvIdentification identification,
         AudioTrackLanguage retainedLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? onBackupCreated = null,
+        Action<string>? onBackupDirectoryCreated = null)
     {
         var source = ValidateSource(sourcePath, mkvMergePath, identification, cancellationToken);
         var audioTracks = identification.Inspection.Tracks
@@ -259,7 +271,7 @@ public sealed class MetadataBackupService(
             return null;
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source);
+        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         return await CreateTrackSidecarAsync(
             source,
             mkvMergePath,
@@ -267,6 +279,7 @@ public sealed class MetadataBackupService(
             "excluded-audio.mka",
             excludedTrackIds,
             isAudio: true,
+            onBackupCreated,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -277,6 +290,7 @@ public sealed class MetadataBackupService(
         string fileName,
         IEnumerable<int> trackIds,
         bool isAudio,
+        Action<string>? onBackupCreated,
         CancellationToken cancellationToken)
     {
         var destination = GetAvailableFilePath(destinationDirectory, fileName);
@@ -320,6 +334,7 @@ public sealed class MetadataBackupService(
                 temporaryPath,
                 cancellationToken).ConfigureAwait(false);
             File.Move(temporaryPath, destination, overwrite: false);
+            onBackupCreated?.Invoke(destination);
             return destination;
         }
         finally
@@ -412,6 +427,8 @@ public sealed class MetadataBackupService(
         string sourcePath,
         IReadOnlyList<MkvAttachmentInfo> attachments,
         string destinationDirectory,
+        Action<string>? onBackupCreated,
+        Action<string>? onBackupDirectoryCreated,
         CancellationToken cancellationToken)
     {
         var parentDirectory = Path.GetDirectoryName(destinationDirectory)
@@ -471,7 +488,7 @@ public sealed class MetadataBackupService(
                 }
             }
 
-            Directory.CreateDirectory(destinationDirectory);
+            CreateDirectory(destinationDirectory, onBackupDirectoryCreated);
             var destinations = new List<string>(extractedFiles.Count);
             foreach (var extractedFile in extractedFiles)
             {
@@ -479,6 +496,7 @@ public sealed class MetadataBackupService(
                     destinationDirectory,
                     extractedFile.DestinationName);
                 File.Move(extractedFile.ExtractionPath, destination, overwrite: false);
+                onBackupCreated?.Invoke(destination);
                 destinations.Add(destination);
             }
             return destinations;
@@ -508,16 +526,30 @@ public sealed class MetadataBackupService(
         return source;
     }
 
-    private static string CreateVideoBackupDirectory(FileInfo source)
+    private static string CreateVideoBackupDirectory(
+        FileInfo source,
+        Action<string>? onBackupDirectoryCreated)
     {
         var root = Path.Combine(
             source.DirectoryName
             ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_SourceDirectoryMissing")),
             BackupDirectoryName);
-        Directory.CreateDirectory(root);
+        CreateDirectory(root, onBackupDirectoryCreated);
         var videoDirectory = Path.Combine(root, source.Name);
-        Directory.CreateDirectory(videoDirectory);
+        CreateDirectory(videoDirectory, onBackupDirectoryCreated);
         return videoDirectory;
+    }
+
+    private static void CreateDirectory(
+        string path,
+        Action<string>? onBackupDirectoryCreated)
+    {
+        var existed = Directory.Exists(path);
+        Directory.CreateDirectory(path);
+        if (!existed)
+        {
+            onBackupDirectoryCreated?.Invoke(path);
+        }
     }
 
     private static bool IsMatroska(string? containerType) =>

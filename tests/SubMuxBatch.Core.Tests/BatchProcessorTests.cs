@@ -111,6 +111,98 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task FatalMuxFailureRollsBackOnlyBackupsCreatedByCurrentJob()
+    {
+        var video = Path.Combine(_root, "Rollback.mp4");
+        var srt = Path.Combine(_root, "Rollback.srt");
+        await File.WriteAllBytesAsync(video, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var backupRoot = Path.Combine(_root, MetadataBackupService.BackupDirectoryName);
+        var currentVideoDirectory = Path.Combine(backupRoot, "Rollback.mp4");
+        var otherVideoDirectory = Path.Combine(backupRoot, "Other.mp4");
+        Directory.CreateDirectory(currentVideoDirectory);
+        Directory.CreateDirectory(otherVideoDirectory);
+        var existingCurrentBackup = Path.Combine(currentVideoDirectory, "keep.txt");
+        var otherBackup = Path.Combine(otherVideoDirectory, "metadata.json");
+        await File.WriteAllTextAsync(existingCurrentBackup, "keep current");
+        await File.WriteAllTextAsync(otherBackup, "keep other");
+        var media = new MediaSet(new MediaKey(_root, "Rollback"), video, null, srt, null);
+
+        var result = await new BatchProcessor(new FatalMp4ReadRunner()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                BackupOriginalMetadata = true
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Failed, result.State);
+        Assert.Null(result.OutputPath);
+        Assert.Contains("원본 미디어 데이터를 끝까지 읽지 못했습니다", result.Error);
+        Assert.Equal("keep current", await File.ReadAllTextAsync(existingCurrentBackup));
+        Assert.Equal("keep other", await File.ReadAllTextAsync(otherBackup));
+        Assert.False(File.Exists(Path.Combine(currentVideoDirectory, "metadata.json")));
+        Assert.DoesNotContain(
+            Directory.EnumerateFiles(currentVideoDirectory),
+            static path => Path.GetFileName(path).StartsWith("metadata (", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(Directory.EnumerateDirectories(_root, ".submuxbatch-*"));
+    }
+
+    [Fact]
+    public async Task FatalMuxFailureRemovesNewEmptyBackupTree()
+    {
+        var video = Path.Combine(_root, "CleanRollback.mp4");
+        var srt = Path.Combine(_root, "CleanRollback.srt");
+        await File.WriteAllBytesAsync(video, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "CleanRollback"), video, null, srt, null);
+
+        var result = await new BatchProcessor(new FatalMp4ReadRunner()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                BackupOriginalMetadata = true
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Failed, result.State);
+        Assert.False(Directory.Exists(Path.Combine(
+            _root,
+            MetadataBackupService.BackupDirectoryName)));
+    }
+
+    [Fact]
+    public async Task SuccessfulMuxCommitsNewBackupFiles()
+    {
+        var video = Path.Combine(_root, "BackupSuccess.mp4");
+        var srt = Path.Combine(_root, "BackupSuccess.srt");
+        await File.WriteAllBytesAsync(video, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "BackupSuccess"), video, null, srt, null);
+
+        var result = await new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                BackupOriginalMetadata = true
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.True(File.Exists(Path.Combine(
+            _root,
+            MetadataBackupService.BackupDirectoryName,
+            "BackupSuccess.mp4",
+            "metadata.json")));
+    }
+
+    [Fact]
     public async Task AssCommentsStayInAssTrackButAreExcludedFromGeneratedSrt()
     {
         var video = Path.Combine(_root, "Comments.mkv");
@@ -672,6 +764,28 @@ public sealed class BatchProcessorTests : IDisposable
           {"type":"audio","properties":{"codec_id":"A_OPUS","default_track":true,"forced_track":false}}
         ],"attachments":[],"chapters":[]}
         """;
+    }
+
+    private sealed class FatalMp4ReadRunner : IProcessRunner
+    {
+        private readonly FakeProcessRunner _inner = new();
+
+        public async Task<ProcessResult> RunAsync(
+            ProcessRequest request,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _inner.RunAsync(request, onOutput, cancellationToken);
+            if (!request.Arguments.Contains("--gui-mode"))
+            {
+                return result;
+            }
+
+            const string warning = "Quicktime/MP4 reader: Could not read 847 bytes at position 9335545265 for chunk number 219594/226031. Aborting.";
+            var output = $"#GUI#progress 100%{Environment.NewLine}#GUI#warning {warning}{Environment.NewLine}";
+            onOutput?.Invoke($"#GUI#warning {warning}");
+            return new ProcessResult(1, output, string.Empty);
+        }
     }
 
     private sealed class StaticFontResolver(IReadOnlyList<FontAttachmentFile> files) : IInstalledFontResolver

@@ -38,6 +38,24 @@ public sealed class BatchProcessor(
         var warnings = plan.Warnings.ToList();
         var currentState = JobState.Ready;
         var currentPercent = 0;
+        BackupArtifactTransaction? backupTransaction = null;
+
+        void ReportBackupRollbackErrors(IReadOnlyList<string> errors)
+        {
+            if (errors.Count == 0)
+            {
+                return;
+            }
+
+            var warning = CoreText.Get(
+                "Batch_BackupRollbackWarning",
+                string.Join(Environment.NewLine, errors));
+            warnings.Add(warning);
+            progress?.Report(new JobProgress(currentState, currentPercent, warning));
+        }
+
+        void RollbackBackups() =>
+            ReportBackupRollbackErrors(backupTransaction?.Rollback() ?? []);
 
         void AddNegativeTimestampWarnings(
             string format,
@@ -94,12 +112,18 @@ public sealed class BatchProcessor(
         async Task TryBackupAsync(
             string backupName,
             string progressMessage,
-            Func<Task<IReadOnlyList<string>>> backupAction)
+            Func<Action<string>, Action<string>, Task<IReadOnlyList<string>>> backupAction)
         {
             Report(JobState.Verifying, 36, progressMessage);
+            var checkpoint = backupTransaction?.Checkpoint ?? new BackupArtifactCheckpoint(0, 0);
             try
             {
-                var paths = await backupAction().ConfigureAwait(false);
+                var transaction = backupTransaction
+                                  ?? throw new InvalidOperationException("The backup transaction is not initialized.");
+                var paths = await backupAction(
+                        transaction.RecordCreatedFile,
+                        transaction.RecordCreatedDirectory)
+                    .ConfigureAwait(false);
                 if (paths.Count == 0)
                 {
                     Report(JobState.Verifying, 36, CoreText.Get("Batch_BackupNoItems", backupName));
@@ -113,10 +137,12 @@ public sealed class BatchProcessor(
             }
             catch (OperationCanceledException)
             {
+                ReportBackupRollbackErrors(backupTransaction?.RollbackTo(checkpoint) ?? []);
                 throw;
             }
             catch (Exception exception)
             {
+                ReportBackupRollbackErrors(backupTransaction?.RollbackTo(checkpoint) ?? []);
                 var warning = CoreText.Get("Batch_BackupWarning", backupName, exception.Message);
                 warnings.Add(warning);
                 Report(JobState.Verifying, 36, warning);
@@ -319,19 +345,22 @@ public sealed class BatchProcessor(
                 .ConfigureAwait(false);
             var sourceInspection = sourceIdentification.Inspection;
             var backupService = new MetadataBackupService(processRunner);
+            backupTransaction = new BackupArtifactTransaction(media.VideoPath);
 
             if (settings.BackupOriginalMetadata)
             {
                 await TryBackupAsync(
                     CoreText.Get("Backup_Metadata"),
                     CoreText.Get("Batch_BackupMetadata"),
-                    async () =>
+                    async (onBackupCreated, onBackupDirectoryCreated) =>
                     [
                         await backupService.BackupMetadataAsync(
                             media.VideoPath,
                             dependencies.MkvMerge.Path,
                             sourceIdentification,
-                            cancellationToken).ConfigureAwait(false)
+                            cancellationToken,
+                            onBackupCreated,
+                            onBackupDirectoryCreated).ConfigureAwait(false)
                     ]).ConfigureAwait(false);
             }
 
@@ -340,11 +369,13 @@ public sealed class BatchProcessor(
                 await TryBackupAsync(
                     CoreText.Get("Backup_Subtitles"),
                     CoreText.Get("Batch_BackupSubtitles"),
-                    () => backupService.BackupSubtitlesAsync(
+                    (onBackupCreated, onBackupDirectoryCreated) => backupService.BackupSubtitlesAsync(
                         media.VideoPath,
                         dependencies.MkvMerge.Path,
                         sourceIdentification,
-                        cancellationToken)).ConfigureAwait(false);
+                        cancellationToken,
+                        onBackupCreated,
+                        onBackupDirectoryCreated)).ConfigureAwait(false);
             }
 
             if (settings.BackupOriginalAttachments)
@@ -352,11 +383,13 @@ public sealed class BatchProcessor(
                 await TryBackupAsync(
                     CoreText.Get("Backup_Attachments"),
                     CoreText.Get("Batch_BackupAttachments"),
-                    () => backupService.BackupAttachmentsAsync(
+                    (onBackupCreated, onBackupDirectoryCreated) => backupService.BackupAttachmentsAsync(
                         media.VideoPath,
                         dependencies.MkvMerge.Path,
                         sourceIdentification,
-                        cancellationToken)).ConfigureAwait(false);
+                        cancellationToken,
+                        onBackupCreated,
+                        onBackupDirectoryCreated)).ConfigureAwait(false);
             }
 
             if (settings.BackupExcludedAudioTracks && settings.FilterAudioTracksByLanguage)
@@ -364,14 +397,16 @@ public sealed class BatchProcessor(
                 await TryBackupAsync(
                     CoreText.Get("Backup_ExcludedAudio"),
                     CoreText.Get("Batch_BackupExcludedAudio"),
-                    async () =>
+                    async (onBackupCreated, onBackupDirectoryCreated) =>
                     {
                         var path = await backupService.BackupExcludedAudioTracksAsync(
                             media.VideoPath,
                             dependencies.MkvMerge.Path,
                             sourceIdentification,
                             settings.SelectedAudioLanguage,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken,
+                            onBackupCreated,
+                            onBackupDirectoryCreated).ConfigureAwait(false);
                         return path is null ? [] : [path];
                     }).ConfigureAwait(false);
             }
@@ -458,6 +493,7 @@ public sealed class BatchProcessor(
 
             Report(JobState.Verifying, 99, CoreText.Get("Batch_CleanupWorkspace"));
             await workspace.DisposeAsync().ConfigureAwait(false);
+            backupTransaction.Commit();
 
             var finalState = warnings.Count > 0 ? JobState.SucceededWithWarnings : JobState.Succeeded;
             Report(finalState, 100, CoreText.Get("Batch_Completed", outputPath));
@@ -465,16 +501,19 @@ public sealed class BatchProcessor(
         }
         catch (OperationCanceledException)
         {
+            RollbackBackups();
             Report(JobState.Cancelled, currentPercent, CoreText.Get("Batch_Cancelled"));
             throw;
         }
         catch (JobSkippedException exception)
         {
+            RollbackBackups();
             Report(JobState.Skipped, currentPercent, exception.Message);
             return new JobResult(JobState.Skipped, null, warnings, exception.Message);
         }
         catch (Exception exception)
         {
+            RollbackBackups();
             Report(JobState.Failed, currentPercent, exception.Message);
             return new JobResult(JobState.Failed, null, warnings, exception.Message);
         }

@@ -126,6 +126,7 @@
   "Batch_BackupCompleted": "Source backup completed: {0}",
   "Batch_BackupNoItems": "There are no {0} items to back up.",
   "Batch_BackupWarning": "The {0} backup failed. The output MKV will still be created, but do not delete the source file. {1}",
+  "Batch_BackupRollbackWarning": "Some backups created by the failed job could not be removed. Check these paths manually.\n{0}",
   "Backup_Metadata": "metadata",
   "Backup_Subtitles": "embedded subtitle",
   "Backup_Attachments": "attachment",
