@@ -297,6 +297,17 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             HandleOutput,
             cancellationToken).ConfigureAwait(false);
 
+        var warnings = ExtractWarnings(result);
+        var fatalReadWarnings = warnings.Where(IsFatalSourceReadWarning).ToArray();
+        if (fatalReadWarnings.Length > 0)
+        {
+            TryDeleteIncompleteOutput(outputPath);
+            throw new InvalidOperationException(
+                CoreText.Get(
+                    "Mkv_SourceReadFailed",
+                    string.Join(Environment.NewLine, fatalReadWarnings)));
+        }
+
         if (result.ExitCode >= 2 || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
         {
             var details = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
@@ -305,7 +316,7 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         }
 
         return new MuxResult(
-            ExtractWarnings(result),
+            warnings,
             result.StandardOutput,
             result.StandardError);
     }
@@ -340,6 +351,41 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         || warning.Contains(
             "파일의 모든 항목은 시작 시간으로 정렬됩니다.",
             StringComparison.Ordinal);
+
+    private static bool IsFatalSourceReadWarning(string warning)
+    {
+        if (!warning.Contains("Quicktime/MP4", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var isEnglishReadAbort = warning.Contains("Could not read", StringComparison.OrdinalIgnoreCase)
+                                 && warning.Contains("chunk number", StringComparison.OrdinalIgnoreCase)
+                                 && warning.Contains("Aborting", StringComparison.OrdinalIgnoreCase);
+        var isKoreanReadAbort = warning.Contains("읽어올 수 없습니다", StringComparison.Ordinal)
+                                && warning.Contains("청크 번호", StringComparison.Ordinal)
+                                && warning.Contains("중단합니다", StringComparison.Ordinal);
+        return isEnglishReadAbort || isKoreanReadAbort;
+    }
+
+    private static void TryDeleteIncompleteOutput(string outputPath)
+    {
+        try
+        {
+            if (File.Exists(outputPath))
+            {
+                File.Delete(outputPath);
+            }
+        }
+        catch (IOException)
+        {
+            // The owning job workspace performs another best-effort cleanup.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The owning job workspace performs another best-effort cleanup.
+        }
+    }
 
     private static string GetUiLanguageCode() =>
         string.Equals(

@@ -82,6 +82,7 @@
   "Mkv_AssTrackName": "스타일 자막 (ASS)",
   "Mkv_SrtTrackName": "일반 자막 (SRT)",
   "Mkv_MuxFailed": "mkvmerge 병합 실패 (종료 코드 {0})\n{1}",
+  "Mkv_SourceReadFailed": "mkvmerge가 원본 미디어 데이터를 끝까지 읽지 못했습니다. 불완전한 결과 파일을 삭제했습니다. 원본 파일의 손상, 불완전한 다운로드 또는 저장 장치·네트워크 읽기 오류를 확인하세요.\n{0}",
   "Mkv_WarningWithoutDetails": "mkvmerge가 경고와 함께 완료되었지만 상세 내용을 제공하지 않았습니다.",
   "Mkv_ValidationAudioMissing": "원본 영상에 선택한 {0} 오디오 트랙이 없습니다.",
   "Mkv_ValidationMediaTrackCount": "원본과 결과의 비자막 트랙 수가 다릅니다.",

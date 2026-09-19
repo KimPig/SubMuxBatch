@@ -135,6 +135,45 @@ public sealed class MkvMergeWarningTests
         }
     }
 
+    [Theory]
+    [InlineData("Quicktime/MP4 reader: Could not read 847 bytes at position 9335545265 for chunk number 219594/226031. Aborting.")]
+    [InlineData("Quicktime/MP4 리더: 위치 9335421002에서 크기 124263, 청크 번호 281089/289316를 읽어올 수 없습니다. 중단합니다.")]
+    public async Task FailsAndDeletesOutputWhenMp4ChunkCannotBeRead(string warning)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-read-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mp4");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[Script Info]\n[V4+ Styles]\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            var runner = new WarningRunner(
+                output,
+                1,
+                $"#GUI#progress 100%\n#GUI#warning {warning}\n",
+                string.Empty);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                    source,
+                    ass,
+                    srt,
+                    output));
+
+            Assert.Contains(warning, exception.Message);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class WarningRunner(
         string outputPath,
         int exitCode,

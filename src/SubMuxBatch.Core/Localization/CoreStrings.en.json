@@ -82,6 +82,7 @@
   "Mkv_AssTrackName": "Styled subtitles (ASS)",
   "Mkv_SrtTrackName": "Standard subtitles (SRT)",
   "Mkv_MuxFailed": "mkvmerge muxing failed (exit code {0})\n{1}",
+  "Mkv_SourceReadFailed": "mkvmerge could not read all source media data. The incomplete output file was deleted. Check for source corruption, an incomplete download, or a storage/network read error.\n{0}",
   "Mkv_WarningWithoutDetails": "mkvmerge completed with a warning but did not provide details.",
   "Mkv_ValidationAudioMissing": "The selected {0} audio track is missing from the source video.",
   "Mkv_ValidationMediaTrackCount": "The number of non-subtitle tracks differs between the source and output.",
