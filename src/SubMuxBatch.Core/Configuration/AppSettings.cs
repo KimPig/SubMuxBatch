@@ -49,6 +49,13 @@ public sealed class AppSettings
     public bool RemoveChapters { get; set; } = false;
     public bool AttachAssStyleFonts { get; set; } = true;
     public bool AddSubMuxTag { get; set; } = true;
+    public bool BackupOriginalMetadata { get; set; } = false;
+    public bool BackupOriginalSubtitles { get; set; } = false;
+    public bool BackupOriginalAttachments { get; set; } = false;
+    public bool BackupExcludedAudioTracks { get; set; } = false;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool BackupOriginalSubtitlesAndAttachments { get; set; } = false;
+    public bool CleanOutputMetadata { get; set; } = false;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
     public int ConcurrentJobCount { get; set; } = MinConcurrentJobCount;
@@ -130,6 +137,12 @@ public sealed class AppSettings
         {
             settings.Language = AppLanguage.System;
         }
+        if (settings.BackupOriginalSubtitlesAndAttachments)
+        {
+            settings.BackupOriginalSubtitles = true;
+            settings.BackupOriginalAttachments = true;
+            settings.BackupOriginalSubtitlesAndAttachments = false;
+        }
         return settings;
     }
 
@@ -176,6 +189,11 @@ public sealed class AppSettings
         RemoveChapters = RemoveChapters,
         AttachAssStyleFonts = AttachAssStyleFonts,
         AddSubMuxTag = AddSubMuxTag,
+        BackupOriginalMetadata = BackupOriginalMetadata,
+        BackupOriginalSubtitles = BackupOriginalSubtitles,
+        BackupOriginalAttachments = BackupOriginalAttachments,
+        BackupExcludedAudioTracks = BackupExcludedAudioTracks,
+        CleanOutputMetadata = CleanOutputMetadata,
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,
         ConcurrentJobCount = ConcurrentJobCount,

@@ -75,6 +75,20 @@ public sealed record MediaInfoTextStream(
 
 public sealed record MediaInfoMetadataTag(string Name, string Value);
 
+public sealed record MediaInfoRawField(string Name, string Value);
+
+public sealed record MediaInfoRawStream(
+    string Kind,
+    int Index,
+    IReadOnlyList<MediaInfoRawField> Fields);
+
+public interface IMediaInfoRawReader
+{
+    Task<IReadOnlyList<MediaInfoRawStream>> ReadRawReportAsync(
+        string path,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record MediaInfoInspection(
     string? ContainerFormat,
     string? ContainerProfile,
@@ -97,8 +111,19 @@ public sealed record MediaInfoInspection(
     string? Comment,
     bool ProcessedBySubMux);
 
-public sealed class MediaInfoClient
+public sealed class MediaInfoClient : IMediaInfoRawReader
 {
+    private static readonly (StreamKind Kind, string Name)[] RawStreamKinds =
+    [
+        (StreamKind.General, "General"),
+        (StreamKind.Video, "Video"),
+        (StreamKind.Audio, "Audio"),
+        (StreamKind.Text, "Text"),
+        (StreamKind.Other, "Other"),
+        (StreamKind.Image, "Image"),
+        (StreamKind.Menu, "Menu")
+    ];
+
     private static readonly HashSet<string> ExactTechnicalGeneralFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "Count", "StreamCount", "StreamKind", "StreamOrder", "ID", "UniqueID",
@@ -124,6 +149,67 @@ public sealed class MediaInfoClient
         string path,
         CancellationToken cancellationToken = default) =>
         Task.Run(() => Inspect(path, cancellationToken), cancellationToken);
+
+    public Task<IReadOnlyList<MediaInfoRawStream>> ReadRawReportAsync(
+        string path,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => ReadRawReport(path, cancellationToken), cancellationToken);
+
+    private static IReadOnlyList<MediaInfoRawStream> ReadRawReport(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var mediaInfo = new MediaInfo();
+        mediaInfo.Option("Internet", "No");
+        mediaInfo.Option("ParseUnknownExtensions", "1");
+        if (mediaInfo.Open(path) == 0)
+        {
+            throw new InvalidOperationException(CoreText.Get("MediaInfo_OpenFailed", Path.GetFileName(path)));
+        }
+
+        try
+        {
+            var streams = new List<MediaInfoRawStream>();
+            foreach (var (kind, kindName) in RawStreamKinds)
+            {
+                var streamCount = mediaInfo.Count_Get(kind);
+                for (var streamIndex = 0; streamIndex < streamCount; streamIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var fields = new List<MediaInfoRawField>();
+                    var fieldCount = mediaInfo.Count_Get(kind, streamIndex);
+                    for (var fieldIndex = 0; fieldIndex < fieldCount; fieldIndex++)
+                    {
+                        var name = NullIfWhiteSpace(mediaInfo.Get(
+                            kind,
+                            streamIndex,
+                            fieldIndex,
+                            InfoKind.Name));
+                        var value = NullIfWhiteSpace(mediaInfo.Get(
+                            kind,
+                            streamIndex,
+                            fieldIndex,
+                            InfoKind.Text));
+                        if (name is not null && value is not null)
+                        {
+                            fields.Add(new MediaInfoRawField(name, value));
+                        }
+                    }
+
+                    streams.Add(new MediaInfoRawStream(kindName, streamIndex, fields));
+                }
+            }
+
+            return streams;
+        }
+        finally
+        {
+            mediaInfo.Close();
+        }
+    }
 
     public MediaInfoInspection Inspect(
         string path,

@@ -84,6 +84,33 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task BackupFailureCompletesMuxWithWarningAndKeepsSource()
+    {
+        var video = Path.Combine(_root, "BackupWarning.mkv");
+        var srt = Path.Combine(_root, "BackupWarning.srt");
+        await File.WriteAllBytesAsync(video, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "BackupWarning"), video, null, srt, null);
+
+        var result = await new BatchProcessor(new BackupFailingRunner(video)).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                BackupOriginalMetadata = true
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.NotNull(result.OutputPath);
+        Assert.True(File.Exists(result.OutputPath));
+        Assert.True(File.Exists(video));
+        Assert.Contains(result.Warnings, static warning =>
+            warning.Contains("원본 파일을 삭제하지 마세요", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AssCommentsStayInAssTrackButAreExcludedFromGeneratedSrt()
     {
         var video = Path.Combine(_root, "Comments.mkv");
@@ -618,6 +645,33 @@ public sealed class BatchProcessorTests : IDisposable
             Action<string>? onOutput = null,
             CancellationToken cancellationToken = default) =>
             throw new JobSkippedException("해당 작업은 건너뜁니다.");
+    }
+
+    private sealed class BackupFailingRunner(string sourcePath) : IProcessRunner
+    {
+        private readonly FakeProcessRunner _inner = new();
+
+        public async Task<ProcessResult> RunAsync(
+            ProcessRequest request,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Arguments.Count > 1
+                && request.Arguments[0] == "-J"
+                && string.Equals(request.Arguments[1], sourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return new ProcessResult(0, SourceMatroskaJson, string.Empty);
+            }
+
+            return await _inner.RunAsync(request, onOutput, cancellationToken);
+        }
+
+        private const string SourceMatroskaJson = """
+        {"container":{"type":"Matroska"},"tracks":[
+          {"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC","default_track":true,"forced_track":false}},
+          {"type":"audio","properties":{"codec_id":"A_OPUS","default_track":true,"forced_track":false}}
+        ],"attachments":[],"chapters":[]}
+        """;
     }
 
     private sealed class StaticFontResolver(IReadOnlyList<FontAttachmentFile> files) : IInstalledFontResolver

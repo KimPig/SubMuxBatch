@@ -62,6 +62,11 @@ public partial class SettingsWindow : Window
         RemoveChaptersCheckBox.IsChecked = settings.RemoveChapters;
         AttachAssStyleFontsCheckBox.IsChecked = settings.AttachAssStyleFonts;
         AddSubMuxTagCheckBox.IsChecked = settings.AddSubMuxTag;
+        BackupOriginalMetadataCheckBox.IsChecked = settings.BackupOriginalMetadata;
+        BackupOriginalSubtitlesCheckBox.IsChecked = settings.BackupOriginalSubtitles;
+        BackupOriginalAttachmentsCheckBox.IsChecked = settings.BackupOriginalAttachments;
+        BackupExcludedAudioTracksCheckBox.IsChecked = settings.BackupExcludedAudioTracks;
+        CleanOutputMetadataCheckBox.IsChecked = settings.CleanOutputMetadata;
         FilterAudioTracksByLanguageCheckBox.IsChecked = settings.FilterAudioTracksByLanguage;
         AudioLanguageComboBox.SelectedValue = settings.SelectedAudioLanguage.ToString();
         if (AudioLanguageComboBox.SelectedIndex < 0)
@@ -189,6 +194,11 @@ public partial class SettingsWindow : Window
             updated.RemoveChapters = RemoveChaptersCheckBox.IsChecked == true;
             updated.AttachAssStyleFonts = AttachAssStyleFontsCheckBox.IsChecked == true;
             updated.AddSubMuxTag = AddSubMuxTagCheckBox.IsChecked == true;
+            updated.BackupOriginalMetadata = BackupOriginalMetadataCheckBox.IsChecked == true;
+            updated.BackupOriginalSubtitles = BackupOriginalSubtitlesCheckBox.IsChecked == true;
+            updated.BackupOriginalAttachments = BackupOriginalAttachmentsCheckBox.IsChecked == true;
+            updated.BackupExcludedAudioTracks = BackupExcludedAudioTracksCheckBox.IsChecked == true;
+            updated.CleanOutputMetadata = CleanOutputMetadataCheckBox.IsChecked == true;
             updated.FilterAudioTracksByLanguage = FilterAudioTracksByLanguageCheckBox.IsChecked == true;
             if (AudioLanguageComboBox.SelectedValue is not string selectedAudioLanguage
                 || !Enum.TryParse(selectedAudioLanguage, out AudioTrackLanguage audioLanguage)

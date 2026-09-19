@@ -443,30 +443,6 @@
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_AddSubMuxTagHelp}" />
-                                <CheckBox x:Name="RemoveExistingSubtitlesCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_RemoveSubtitles}" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_RemoveSubtitlesHelp}" />
-                                <CheckBox x:Name="RemoveChaptersCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_RemoveChapters}" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_RemoveChaptersHelp}" />
-                                <CheckBox x:Name="RemoveExistingFontAttachmentsCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_RemoveFonts}" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_RemoveFontsHelp}" />
                                 <CheckBox x:Name="AttachAssStyleFontsCheckBox"
                                           Margin="0,14,0,0">
                                     <TextBlock Text="{loc:Loc Settings_AttachFonts}" TextWrapping="Wrap" />
@@ -521,6 +497,96 @@
                                            TextWrapping="NoWrap"
                                            Text="{loc:Loc Settings_AudioLanguageMissing}"
                                            IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_BackupAndCleanup}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+
+                                <TextBlock Margin="0,14,0,0"
+                                           Text="{loc:Loc Settings_SourceBackup}"
+                                           FontWeight="SemiBold" />
+                                <WrapPanel Margin="0,10,0,0"
+                                           ItemWidth="250"
+                                           HorizontalAlignment="Left">
+                                    <CheckBox x:Name="BackupOriginalMetadataCheckBox"
+                                              Margin="0,0,20,10"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_BackupMetadataHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_BackupMetadataShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="BackupOriginalSubtitlesCheckBox"
+                                              Margin="0,0,0,10"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_BackupSubtitlesHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_BackupSubtitlesShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="BackupOriginalAttachmentsCheckBox"
+                                              Margin="0,0,20,0"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_BackupAttachmentsHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_BackupAttachmentsShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="BackupExcludedAudioTracksCheckBox"
+                                              VerticalAlignment="Top"
+                                              IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}"
+                                              ToolTip="{loc:Loc Settings_BackupExcludedAudioHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_BackupExcludedAudioShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                </WrapPanel>
+                                <TextBlock Margin="24,7,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_BackupCommonHelp}" />
+
+                                <Border Margin="0,16,0,14"
+                                        BorderBrush="#E1E1E1"
+                                        BorderThickness="0,1,0,0" />
+
+                                <TextBlock Text="{loc:Loc Settings_CleanupItems}"
+                                           FontWeight="SemiBold" />
+                                <WrapPanel Margin="0,10,0,0"
+                                           ItemWidth="250"
+                                           HorizontalAlignment="Left">
+                                    <CheckBox x:Name="CleanOutputMetadataCheckBox"
+                                              Margin="0,0,20,10"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_CleanMetadataHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_CleanMetadataShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="RemoveExistingSubtitlesCheckBox"
+                                              Margin="0,0,0,10"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_RemoveSubtitlesHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_RemoveSubtitlesShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="RemoveChaptersCheckBox"
+                                              Margin="0,0,20,0"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_RemoveChaptersHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_RemoveChaptersShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <CheckBox x:Name="RemoveExistingFontAttachmentsCheckBox"
+                                              VerticalAlignment="Top"
+                                              ToolTip="{loc:Loc Settings_RemoveFontsHelp}">
+                                        <TextBlock Text="{loc:Loc Settings_RemoveFontsShort}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                </WrapPanel>
+                                <TextBlock Margin="24,7,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_SourceCleanupHelp}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

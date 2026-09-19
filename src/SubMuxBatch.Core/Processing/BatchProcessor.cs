@@ -91,6 +91,38 @@ public sealed class BatchProcessor(
             progress?.Report(new JobProgress(state, currentPercent, message));
         }
 
+        async Task TryBackupAsync(
+            string backupName,
+            string progressMessage,
+            Func<Task<IReadOnlyList<string>>> backupAction)
+        {
+            Report(JobState.Verifying, 36, progressMessage);
+            try
+            {
+                var paths = await backupAction().ConfigureAwait(false);
+                if (paths.Count == 0)
+                {
+                    Report(JobState.Verifying, 36, CoreText.Get("Batch_BackupNoItems", backupName));
+                    return;
+                }
+
+                var displayPath = paths.Count == 1
+                    ? paths[0]
+                    : Path.GetDirectoryName(paths[0]) ?? paths[0];
+                Report(JobState.Verifying, 36, CoreText.Get("Batch_BackupCompleted", displayPath));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var warning = CoreText.Get("Batch_BackupWarning", backupName, exception.Message);
+                warnings.Add(warning);
+                Report(JobState.Verifying, 36, warning);
+            }
+        }
+
         try
         {
             settings.Validate();
@@ -282,8 +314,67 @@ public sealed class BatchProcessor(
             }
 
             Report(JobState.Verifying, 34, CoreText.Get("Batch_InspectSource"));
-            var sourceInspection = await mkvMerge.InspectAsync(media.VideoPath, cancellationToken: cancellationToken)
+            var sourceIdentification = await mkvMerge
+                .IdentifyAsync(media.VideoPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+            var sourceInspection = sourceIdentification.Inspection;
+            var backupService = new MetadataBackupService(processRunner);
+
+            if (settings.BackupOriginalMetadata)
+            {
+                await TryBackupAsync(
+                    CoreText.Get("Backup_Metadata"),
+                    CoreText.Get("Batch_BackupMetadata"),
+                    async () =>
+                    [
+                        await backupService.BackupMetadataAsync(
+                            media.VideoPath,
+                            dependencies.MkvMerge.Path,
+                            sourceIdentification,
+                            cancellationToken).ConfigureAwait(false)
+                    ]).ConfigureAwait(false);
+            }
+
+            if (settings.BackupOriginalSubtitles)
+            {
+                await TryBackupAsync(
+                    CoreText.Get("Backup_Subtitles"),
+                    CoreText.Get("Batch_BackupSubtitles"),
+                    () => backupService.BackupSubtitlesAsync(
+                        media.VideoPath,
+                        dependencies.MkvMerge.Path,
+                        sourceIdentification,
+                        cancellationToken)).ConfigureAwait(false);
+            }
+
+            if (settings.BackupOriginalAttachments)
+            {
+                await TryBackupAsync(
+                    CoreText.Get("Backup_Attachments"),
+                    CoreText.Get("Batch_BackupAttachments"),
+                    () => backupService.BackupAttachmentsAsync(
+                        media.VideoPath,
+                        dependencies.MkvMerge.Path,
+                        sourceIdentification,
+                        cancellationToken)).ConfigureAwait(false);
+            }
+
+            if (settings.BackupExcludedAudioTracks && settings.FilterAudioTracksByLanguage)
+            {
+                await TryBackupAsync(
+                    CoreText.Get("Backup_ExcludedAudio"),
+                    CoreText.Get("Batch_BackupExcludedAudio"),
+                    async () =>
+                    {
+                        var path = await backupService.BackupExcludedAudioTracksAsync(
+                            media.VideoPath,
+                            dependencies.MkvMerge.Path,
+                            sourceIdentification,
+                            settings.SelectedAudioLanguage,
+                            cancellationToken).ConfigureAwait(false);
+                        return path is null ? [] : [path];
+                    }).ConfigureAwait(false);
+            }
 
             var partialPath = Path.Combine(workspace.Path, "output.partial.mkv");
             Report(JobState.Muxing, 38, CoreText.Get("Batch_MuxSubtitles"));
@@ -306,7 +397,8 @@ public sealed class BatchProcessor(
                     ? settings.SelectedAudioLanguage
                     : null,
                 fontAttachments: fontAttachments,
-                globalTagsPath: globalTagsPath).ConfigureAwait(false);
+                globalTagsPath: globalTagsPath,
+                cleanOutputMetadata: settings.CleanOutputMetadata).ConfigureAwait(false);
 
             Report(JobState.Verifying, 94, CoreText.Get("Batch_VerifyOutput"));
             var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
@@ -320,7 +412,8 @@ public sealed class BatchProcessor(
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
-                addedFontAttachments: fontAttachments);
+                addedFontAttachments: fontAttachments,
+                cleanOutputMetadata: settings.CleanOutputMetadata);
             if (validationErrors.Count > 0)
             {
                 throw new InvalidOperationException(
@@ -353,7 +446,8 @@ public sealed class BatchProcessor(
                 keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
-                addedFontAttachments: fontAttachments);
+                addedFontAttachments: fontAttachments,
+                cleanOutputMetadata: settings.CleanOutputMetadata);
             if (committedValidationErrors.Count > 0)
             {
                 throw new InvalidOperationException(

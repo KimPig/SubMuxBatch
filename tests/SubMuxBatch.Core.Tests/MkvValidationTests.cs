@@ -1,6 +1,7 @@
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.Tests;
 
@@ -479,6 +480,109 @@ public sealed class MkvValidationTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task MetadataCleanupRemovesOnlySourceMetadataBeforeAddingNamedSubMuxTracksAndTags()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-clean-metadata-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var tags = Path.Combine(root, "submux-tags.xml");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Family,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+            await File.WriteAllTextAsync(tags, "<Tags />");
+
+            const string inspection = """
+                {"tracks":[
+                  {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC","track_name":"Named video"}},
+                  {"id":1,"type":"audio","properties":{"codec_id":"A_OPUS","track_name":"Named audio"}}
+                ],"attachments":[],"chapters":[]}
+                """;
+            var runner = new MuxArgumentRunner(output, inspection);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                globalTagsPath: tags,
+                cleanOutputMetadata: true);
+
+            var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+            Assert.Contains("--title", arguments);
+            Assert.Equal(string.Empty, arguments[arguments.IndexOf("--title") + 1]);
+            Assert.DoesNotContain("--disable-track-statistics-tags", arguments);
+            Assert.Contains("--no-global-tags", arguments);
+            Assert.Contains("--no-track-tags", arguments);
+            Assert.DoesNotContain("0:", arguments);
+            Assert.DoesNotContain("1:", arguments);
+            Assert.Equal(2, arguments.Count(static argument => argument == "--track-name"));
+            Assert.Contains($"0:{CoreText.Get("Mkv_AssTrackName")}", arguments);
+            Assert.Contains($"0:{CoreText.Get("Mkv_SrtTrackName")}", arguments);
+            Assert.True(arguments.IndexOf("--no-global-tags") < arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf("--no-track-tags") < arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf("--global-tags") < arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf($"0:{CoreText.Get("Mkv_AssTrackName")}") > arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf($"0:{CoreText.Get("Mkv_SrtTrackName")}") > arguments.IndexOf(source));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void MetadataCleanupValidationRequiresExistingAndNewTrackNamesToRemain()
+    {
+        var source = new MkvInspection(
+            [Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video")],
+            [],
+            0);
+        var cleanOutput = new MkvInspection(
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video"),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
+            ],
+            [],
+            0);
+        var renamedOutput = cleanOutput with
+        {
+            Tracks =
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Changed video"),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
+            ]
+        };
+        var unnamedSubMuxOutput = cleanOutput with
+        {
+            Tracks =
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video"),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor"),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor")
+            ]
+        };
+
+        Assert.Empty(MkvMergeClient.ValidateOutput(
+            source,
+            cleanOutput,
+            cleanOutputMetadata: true));
+        Assert.Single(MkvMergeClient.ValidateOutput(
+            source,
+            renamedOutput,
+            cleanOutputMetadata: true));
+        Assert.Equal(2, MkvMergeClient.ValidateOutput(
+            source,
+            unnamedSubMuxOutput,
+            cleanOutputMetadata: true).Count);
     }
 
     [Fact]

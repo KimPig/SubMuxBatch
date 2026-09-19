@@ -16,6 +16,11 @@ public sealed class AssStyleTemplateTests
         Assert.False(settings.RemoveChapters);
         Assert.True(settings.AttachAssStyleFonts);
         Assert.True(settings.AddSubMuxTag);
+        Assert.False(settings.BackupOriginalMetadata);
+        Assert.False(settings.BackupOriginalSubtitles);
+        Assert.False(settings.BackupOriginalAttachments);
+        Assert.False(settings.BackupExcludedAudioTracks);
+        Assert.False(settings.CleanOutputMetadata);
         Assert.Equal(
             "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1",
             settings.AssStyleLine);
@@ -132,6 +137,11 @@ public sealed class AssStyleTemplateTests
             RemoveChapters = true,
             AttachAssStyleFonts = false,
             AddSubMuxTag = false,
+            BackupOriginalMetadata = true,
+            BackupOriginalSubtitles = true,
+            BackupOriginalAttachments = true,
+            BackupExcludedAudioTracks = true,
+            CleanOutputMetadata = true,
             AssStyleLine = "saved for later"
         };
 
@@ -144,6 +154,11 @@ public sealed class AssStyleTemplateTests
         Assert.True(copy.RemoveChapters);
         Assert.False(copy.AttachAssStyleFonts);
         Assert.False(copy.AddSubMuxTag);
+        Assert.True(copy.BackupOriginalMetadata);
+        Assert.True(copy.BackupOriginalSubtitles);
+        Assert.True(copy.BackupOriginalAttachments);
+        Assert.True(copy.BackupExcludedAudioTracks);
+        Assert.True(copy.CleanOutputMetadata);
         Assert.Equal("saved for later", copy.AssStyleLine);
     }
 
@@ -169,6 +184,30 @@ public sealed class AssStyleTemplateTests
         Assert.True(migrated.AttachAssStyleFonts);
         Assert.True(migrated.AddSubMuxTag);
         Assert.False(migrated.RemoveChapters);
+        Assert.False(migrated.BackupOriginalMetadata);
+        Assert.False(migrated.BackupOriginalSubtitles);
+        Assert.False(migrated.BackupOriginalAttachments);
+        Assert.False(migrated.BackupExcludedAudioTracks);
+        Assert.False(migrated.CleanOutputMetadata);
+    }
+
+    [Fact]
+    public void EarlierAttachmentBackupSettingRemainsAttachmentOnly()
+    {
+        var migrated = AppSettings.Deserialize("{\"BackupOriginalAttachments\":true}");
+
+        Assert.False(migrated.BackupOriginalSubtitles);
+        Assert.True(migrated.BackupOriginalAttachments);
+    }
+
+    [Fact]
+    public void CombinedBackupSettingMigratesToBothNewSettings()
+    {
+        var migrated = AppSettings.Deserialize("{\"BackupOriginalSubtitlesAndAttachments\":true}");
+
+        Assert.True(migrated.BackupOriginalSubtitles);
+        Assert.True(migrated.BackupOriginalAttachments);
+        Assert.False(migrated.BackupOriginalSubtitlesAndAttachments);
     }
 
     private static int Count(string value, string pattern) =>

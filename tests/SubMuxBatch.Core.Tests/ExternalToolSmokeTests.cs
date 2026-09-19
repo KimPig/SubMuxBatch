@@ -5,6 +5,7 @@ using SubMuxBatch.Core.Dependencies;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
+using SubMuxBatch.Core.Localization;
 using SubMuxBatch.Core.Media;
 using SubMuxBatch.Core.Planning;
 using SubMuxBatch.Core.Processing;
@@ -89,6 +90,124 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var metadataTag = Assert.Single(mediaInfo.MetadataTags);
             Assert.Equal("Title", metadataTag.Name, ignoreCase: true);
             Assert.Equal("Metadata smoke title", metadataTag.Value);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task RealMkvMergeBacksUpThenCleansMetadataAndAddsOnlySubMuxTags()
+    {
+        var mkvMergePath = FindExecutable(
+            "MKVMERGE_PATH",
+            "mkvmerge.exe",
+            @"C:\Program Files\MKVToolNix\mkvmerge.exe");
+        if (mkvMergePath is null)
+        {
+            output.WriteLine("mkvmerge를 찾지 못해 메타데이터 백업/정리 smoke test를 건너뜁니다.");
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-metadata-smoke-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var sourceSubtitle = Path.Combine(root, "source.srt");
+            var sourceTags = Path.Combine(root, "source-tags.xml");
+            var sourceAttachment = Path.Combine(root, "original-attachment.txt");
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var subMuxTags = Path.Combine(root, "submux-tags.xml");
+            var outputPath = Path.Combine(root, "output.mkv");
+            await File.WriteAllTextAsync(sourceSubtitle, "1\n00:00:00,000 --> 00:00:01,000\nSource\n");
+            await File.WriteAllTextAsync(
+                sourceTags,
+                "<Tags><Tag><Targets/><Simple><Name>ORIGINAL_TAG</Name><String>Keep me</String></Simple></Tag></Tags>");
+            await File.WriteAllTextAsync(sourceAttachment, "Original attachment contents");
+            await File.WriteAllTextAsync(
+                ass,
+                "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,40\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Test\n");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+            await File.WriteAllTextAsync(subMuxTags, SubMuxMetadata.CreateGlobalTagsXml("2026.09.20"));
+
+            var runner = new ExternalProcessRunner();
+            var sourceResult = await runner.RunAsync(new ProcessRequest(
+                mkvMergePath,
+                [
+                    "-o", source,
+                    "--title", "Original title",
+                    "--global-tags", sourceTags,
+                    "--track-name", "0:Original subtitle",
+                    "--attachment-name", "original-attachment.txt",
+                    "--attachment-mime-type", "text/plain",
+                    "--attach-file", sourceAttachment,
+                    sourceSubtitle
+                ],
+                root));
+            Assert.InRange(sourceResult.ExitCode, 0, 1);
+
+            var client = new MkvMergeClient(mkvMergePath, runner);
+            var sourceIdentification = await client.IdentifyAsync(source);
+            var backupService = new MetadataBackupService(runner);
+            var backupPath = await backupService.BackupMetadataAsync(
+                source,
+                mkvMergePath,
+                sourceIdentification);
+            await backupService.BackupSubtitlesAsync(
+                source,
+                mkvMergePath,
+                sourceIdentification);
+            await backupService.BackupAttachmentsAsync(
+                source,
+                mkvMergePath,
+                sourceIdentification);
+            await client.MuxAsync(
+                source,
+                ass,
+                srt,
+                outputPath,
+                removeExistingSubtitles: false,
+                globalTagsPath: subMuxTags,
+                cleanOutputMetadata: true);
+
+            var outputInspection = await client.InspectAsync(outputPath);
+            Assert.Empty(MkvMergeClient.ValidateOutput(
+                sourceIdentification.Inspection,
+                outputInspection,
+                removeExistingSubtitles: false,
+                cleanOutputMetadata: true));
+            Assert.Equal("Original subtitle", outputInspection.Tracks[0].TrackName);
+            Assert.Equal(CoreText.Get("Mkv_AssTrackName"), outputInspection.Tracks[^2].TrackName);
+            Assert.Equal(CoreText.Get("Mkv_SrtTrackName"), outputInspection.Tracks[^1].TrackName);
+
+            var outputMediaInfo = new MediaInfoClient().Inspect(outputPath);
+            Assert.True(outputMediaInfo.ProcessedBySubMux);
+            Assert.Equal("2026.09.20", outputMediaInfo.SubMuxBatchVersion);
+            Assert.Equal(SubMuxMetadata.ProcessedValue, outputMediaInfo.SubMuxProcessedMarker);
+            Assert.Empty(outputMediaInfo.MetadataTags);
+
+            var backupJson = await File.ReadAllTextAsync(backupPath);
+            Assert.Contains("ORIGINAL_TAG", backupJson);
+            Assert.Contains("Original title", backupJson);
+            var extractedAttachment = Path.Combine(
+                root,
+                MetadataBackupService.BackupDirectoryName,
+                "source.mkv",
+                "attachments",
+                "original-attachment.txt");
+            Assert.Equal(
+                "Original attachment contents",
+                await File.ReadAllTextAsync(extractedAttachment));
+            Assert.True(File.Exists(Path.Combine(
+                root,
+                MetadataBackupService.BackupDirectoryName,
+                "source.mkv",
+                "subtitles.mks")));
+            Assert.DoesNotContain("ORIGINAL_TAG", string.Join("\n", outputMediaInfo.MetadataTags.Select(static tag => tag.Name)));
         }
         finally
         {
@@ -281,6 +400,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             settings.RemoveExistingFontAttachments = false;
             settings.FilterAudioTracksByLanguage = true;
             settings.SelectedAudioLanguage = AudioTrackLanguage.Japanese;
+            settings.BackupExcludedAudioTracks = true;
             var japaneseResult = await new BatchProcessor(runner).ProcessAsync(media, plan, settings, dependencies);
             Assert.True(
                 japaneseResult.State is JobState.Succeeded or JobState.SucceededWithWarnings,
@@ -297,6 +417,19 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 string.Equals(japaneseAudio.Language, "jpn", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(japaneseAudio.LanguageIetf, "ja", StringComparison.OrdinalIgnoreCase)
                 || japaneseAudio.LanguageIetf?.StartsWith("ja-", StringComparison.OrdinalIgnoreCase) == true);
+            var excludedAudioBackup = Path.Combine(
+                root,
+                MetadataBackupService.BackupDirectoryName,
+                Path.GetFileName(sourcePath),
+                "excluded-audio.mka");
+            var excludedAudioInspection = await mkvMerge.InspectAsync(excludedAudioBackup);
+            var excludedAudio = Assert.Single(
+                excludedAudioInspection.Tracks,
+                static track => track.Type == "audio");
+            Assert.True(
+                string.Equals(excludedAudio.Language, "eng", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(excludedAudio.LanguageIetf, "en", StringComparison.OrdinalIgnoreCase)
+                || excludedAudio.LanguageIetf?.StartsWith("en-", StringComparison.OrdinalIgnoreCase) == true);
         }
         finally
         {
@@ -365,6 +498,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                     OutputPrefix = "result_",
                     AssStyleLine = ArialStyleLine,
                     RemoveExistingSubtitles = true,
+                    BackupOriginalSubtitles = true,
                     AttachAssStyleFonts = false
                 },
                 new DependencyReport(
@@ -379,6 +513,15 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             Assert.Empty(MkvMergeClient.ValidateOutput(
                 sourceInspection,
                 await mkvMerge.InspectAsync(result.OutputPath!)));
+            var subtitleBackupPath = Path.Combine(
+                root,
+                MetadataBackupService.BackupDirectoryName,
+                "Movie.mp4",
+                "subtitles.mks");
+            var subtitleBackupInspection = await mkvMerge.InspectAsync(subtitleBackupPath);
+            Assert.Single(
+                subtitleBackupInspection.Tracks,
+                static track => track.Type == "subtitles");
 
             var preserveSettings = new AppSettings
             {
