@@ -92,7 +92,11 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 "Matroska"),
             "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
         var runner = new BackupRunner();
-        var service = new MetadataBackupService(runner, new StaticRawReader([]));
+        var attachmentTemporaryRoot = Path.Combine(_root, "short-attachment-temp");
+        var service = new MetadataBackupService(
+            runner,
+            new StaticRawReader([]),
+            attachmentTemporaryRoot);
 
         await service.BackupSubtitlesAsync(source, mkvMerge, identification);
         await service.BackupAttachmentsAsync(source, mkvMerge, identification);
@@ -113,6 +117,17 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 .Order()
                 .ToArray());
         Assert.Equal(2, runner.ExtractModes.Count(static mode => mode == "attachments"));
+        Assert.All(runner.AttachmentOutputPaths, path =>
+        {
+            Assert.StartsWith(
+                Path.GetFullPath(attachmentTemporaryRoot) + Path.DirectorySeparatorChar,
+                Path.GetFullPath(path),
+                StringComparison.OrdinalIgnoreCase);
+            Assert.StartsWith("attachment-", Path.GetFileName(path), StringComparison.Ordinal);
+            Assert.EndsWith(".bin", path, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(MetadataBackupService.BackupDirectoryName, path, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Empty(Directory.EnumerateDirectories(attachmentTemporaryRoot));
         Assert.All(
             runner.MuxCalls,
             static arguments => Assert.Contains("--subtitle-tracks", arguments));
@@ -143,6 +158,50 @@ public sealed class MetadataBackupServiceTests : IDisposable
             _root,
             MetadataBackupService.BackupDirectoryName,
             "empty.avi")));
+    }
+
+    [Fact]
+    public async Task LongBackupDestinationUsesShortLocalAttachmentExtractionPath()
+    {
+        var longSourceDirectory = Path.Combine(
+            _root,
+            new string('a', 60),
+            new string('b', 60),
+            new string('c', 60));
+        Directory.CreateDirectory(longSourceDirectory);
+        var source = Path.Combine(longSourceDirectory, $"{new string('v', 80)}.mkv");
+        var mkvMerge = Path.Combine(_root, "mkvmerge.exe");
+        var mkvExtract = Path.Combine(_root, "mkvextract.exe");
+        await File.WriteAllBytesAsync(source, [1]);
+        await File.WriteAllBytesAsync(mkvMerge, [1]);
+        await File.WriteAllBytesAsync(mkvExtract, [1]);
+        var identification = new MkvIdentification(
+            new MkvInspection(
+                [],
+                [new MkvAttachmentInfo("FOT-MatisseVPro-UB.otf", "font/otf", null, 3, "1", 4)],
+                0,
+                "Matroska"),
+            "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
+        var runner = new BackupRunner();
+        var attachmentTemporaryRoot = Path.Combine(_root, "short-temp");
+        var service = new MetadataBackupService(
+            runner,
+            new StaticRawReader([]),
+            attachmentTemporaryRoot);
+
+        var paths = await service.BackupAttachmentsAsync(source, mkvMerge, identification);
+
+        var backup = Assert.Single(paths);
+        Assert.True(backup.Length > 260);
+        Assert.True(File.Exists(backup));
+        var extractionPath = Assert.Single(runner.AttachmentOutputPaths);
+        Assert.StartsWith(
+            Path.GetFullPath(attachmentTemporaryRoot) + Path.DirectorySeparatorChar,
+            Path.GetFullPath(extractionPath),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(extractionPath.Length < 260);
+        Assert.DoesNotContain(Path.GetFileName(source), extractionPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateDirectories(attachmentTemporaryRoot));
     }
 
     [Fact]
@@ -234,6 +293,7 @@ public sealed class MetadataBackupServiceTests : IDisposable
     private sealed class BackupRunner : IProcessRunner
     {
         public List<string> ExtractModes { get; } = [];
+        public List<string> AttachmentOutputPaths { get; } = [];
         public List<IReadOnlyList<string>> MuxCalls { get; } = [];
 
         public Task<ProcessResult> RunAsync(
@@ -251,6 +311,7 @@ public sealed class MetadataBackupServiceTests : IDisposable
                     {
                         var separator = mapping.IndexOf(':');
                         var outputPath = mapping[(separator + 1)..];
+                        AttachmentOutputPaths.Add(outputPath);
                         File.WriteAllText(outputPath, mapping[..separator]);
                     }
                     return Task.FromResult(new ProcessResult(0, string.Empty, string.Empty));

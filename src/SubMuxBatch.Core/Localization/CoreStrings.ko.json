@@ -116,6 +116,7 @@
   "MetadataBackup_NoAvailableName": "{0}의 메타데이터 백업 파일 이름을 만들 수 없습니다.",
   "MetadataBackup_AttachmentIdMissing": "첨부 파일 {0}의 ID를 확인할 수 없어 백업할 수 없습니다.",
   "MetadataBackup_AttachmentMissing": "mkvextract가 첨부 파일 {0}을(를) 생성하지 않았습니다.",
+  "MetadataBackup_AttachmentCopySizeMismatch": "첨부 파일 백업의 복사 전후 크기가 다릅니다.",
   "MetadataBackup_TrackIdMissing": "백업할 {0} 트랙의 ID를 확인할 수 없습니다.",
   "MetadataBackup_AttachmentsNotPreserved": "비 MKV 입력의 첨부 파일을 임시 Matroska 파일에 보존하지 못했습니다.",
   "MetadataBackup_MuxFailed": "백업용 Matroska 파일 생성에 실패했습니다. 종료 코드: {0}. {1}",

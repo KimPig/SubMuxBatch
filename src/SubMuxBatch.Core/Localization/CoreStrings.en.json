@@ -116,6 +116,7 @@
   "MetadataBackup_NoAvailableName": "No available metadata backup file name could be created for {0}.",
   "MetadataBackup_AttachmentIdMissing": "Attachment {0} has no usable ID and cannot be backed up.",
   "MetadataBackup_AttachmentMissing": "mkvextract did not create attachment {0}.",
+  "MetadataBackup_AttachmentCopySizeMismatch": "The attachment backup size differs before and after copying.",
   "MetadataBackup_TrackIdMissing": "A {0} track to back up has no usable ID.",
   "MetadataBackup_AttachmentsNotPreserved": "Attachments from the non-MKV input were not preserved in the temporary Matroska file.",
   "MetadataBackup_MuxFailed": "Creating the Matroska backup failed. Exit code: {0}. {1}",

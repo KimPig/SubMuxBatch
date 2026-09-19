@@ -25,7 +25,8 @@ public sealed record MetadataBackupDocument(
 
 public sealed class MetadataBackupService(
     IProcessRunner processRunner,
-    IMediaInfoRawReader? mediaInfoRawReader = null)
+    IMediaInfoRawReader? mediaInfoRawReader = null,
+    string? attachmentTemporaryRoot = null)
 {
     public const string BackupDirectoryName = ".submux-backup";
     public const int CurrentSchemaVersion = 1;
@@ -46,6 +47,9 @@ public sealed class MetadataBackupService(
 
     private readonly IMediaInfoRawReader _mediaInfoRawReader =
         mediaInfoRawReader ?? new MediaInfoClient();
+    private readonly string _attachmentTemporaryRoot = Path.GetFullPath(
+        attachmentTemporaryRoot
+        ?? Path.Combine(AppSettings.SettingsDirectory, "temp", "attachments"));
 
     public async Task<string> BackupMetadataAsync(
         string sourcePath,
@@ -189,16 +193,14 @@ public sealed class MetadataBackupService(
         var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var mkvExtractPath = ResolveMkvExtractPath(mkvMergePath);
         EnsureMkvExtractExists(mkvExtractPath);
-        var attachmentSource = source.FullName;
-        var extractionAttachments = attachments;
-        string? temporaryAttachmentSource = null;
+        var extractionDirectory = CreateAttachmentExtractionDirectory();
         try
         {
+            var attachmentSource = source.FullName;
+            var extractionAttachments = attachments;
             if (!IsMatroska(identification.Inspection.ContainerType))
             {
-                temporaryAttachmentSource = Path.Combine(
-                    videoBackupDirectory,
-                    $".submux-attachment-source-{Guid.NewGuid():N}.mkv");
+                var temporaryAttachmentSource = Path.Combine(extractionDirectory, "source.mkv");
                 await CreateAttachmentSourceAsync(
                     source,
                     mkvMergePath,
@@ -219,6 +221,7 @@ public sealed class MetadataBackupService(
                 mkvExtractPath,
                 attachmentSource,
                 extractionAttachments,
+                extractionDirectory,
                 Path.Combine(videoBackupDirectory, "attachments"),
                 onBackupCreated,
                 onBackupDirectoryCreated,
@@ -226,10 +229,7 @@ public sealed class MetadataBackupService(
         }
         finally
         {
-            if (temporaryAttachmentSource is not null)
-            {
-                TryDelete(temporaryAttachmentSource);
-            }
+            TryDeleteDirectory(extractionDirectory);
         }
     }
 
@@ -426,84 +426,121 @@ public sealed class MetadataBackupService(
         string mkvExtractPath,
         string sourcePath,
         IReadOnlyList<MkvAttachmentInfo> attachments,
+        string extractionDirectory,
         string destinationDirectory,
         Action<string>? onBackupCreated,
         Action<string>? onBackupDirectoryCreated,
         CancellationToken cancellationToken)
     {
-        var parentDirectory = Path.GetDirectoryName(destinationDirectory)
-                              ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_SourceDirectoryMissing"));
-        var extractionDirectory = Path.Combine(
-            parentDirectory,
-            $".submux-attachments-{Guid.NewGuid():N}.tmp");
-        Directory.CreateDirectory(extractionDirectory);
+        var arguments = new List<string> { sourcePath, "attachments" };
+        var extractedFiles = new List<(string ExtractionPath, string DestinationName)>(attachments.Count);
+        for (var index = 0; index < attachments.Count; index++)
+        {
+            var attachment = attachments[index];
+            if (attachment.Id is not int id)
+            {
+                throw new InvalidOperationException(CoreText.Get(
+                    "MetadataBackup_AttachmentIdMissing",
+                    attachment.FileName ?? (index + 1).ToString()));
+            }
 
+            var safeName = MakeSafeAttachmentName(attachment.FileName, id);
+            var extractionPath = Path.Combine(extractionDirectory, $"attachment-{index + 1:D4}.bin");
+            arguments.Add($"{id}:{extractionPath}");
+            extractedFiles.Add((extractionPath, safeName));
+        }
+
+        var result = await processRunner.RunAsync(
+            new ProcessRequest(mkvExtractPath, arguments, Path.GetDirectoryName(sourcePath)),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode >= 2)
+        {
+            var details = string.IsNullOrWhiteSpace(result.StandardError)
+                ? result.StandardOutput
+                : result.StandardError;
+            throw new InvalidOperationException(CoreText.Get(
+                "MetadataBackup_ExtractionFailed",
+                "attachments",
+                result.ExitCode,
+                details.Trim()));
+        }
+
+        foreach (var extractedFile in extractedFiles)
+        {
+            if (!File.Exists(extractedFile.ExtractionPath))
+            {
+                throw new InvalidOperationException(CoreText.Get(
+                    "MetadataBackup_AttachmentMissing",
+                    Path.GetFileName(extractedFile.ExtractionPath)));
+            }
+        }
+
+        CreateDirectory(destinationDirectory, onBackupDirectoryCreated);
+        var destinations = new List<string>(extractedFiles.Count);
+        foreach (var extractedFile in extractedFiles)
+        {
+            var destination = GetAvailableFilePath(
+                destinationDirectory,
+                extractedFile.DestinationName);
+            await CopyAttachmentToBackupAsync(
+                extractedFile.ExtractionPath,
+                destination,
+                cancellationToken).ConfigureAwait(false);
+            onBackupCreated?.Invoke(destination);
+            destinations.Add(destination);
+        }
+        return destinations;
+    }
+
+    private string CreateAttachmentExtractionDirectory()
+    {
+        Directory.CreateDirectory(_attachmentTemporaryRoot);
+        var path = Path.Combine(_attachmentTemporaryRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static async Task CopyAttachmentToBackupAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath)
+                                   ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_SourceDirectoryMissing"));
+        var temporaryPath = Path.Combine(
+            destinationDirectory,
+            $".submux-copy-{Guid.NewGuid():N}.tmp");
         try
         {
-            var arguments = new List<string> { sourcePath, "attachments" };
-            var extractedFiles = new List<(string ExtractionPath, string DestinationName)>(attachments.Count);
-            var reservedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (var index = 0; index < attachments.Count; index++)
+            await using (var source = new FileStream(
+                             sourcePath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             128 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var destination = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None,
+                             128 * 1024,
+                             FileOptions.Asynchronous))
             {
-                var attachment = attachments[index];
-                if (attachment.Id is not int id)
-                {
-                    throw new InvalidOperationException(CoreText.Get(
-                        "MetadataBackup_AttachmentIdMissing",
-                        attachment.FileName ?? (index + 1).ToString()));
-                }
-
-                var safeName = MakeSafeAttachmentName(attachment.FileName, id);
-                var extractionPath = GetAvailableFilePath(
-                    extractionDirectory,
-                    safeName,
-                    reservedNames);
-                reservedNames.Add(Path.GetFileName(extractionPath));
-                arguments.Add($"{id}:{extractionPath}");
-                extractedFiles.Add((extractionPath, safeName));
+                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            var result = await processRunner.RunAsync(
-                new ProcessRequest(mkvExtractPath, arguments, Path.GetDirectoryName(sourcePath)),
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (result.ExitCode >= 2)
+            if (new FileInfo(sourcePath).Length != new FileInfo(temporaryPath).Length)
             {
-                var details = string.IsNullOrWhiteSpace(result.StandardError)
-                    ? result.StandardOutput
-                    : result.StandardError;
-                throw new InvalidOperationException(CoreText.Get(
-                    "MetadataBackup_ExtractionFailed",
-                    "attachments",
-                    result.ExitCode,
-                    details.Trim()));
+                throw new IOException(CoreText.Get("MetadataBackup_AttachmentCopySizeMismatch"));
             }
 
-            foreach (var extractedFile in extractedFiles)
-            {
-                if (!File.Exists(extractedFile.ExtractionPath))
-                {
-                    throw new InvalidOperationException(CoreText.Get(
-                        "MetadataBackup_AttachmentMissing",
-                        Path.GetFileName(extractedFile.ExtractionPath)));
-                }
-            }
-
-            CreateDirectory(destinationDirectory, onBackupDirectoryCreated);
-            var destinations = new List<string>(extractedFiles.Count);
-            foreach (var extractedFile in extractedFiles)
-            {
-                var destination = GetAvailableFilePath(
-                    destinationDirectory,
-                    extractedFile.DestinationName);
-                File.Move(extractedFile.ExtractionPath, destination, overwrite: false);
-                onBackupCreated?.Invoke(destination);
-                destinations.Add(destination);
-            }
-            return destinations;
+            File.Move(temporaryPath, destinationPath, overwrite: false);
         }
         finally
         {
-            TryDeleteDirectory(extractionDirectory);
+            TryDelete(temporaryPath);
         }
     }
 
