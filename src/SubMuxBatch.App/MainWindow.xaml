@@ -765,7 +765,12 @@
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="18" />
                                 </Grid.RowDefinitions>
-                                <Grid Grid.Row="0" ClipToBounds="True">
+                                <ScrollViewer Grid.Row="0"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              CanContentScroll="False"
+                                              PanningMode="VerticalOnly">
+                                    <Grid ClipToBounds="True">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="20" />
@@ -828,7 +833,8 @@
                                                        Text="{Binding PlanDescription}"
                                                        TextWrapping="Wrap" />
                                         </Grid>
-                                </Grid>
+                                    </Grid>
+                                </ScrollViewer>
                                 <TextBlock Grid.Row="1"
                                            Margin="0,2,0,0"
                                            Text="{Binding IssuesText}"
