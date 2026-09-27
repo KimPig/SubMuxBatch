@@ -174,6 +174,50 @@ public sealed class MkvMergeWarningTests
         }
     }
 
+    [Theory]
+    [InlineData("source.mkv: Error in the Matroska file structure at position 503098. Resyncing to the next level 1 element.")]
+    [InlineData("source.mkv: 503098 위치에서 Matroska 파일 구조에 오류가 발생했습니다. 다음 수준 1 요소로 재동기화 합니다.")]
+    [InlineData("'source.mkv': A block at timestamp 00:00:10.777000000 for track number 101 was found, but no corresponding track header was found. The block will be skipped.")]
+    [InlineData("'source.mkv': 트랙 번호 101에 대한 타임스탬프 00:00:10.777000000의 블록을 찾았지만, 그 트랙 번호의 헤더는 찾지 못했습니다. 이 블록은 건너 뜁니다.")]
+    public async Task FailsAndDeletesOutputWhenMatroskaStructureIsDamaged(string warning)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-matroska-damage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[Script Info]\n[V4+ Styles]\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            const string context = "Successfully resynced at position 6793040.";
+            var runner = new WarningRunner(
+                output,
+                1,
+                $"#GUI#warning {warning}\n#GUI#warning {context}\n",
+                string.Empty);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                    source,
+                    ass,
+                    srt,
+                    output));
+
+            Assert.Contains("Matroska", exception.Message);
+            Assert.Contains(warning, exception.Message);
+            Assert.Contains(context, exception.Message);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class WarningRunner(
         string outputPath,
         int exitCode,

@@ -8,7 +8,7 @@ You can add individual files, select folders, or drag files and folders from Fil
 
 Prebuilt, self-contained Windows x64 packages are available on the [Releases](https://github.com/KimPig/SubMuxBatch/releases) page.
 
-MKVToolNix and Subtitle Edit's command-line converter are external dependencies and are not bundled. Install or extract them separately before using the application. MediaInfoLib is bundled with SubMux Batch and requires no separate installation or path setting.
+MKVToolNix is an external dependency and is not bundled. Subtitle conversion uses the bundled Subtitle Edit library (`libse` 5.1.0), and MediaInfoLib is also bundled; neither requires a separate installation or path setting.
 
 The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
 
@@ -16,7 +16,7 @@ The interface supports Korean and English. With **System default**, Korean Windo
 
 **Check for updates when the application starts** is enabled by default. You can also use **Check now** beside this option in Settings. SubMux Batch checks the latest public GitHub Release without requiring a GitHub account. When a newer date version and a matching Windows package are available, it asks before downloading anything. Choosing **Update** downloads the release ZIP, verifies its size and GitHub-provided SHA-256 digest when available, safely extracts it below `%LocalAppData%\SubMuxBatch\updates`, replaces the application files after the current process exits, and starts SubMux Batch again.
 
-Update-check or network failures never prevent the current application from starting. The updater overwrites only files supplied by the SubMux Batch release package; unrelated files such as separately installed `mkvmerge.exe` and `seconv.exe` are left untouched. If the application directory requires administrator permission, Windows displays the standard elevation prompt when applying the update.
+Update-check or network failures never prevent the current application from starting. The updater overwrites only files supplied by the SubMux Batch release package; unrelated files such as a separately installed `mkvmerge.exe` are left untouched. If the application directory requires administrator permission, Windows displays the standard elevation prompt when applying the update.
 
 ## Supported video inputs
 
@@ -53,33 +53,30 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 
 ## External dependencies
 
-The repository and release packages do not include these applications:
+The repository and release packages do not include this application:
 
 - `mkvmerge.exe` from [MKVToolNix](https://mkvtoolnix.download/)
-- `seconv.exe` and the libraries distributed with it from [Subtitle Edit](https://github.com/SubtitleEdit/subtitleedit/releases) ([official command-line documentation](https://github.com/SubtitleEdit/subtitleedit/blob/main/docs/reference/command-line.md))
 
-The standard Subtitle Edit installer does not include `seconv.exe`. Download and extract the separate `SeConv-Windows-x64.zip` package, then select `seconv.exe` in Settings if it is not detected automatically.
-
-SubMux Batch searches for each executable in this order:
+SubMux Batch searches for `mkvmerge.exe` in this order:
 
 1. The path selected in Settings
-2. `tools\mkvtoolnix\mkvmerge.exe` or `tools\seconv\seconv.exe` below the application directory
+2. `tools\mkvtoolnix\mkvmerge.exe` below the application directory
 3. Standard installation directories
 4. The Windows `PATH`
 
-Development and integration testing used MKVToolNix 88.0 and `seconv` 5.1.0. Test a small copy of your media first when using another version. Installation and redistribution of each dependency are governed by that project's license.
+Development and integration testing used MKVToolNix 88.0. Test a small copy of your media first when using another version. Installation and redistribution are governed by the MKVToolNix license.
 
 Media information shown in the queue and detail panel is read primarily with the bundled MediaInfoLib. This includes the actual container format, duration, overall and per-track bit rates, video frame rate and frame count, resolution, and audio properties. `mkvmerge` identification remains authoritative for remuxing track IDs, attachments, chapters, and output validation. The bundled library notice is included below.
 
 ## Subtitle conversion policy
 
-Subtitle parsing and format conversion are delegated to Subtitle Edit's `seconv`. SubMux Batch adds only the following policies:
+Subtitle parsing and format conversion run in process with Subtitle Edit's bundled `libse` 5.1.0. When saving to a different format, SubMux Batch invokes the same native-format cleanup path used by Subtitle Edit 5.1's GUI **Save As** command. SubMux Batch adds the following policies:
 
 - Apply the selected PlayRes and ASS `Style:` line when converting SRT to ASS
-- Pass `seconv --input-encoding-fallback:949` for CP949-encoded SMI files
+- Use CP949 as the fallback for SMI files that are neither Unicode nor valid UTF-8
 - Normalize uppercase HTML tags emitted during SMI-to-SRT conversion only in the temporary SRT used to create ASS
 - Flatten `<ruby>漢<rt>かん</rt></ruby>` to `漢(かん)` only in the temporary ASS-conversion input because ASS cannot represent ruby markup directly
-- Restore supported inline positioning tags that `seconv` may drop while converting SRT to ASS
+- Restore supported inline positioning tags that the conversion pipeline may drop while converting SRT to ASS
 
 The SRT track added to the MKV does not pass through the ASS-compatibility preprocessing, so its original ruby markup and supported tags are retained. Subtitle Edit converts supported SRT color, position, font, size, weight, and italic markup to ASS override tags.
 
@@ -117,11 +114,9 @@ When a font is found only through a Windows registered name, it is still attache
 
 Font files can have separate redistribution terms. **The user is responsible for verifying that each attached font's license permits redistribution.** SubMux Batch does not make or enforce that licensing decision.
 
-SubMux Batch also works around `seconv` 5.1.0 interpreting `[` and `]` in arguments as console markup, so filenames and directories such as `[Release Group] Movie.mp4` are supported.
-
 ## Usage
 
-1. Install or extract MKVToolNix and Subtitle Edit's `seconv` package.
+1. Install or extract MKVToolNix.
 2. Run `SubMuxBatch.exe`.
 3. If a dependency is not detected automatically, select its executable in **Settings**.
 4. Add files or folders, or drag them into the application window.
@@ -155,7 +150,6 @@ To include optional integration tests against real external tools, specify their
 
 ```powershell
 $env:MKVMERGE_PATH = 'C:\Program Files\MKVToolNix\mkvmerge.exe'
-$env:SECONV_PATH = 'C:\Tools\seconv\seconv.exe'
 $env:FFMPEG_PATH = 'C:\Tools\ffmpeg.exe'
 dotnet test tests\SubMuxBatch.Core.Tests\SubMuxBatch.Core.Tests.csproj -c Release
 ```
@@ -166,7 +160,7 @@ Create a self-contained Windows build without bundling the external dependencies
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The application is published as a self-contained single EXE that includes MediaInfoLib; MKVToolNix and `seconv` remain separate external dependencies.
+The default output is written to `artifacts\publish\win-x64`. The application is published as a self-contained single EXE that includes MediaInfoLib and libse; only MKVToolNix remains an external dependency.
 
 ## Project structure
 
@@ -178,3 +172,11 @@ The default output is written to `artifacts\publish\win-x64`. The application is
 ## Third-party notices
 
 This product uses [MediaInfo](https://mediaarea.net/MediaInfo) library, Copyright (c) 2002-2025 [MediaArea.net SARL](https://mediaarea.net/).
+
+This product uses [libse 5.1.0](https://github.com/SubtitleEdit/subtitleedit/tree/main/src/libse), Copyright (c) 2026 Nikolaj Olsson, under the MIT License:
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

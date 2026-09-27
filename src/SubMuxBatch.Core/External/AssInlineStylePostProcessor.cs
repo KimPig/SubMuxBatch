@@ -201,7 +201,7 @@ public static class AssInlineStylePostProcessor
         CueKey target,
         out string tags)
     {
-        // seconv writes centiseconds. Depending on the millisecond input it may round
+        // libse writes centiseconds. Depending on the millisecond input it may round
         // either side of the boundary, so accept at most one centisecond of drift.
         for (var distance = 0; distance <= 2; distance++)
         {

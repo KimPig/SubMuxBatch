@@ -12,10 +12,13 @@ namespace SubMuxBatch.Core.Processing;
 
 public sealed class BatchProcessor(
     IProcessRunner processRunner,
-    IInstalledFontResolver? installedFontResolver = null)
+    IInstalledFontResolver? installedFontResolver = null,
+    ISubtitleConverter? subtitleConverter = null)
 {
     private readonly IInstalledFontResolver _installedFontResolver =
         installedFontResolver ?? InstalledFontResolver.System;
+    private readonly ISubtitleConverter _subtitleConverter =
+        subtitleConverter ?? new LibSeSubtitleConverter();
 
     public async Task<JobResult> ProcessAsync(
         MediaSet media,
@@ -30,7 +33,7 @@ public sealed class BatchProcessor(
             return new JobResult(JobState.Failed, null, plan.Warnings, plan.Error ?? CoreText.Get("Batch_InvalidPlan"));
         }
 
-        if (!dependencies.IsReady || dependencies.MkvMerge.Path is null || dependencies.SeConv.Path is null)
+        if (!dependencies.IsReady || dependencies.MkvMerge.Path is null)
         {
             return new JobResult(JobState.Failed, null, plan.Warnings, CoreText.Get("Batch_DependenciesMissing"));
         }
@@ -159,7 +162,6 @@ public sealed class BatchProcessor(
                 OutputFileNaming.Create(media.VideoPath, settings.OutputPrefix));
 
             await using var workspace = JobWorkspace.Create(media.Key.DirectoryPath);
-            var seConv = new SeConvClient(dependencies.SeConv.Path, processRunner);
             var mkvMerge = new MkvMergeClient(dependencies.MkvMerge.Path, processRunner);
             string? globalTagsPath = null;
             if (settings.AddSubMuxTag)
@@ -207,7 +209,7 @@ public sealed class BatchProcessor(
                         throw new JobSkippedException(CoreText.Get("Batch_SkipNoValidSubtitleCues"));
                     }
 
-                    var assToSrtResult = await seConv.ConvertAsync(
+                    var assToSrtResult = await _subtitleConverter.ConvertAsync(
                         assForSrt,
                         finalSrt,
                         SubtitleOutputFormat.SubRip,
@@ -216,7 +218,7 @@ public sealed class BatchProcessor(
                         settings.PlayResY,
                         LogToolOutput,
                         cancellationToken).ConfigureAwait(false);
-                    AddSeConvWarnings(warnings, assToSrtResult);
+                    AddSubtitleConversionWarnings(warnings, assToSrtResult);
                     break;
 
                 case SrtSourceKind.ConvertFromSmi:
@@ -228,7 +230,7 @@ public sealed class BatchProcessor(
                         normalizedSmi,
                         cancellationToken).ConfigureAwait(false);
                     AddNegativeTimestampWarnings("SMI", smiTimestampAdjustments);
-                    var smiToSrtResult = await seConv.ConvertAsync(
+                    var smiToSrtResult = await _subtitleConverter.ConvertAsync(
                         normalizedSmi,
                         finalSrt,
                         SubtitleOutputFormat.SubRip,
@@ -237,7 +239,7 @@ public sealed class BatchProcessor(
                         settings.PlayResY,
                         LogToolOutput,
                         cancellationToken).ConfigureAwait(false);
-                    AddSeConvWarnings(warnings, smiToSrtResult);
+                    AddSubtitleConversionWarnings(warnings, smiToSrtResult);
                     break;
 
                 default:
@@ -280,12 +282,12 @@ public sealed class BatchProcessor(
                         stylePath = Path.Combine(workspace.Path, "default-style.ass");
                         await File.WriteAllTextAsync(
                             stylePath,
-                            AssStyleTemplateWriter.Create(settings),
+                            AssStyleTemplateWriter.CreateHeader(settings),
                             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
                             cancellationToken).ConfigureAwait(false);
                     }
 
-                    var srtToAssResult = await seConv.ConvertAsync(
+                    var srtToAssResult = await _subtitleConverter.ConvertAsync(
                         compatibleSrt,
                         finalAss,
                         SubtitleOutputFormat.AdvancedSubStationAlpha,
@@ -294,7 +296,7 @@ public sealed class BatchProcessor(
                         settings.PlayResY,
                         LogToolOutput,
                         cancellationToken).ConfigureAwait(false);
-                    AddSeConvWarnings(warnings, srtToAssResult);
+                    AddSubtitleConversionWarnings(warnings, srtToAssResult);
 
                     // Subtitle Edit keeps most inline formatting, but it can drop ASS
                     // position/move overrides carried inside SRT. Restore those tags
@@ -344,7 +346,9 @@ public sealed class BatchProcessor(
                 .IdentifyAsync(media.VideoPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var sourceInspection = sourceIdentification.Inspection;
-            var backupService = new MetadataBackupService(processRunner);
+            var backupService = new MetadataBackupService(
+                processRunner,
+                workingDirectory: workspace.Path);
             backupTransaction = new BackupArtifactTransaction(media.VideoPath);
 
             if (settings.BackupOriginalMetadata)
@@ -547,11 +551,13 @@ public sealed class BatchProcessor(
         }
     }
 
-    private static void AddSeConvWarnings(ICollection<string> warnings, SeConvResult result)
+    private static void AddSubtitleConversionWarnings(
+        ICollection<string> warnings,
+        SubtitleConversionResult result)
     {
         foreach (var warning in result.Warnings)
         {
-            warnings.Add($"Subtitle Edit: {warning}");
+            warnings.Add($"libse: {warning}");
         }
     }
 
@@ -785,9 +791,20 @@ public sealed class BatchProcessor(
         public static JobWorkspace Create(string outputDirectory)
         {
             var parent = System.IO.Path.GetFullPath(outputDirectory);
-            var path = System.IO.Path.Combine(parent, $"{WorkspaceNaming.CurrentPrefix}{Guid.NewGuid():N}");
-            Directory.CreateDirectory(path);
-            return new JobWorkspace(parent, path);
+            for (var attempt = 0; attempt < 64; attempt++)
+            {
+                var id = Guid.NewGuid().ToString("N")[..12];
+                var path = System.IO.Path.Combine(parent, $"{WorkspaceNaming.CurrentPrefix}{id}");
+                if (Directory.Exists(path) || File.Exists(path))
+                {
+                    continue;
+                }
+
+                Directory.CreateDirectory(path);
+                return new JobWorkspace(parent, path);
+            }
+
+            throw new IOException(CoreText.Get("Batch_CreateWorkspaceFailed"));
         }
 
         public ValueTask DisposeAsync()

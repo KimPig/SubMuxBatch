@@ -38,7 +38,6 @@ public sealed class AppSettings
         "Style: Default,\uB9D1\uC740 \uACE0\uB515,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1";
 
     public string? MkvMergePath { get; set; }
-    public string? SeConvPath { get; set; }
     public AppLanguage Language { get; set; } = AppLanguage.System;
     public bool CheckForUpdatesAutomatically { get; set; } = true;
     public string OutputPrefix { get; set; } = OutputFileNaming.DefaultPrefix;
@@ -178,7 +177,6 @@ public sealed class AppSettings
     public AppSettings Copy() => new()
     {
         MkvMergePath = MkvMergePath,
-        SeConvPath = SeConvPath,
         Language = Language,
         CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,
         OutputPrefix = OutputPrefix,
@@ -284,5 +282,14 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """;
+    }
+
+    public static string CreateHeader(AppSettings settings)
+    {
+        var template = Create(settings);
+        var formatIndex = template.LastIndexOf(
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+            StringComparison.Ordinal);
+        return formatIndex < 0 ? template : template[..formatIndex].TrimEnd();
     }
 }

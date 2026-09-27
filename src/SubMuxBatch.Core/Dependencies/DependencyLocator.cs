@@ -11,16 +11,16 @@ public sealed record ToolDependency(
     public bool IsAvailable => Path is not null;
 }
 
-public sealed record DependencyReport(ToolDependency MkvMerge, ToolDependency SeConv)
+public sealed record DependencyReport(ToolDependency MkvMerge)
 {
-    public bool IsReady => MkvMerge.IsAvailable && SeConv.IsAvailable;
+    public bool IsReady => MkvMerge.IsAvailable;
 }
 
 public sealed class DependencyLocator(string? applicationDirectory = null)
 {
     private readonly string _applicationDirectory = applicationDirectory ?? AppContext.BaseDirectory;
 
-    public DependencyReport Locate(string? configuredMkvMerge, string? configuredSeConv)
+    public DependencyReport Locate(string? configuredMkvMerge)
     {
         var mkvMerge = LocateTool(
             "MKVToolNix",
@@ -31,16 +31,7 @@ public sealed class DependencyLocator(string? applicationDirectory = null)
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MKVToolNix", "mkvmerge.exe")
             ]);
 
-        var seConv = LocateTool(
-            "Subtitle Edit seconv",
-            "seconv.exe",
-            configuredSeConv,
-            [
-                Path.Combine(_applicationDirectory, "tools", "seconv", "seconv.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Subtitle Edit", "seconv.exe")
-            ]);
-
-        return new DependencyReport(mkvMerge, seConv);
+        return new DependencyReport(mkvMerge);
     }
 
     private static ToolDependency LocateTool(

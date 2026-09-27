@@ -26,7 +26,7 @@ public sealed record MetadataBackupDocument(
 public sealed class MetadataBackupService(
     IProcessRunner processRunner,
     IMediaInfoRawReader? mediaInfoRawReader = null,
-    string? attachmentTemporaryRoot = null)
+    string? workingDirectory = null)
 {
     public const string BackupDirectoryName = ".submux-backup";
     public const int CurrentSchemaVersion = 1;
@@ -47,9 +47,9 @@ public sealed class MetadataBackupService(
 
     private readonly IMediaInfoRawReader _mediaInfoRawReader =
         mediaInfoRawReader ?? new MediaInfoClient();
-    private readonly string _attachmentTemporaryRoot = Path.GetFullPath(
-        attachmentTemporaryRoot
-        ?? Path.Combine(AppSettings.SettingsDirectory, "temp", "attachments"));
+    private readonly string? _workingDirectory = string.IsNullOrWhiteSpace(workingDirectory)
+        ? null
+        : Path.GetFullPath(workingDirectory);
 
     public async Task<string> BackupMetadataAsync(
         string sourcePath,
@@ -108,11 +108,7 @@ public sealed class MetadataBackupService(
             tagsXml,
             chaptersXml);
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
-        var destination = GetAvailableFilePath(videoBackupDirectory, "metadata.json");
-        var temporaryPath = Path.Combine(
-            videoBackupDirectory,
-            $".submux-backup-{Guid.NewGuid():N}.tmp");
+        var temporaryPath = CreateTemporaryFilePath(source, "meta", ".tmp");
         try
         {
             await using (var stream = new FileStream(
@@ -131,7 +127,9 @@ public sealed class MetadataBackupService(
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            File.Move(temporaryPath, destination, overwrite: false);
+            var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
+            var destination = GetAvailableFilePath(videoBackupDirectory, "metadata.json");
+            CommitStagedFile(temporaryPath, destination);
             onBackupCreated?.Invoke(destination);
             return destination;
         }
@@ -160,17 +158,16 @@ public sealed class MetadataBackupService(
             return [];
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var trackIds = subtitleTracks.Select(static track => track.Id
             ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_TrackIdMissing", "subtitle")));
         var subtitlePath = await CreateTrackSidecarAsync(
             source,
             mkvMergePath,
-            videoBackupDirectory,
             "subtitles.mks",
             trackIds,
             isAudio: false,
             onBackupCreated,
+            onBackupDirectoryCreated,
             cancellationToken).ConfigureAwait(false);
         return [subtitlePath];
     }
@@ -190,10 +187,9 @@ public sealed class MetadataBackupService(
             return [];
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         var mkvExtractPath = ResolveMkvExtractPath(mkvMergePath);
         EnsureMkvExtractExists(mkvExtractPath);
-        var extractionDirectory = CreateAttachmentExtractionDirectory();
+        var extractionDirectory = CreateAttachmentExtractionDirectory(source);
         try
         {
             var attachmentSource = source.FullName;
@@ -217,6 +213,7 @@ public sealed class MetadataBackupService(
                 }
             }
 
+            var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
             return await ExtractAttachmentsAsync(
                 mkvExtractPath,
                 attachmentSource,
@@ -271,32 +268,31 @@ public sealed class MetadataBackupService(
             return null;
         }
 
-        var videoBackupDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
         return await CreateTrackSidecarAsync(
             source,
             mkvMergePath,
-            videoBackupDirectory,
             "excluded-audio.mka",
             excludedTrackIds,
             isAudio: true,
             onBackupCreated,
+            onBackupDirectoryCreated,
             cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> CreateTrackSidecarAsync(
         FileInfo source,
         string mkvMergePath,
-        string destinationDirectory,
         string fileName,
         IEnumerable<int> trackIds,
         bool isAudio,
         Action<string>? onBackupCreated,
+        Action<string>? onBackupDirectoryCreated,
         CancellationToken cancellationToken)
     {
-        var destination = GetAvailableFilePath(destinationDirectory, fileName);
-        var temporaryPath = Path.Combine(
-            destinationDirectory,
-            $".submux-{Guid.NewGuid():N}{Path.GetExtension(fileName)}");
+        var temporaryPath = CreateTemporaryFilePath(
+            source,
+            isAudio ? "audio" : "subs",
+            Path.GetExtension(fileName));
         var ids = string.Join(",", trackIds);
         var arguments = new List<string>
         {
@@ -333,7 +329,9 @@ public sealed class MetadataBackupService(
                 source.DirectoryName,
                 temporaryPath,
                 cancellationToken).ConfigureAwait(false);
-            File.Move(temporaryPath, destination, overwrite: false);
+            var destinationDirectory = CreateVideoBackupDirectory(source, onBackupDirectoryCreated);
+            var destination = GetAvailableFilePath(destinationDirectory, fileName);
+            CommitStagedFile(temporaryPath, destination);
             onBackupCreated?.Invoke(destination);
             return destination;
         }
@@ -482,65 +480,82 @@ public sealed class MetadataBackupService(
             var destination = GetAvailableFilePath(
                 destinationDirectory,
                 extractedFile.DestinationName);
-            await CopyAttachmentToBackupAsync(
-                extractedFile.ExtractionPath,
-                destination,
-                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            CommitStagedFile(extractedFile.ExtractionPath, destination);
             onBackupCreated?.Invoke(destination);
             destinations.Add(destination);
         }
         return destinations;
     }
 
-    private string CreateAttachmentExtractionDirectory()
+    private string CreateAttachmentExtractionDirectory(FileInfo source)
     {
-        Directory.CreateDirectory(_attachmentTemporaryRoot);
-        var path = Path.Combine(_attachmentTemporaryRoot, Guid.NewGuid().ToString("N"));
+        var root = GetWorkingDirectory(source);
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var path = Path.Combine(root, $"att-{CreateShortId()}");
+            if (Directory.Exists(path) || File.Exists(path))
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        throw new IOException(CoreText.Get("MetadataBackup_NoAvailableName", "attachments"));
+    }
+
+    private string CreateTemporaryFilePath(
+        FileInfo source,
+        string prefix,
+        string extension)
+    {
+        var root = GetWorkingDirectory(source);
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var path = Path.Combine(root, $"{prefix}-{CreateShortId()}{extension}");
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        throw new IOException(CoreText.Get("MetadataBackup_NoAvailableName", $"{prefix}{extension}"));
+    }
+
+    private string GetWorkingDirectory(FileInfo source)
+    {
+        var path = _workingDirectory
+                   ?? source.DirectoryName
+                   ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_SourceDirectoryMissing"));
         Directory.CreateDirectory(path);
         return path;
     }
 
-    private static async Task CopyAttachmentToBackupAsync(
-        string sourcePath,
-        string destinationPath,
-        CancellationToken cancellationToken)
+    private static string CreateShortId() => Guid.NewGuid().ToString("N")[..12];
+
+    private static void CommitStagedFile(string stagedPath, string destinationPath)
     {
-        var destinationDirectory = Path.GetDirectoryName(destinationPath)
-                                   ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_SourceDirectoryMissing"));
-        var temporaryPath = Path.Combine(
-            destinationDirectory,
-            $".submux-copy-{Guid.NewGuid():N}.tmp");
+        var expectedLength = new FileInfo(stagedPath).Length;
+        var moved = false;
         try
         {
-            await using (var source = new FileStream(
-                             sourcePath,
-                             FileMode.Open,
-                             FileAccess.Read,
-                             FileShare.Read,
-                             128 * 1024,
-                             FileOptions.Asynchronous | FileOptions.SequentialScan))
-            await using (var destination = new FileStream(
-                             temporaryPath,
-                             FileMode.CreateNew,
-                             FileAccess.Write,
-                             FileShare.None,
-                             128 * 1024,
-                             FileOptions.Asynchronous))
+            File.Move(stagedPath, destinationPath, overwrite: false);
+            moved = true;
+            var destination = new FileInfo(destinationPath);
+            if (!destination.Exists || destination.Length != expectedLength)
             {
-                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
-                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                throw new IOException(CoreText.Get("MetadataBackup_BackupSizeMismatch"));
             }
-
-            if (new FileInfo(sourcePath).Length != new FileInfo(temporaryPath).Length)
-            {
-                throw new IOException(CoreText.Get("MetadataBackup_AttachmentCopySizeMismatch"));
-            }
-
-            File.Move(temporaryPath, destinationPath, overwrite: false);
         }
-        finally
+        catch
         {
-            TryDelete(temporaryPath);
+            if (moved)
+            {
+                TryDelete(destinationPath);
+            }
+            throw;
         }
     }
 

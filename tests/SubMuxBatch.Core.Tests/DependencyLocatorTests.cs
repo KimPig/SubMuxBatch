@@ -12,15 +12,11 @@ public sealed class DependencyLocatorTests : IDisposable
     public void MissingConfiguredPathsFallBackToBundledTools()
     {
         var mkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
-        var seConv = CreateTool("tools", "seconv", "seconv.exe");
         var locator = new DependencyLocator(_root);
 
-        var report = locator.Locate(
-            Path.Combine(_root, "deleted", "mkvmerge.exe"),
-            Path.Combine(_root, "deleted", "seconv.exe"));
+        var report = locator.Locate(Path.Combine(_root, "deleted", "mkvmerge.exe"));
 
         Assert.Equal(mkvMerge, report.MkvMerge.Path, ignoreCase: true);
-        Assert.Equal(seConv, report.SeConv.Path, ignoreCase: true);
         Assert.True(report.IsReady);
     }
 
@@ -28,15 +24,12 @@ public sealed class DependencyLocatorTests : IDisposable
     public void ExistingConfiguredPathsArePreferredOverAutomaticCandidates()
     {
         var configuredMkvMerge = CreateTool("configured", "mkvmerge.exe");
-        var configuredSeConv = CreateTool("configured", "seconv.exe");
         CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
-        CreateTool("tools", "seconv", "seconv.exe");
         var locator = new DependencyLocator(_root);
 
-        var report = locator.Locate(configuredMkvMerge, configuredSeConv);
+        var report = locator.Locate(configuredMkvMerge);
 
         Assert.Equal(configuredMkvMerge, report.MkvMerge.Path, ignoreCase: true);
-        Assert.Equal(configuredSeConv, report.SeConv.Path, ignoreCase: true);
     }
 
     public void Dispose()

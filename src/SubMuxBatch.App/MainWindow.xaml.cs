@@ -2072,14 +2072,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshDependencies(bool persistResolvedPaths = false)
     {
-        _dependencies = _dependencyLocator.Locate(_settings.MkvMergePath, _settings.SeConvPath);
+        _dependencies = _dependencyLocator.Locate(_settings.MkvMergePath);
         if (persistResolvedPaths)
         {
             PersistResolvedDependencyPaths(_dependencies);
         }
 
         SetDependencyStatus(MkvStatusDot, MkvStatusText, _dependencies.MkvMerge);
-        SetDependencyStatus(SeConvStatusDot, SeConvStatusText, _dependencies.SeConv);
     }
 
     private void PersistResolvedDependencyPaths(DependencyReport dependencies)
@@ -2088,17 +2087,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _settings.MkvMergePath,
             dependencies.MkvMerge.Path,
             StringComparison.OrdinalIgnoreCase);
-        var seConvChanged = !string.Equals(
-            _settings.SeConvPath,
-            dependencies.SeConv.Path,
-            StringComparison.OrdinalIgnoreCase);
-        if (!mkvMergeChanged && !seConvChanged)
+        if (!mkvMergeChanged)
         {
             return;
         }
 
         _settings.MkvMergePath = dependencies.MkvMerge.Path;
-        _settings.SeConvPath = dependencies.SeConv.Path;
         try
         {
             _settings.Save();

@@ -53,6 +53,12 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Publish failed.'
 }
 
+# Some native NuGet packages ship their own PDB files even when DebugSymbols is
+# disabled. They are not needed at runtime and would otherwise add tens of MB to
+# the release archive.
+Get-ChildItem -LiteralPath $outputPath -Filter '*.pdb' -File |
+    Remove-Item -Force
+
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $outputPath -Force
 [System.IO.Directory]::CreateDirectory($releasePath) | Out-Null
 if (Test-Path -LiteralPath $releaseArchivePath) {
@@ -61,4 +67,4 @@ if (Test-Path -LiteralPath $releaseArchivePath) {
 Compress-Archive -Path (Join-Path $outputPath '*') -DestinationPath $releaseArchivePath -CompressionLevel Optimal
 Write-Host "Published: $outputPath"
 Write-Host "Release archive: $releaseArchivePath"
-Write-Host 'MediaInfoLib is bundled. MKVToolNix and seconv remain external dependencies.'
+Write-Host 'MediaInfoLib and libse are bundled. MKVToolNix remains an external dependency.'

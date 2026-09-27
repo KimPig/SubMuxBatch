@@ -17,19 +17,21 @@ public sealed class BatchProcessorTests : IDisposable
     public BatchProcessorTests() => Directory.CreateDirectory(_root);
 
     [Fact]
-    public async Task SmiOnlyRunsTwoConversionsAndCommitsVerifiedMkv()
+    public async Task SmiOnlyRunsTwoEmbeddedConversionsAndCommitsVerifiedMkv()
     {
         var mkv = Path.Combine(_root, "Episode.mkv");
         var smi = Path.Combine(_root, "Episode.smi");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
-        await File.WriteAllTextAsync(smi, "<SAMI>test</SAMI>");
+        await File.WriteAllTextAsync(
+            smi,
+            "<SAMI><BODY><SYNC Start=0><P>test<SYNC Start=1000><P>&nbsp;</BODY></SAMI>");
 
         var media = new MediaSet(new MediaKey(_root, "Episode"), mkv, null, null, smi);
         var plan = ConversionPlanFactory.Create(media);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
         var dependencies = new DependencyReport(
-            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
-            new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
+            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"));
         bool? workspaceExistsWhenCompleted = null;
         var progress = new InlineProgress<JobProgress>(update =>
         {
@@ -39,7 +41,7 @@ public sealed class BatchProcessorTests : IDisposable
             }
         });
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             plan,
             new AppSettings { AttachAssStyleFonts = false },
@@ -49,13 +51,19 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.NotNull(result.OutputPath);
         Assert.True(File.Exists(result.OutputPath));
-        Assert.Equal(2, runner.SeConvCalls.Count);
-        Assert.Contains(runner.SeConvCalls, args => args.Contains("subrip"));
-        Assert.Contains(runner.SeConvCalls, args => args.Contains("assa"));
+        Assert.Equal(2, converter.Calls.Count);
+        Assert.Contains(converter.Calls, call => call.OutputFormat == SubtitleOutputFormat.SubRip);
+        Assert.Contains(converter.Calls, call => call.OutputFormat == SubtitleOutputFormat.AdvancedSubStationAlpha);
         Assert.Contains(SubMuxMetadata.VersionTagName, runner.MuxedGlobalTagsText);
         Assert.Contains(SubMuxMetadata.ProcessedTagName, runner.MuxedGlobalTagsText);
         Assert.Contains(SubMuxMetadata.ProcessedValue, runner.MuxedGlobalTagsText);
         Assert.DoesNotContain(SubMuxMetadata.LegacyCommentTagName, runner.MuxedGlobalTagsText);
+        var muxArguments = Assert.Single(runner.MuxCalls);
+        var stagedOutput = muxArguments[muxArguments.ToList().IndexOf("-o") + 1];
+        var workspaceDirectory = Assert.IsType<string>(Path.GetDirectoryName(stagedOutput));
+        var workspaceName = Path.GetFileName(workspaceDirectory);
+        Assert.StartsWith(WorkspaceNaming.CurrentPrefix, workspaceName, StringComparison.Ordinal);
+        Assert.Equal(WorkspaceNaming.CurrentPrefix.Length + 12, workspaceName.Length);
         Assert.True(File.Exists(mkv));
         Assert.False(workspaceExistsWhenCompleted);
         Assert.Empty(Directory.EnumerateDirectories(_root, ".submuxbatch-*"));
@@ -70,8 +78,7 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         var media = new MediaSet(new MediaKey(_root, "Invalid"), mkv, null, srt, null);
         var dependencies = new DependencyReport(
-            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
-            new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
+            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"));
 
         var result = await new BatchProcessor(new FakeProcessRunner()).ProcessAsync(
             media,
@@ -215,17 +222,21 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(ass, sourceAss);
         var media = new MediaSet(new MediaKey(_root, "Comments"), video, ass, null, null);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings { AttachAssStyleFonts = false },
             CreateDependencies());
 
         Assert.Equal(JobState.Succeeded, result.State);
-        Assert.DoesNotContain("Comment:", runner.SeConvSubRipInputText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Editor note", runner.SeConvSubRipInputText);
-        Assert.Contains("Visible subtitle", runner.SeConvSubRipInputText);
+        var assConversion = Assert.Single(
+            converter.Calls,
+            call => call.OutputFormat == SubtitleOutputFormat.SubRip);
+        Assert.DoesNotContain("Comment:", assConversion.InputText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Editor note", assConversion.InputText);
+        Assert.Contains("Visible subtitle", assConversion.InputText);
         Assert.Contains("Editor note", runner.MuxedAssText);
         Assert.Equal(sourceAss, await File.ReadAllTextAsync(ass));
     }
@@ -265,8 +276,7 @@ public sealed class BatchProcessorTests : IDisposable
         var media = new MediaSet(new MediaKey(_root, "Scaled"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
         var dependencies = new DependencyReport(
-            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
-            new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
+            new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"));
 
         var result = await new BatchProcessor(runner).ProcessAsync(
             media,
@@ -281,7 +291,9 @@ public sealed class BatchProcessorTests : IDisposable
 
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.NotNull(runner.MuxedAssText);
-        Assert.Contains(@"{\fs40\pos(320,72)}테스트", runner.MuxedAssText);
+        Assert.Contains(@"\fs40", runner.MuxedAssText);
+        Assert.Contains(@"\pos(320,72)", runner.MuxedAssText);
+        Assert.Contains("테스트", runner.MuxedAssText);
     }
 
     [Fact]
@@ -294,8 +306,9 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(srt, sourceText);
         var media = new MediaSet(new MediaKey(_root, "NegativeTimestamp"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings { AttachAssStyleFonts = false },
@@ -305,7 +318,10 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(result.Warnings, static warning =>
             warning.Contains("음수 타임스탬프", StringComparison.Ordinal)
             && warning.Contains("00:00:00,000 --> 00:00:05,000", StringComparison.Ordinal));
-        Assert.Contains("00:00:00,000 --> 00:00:05,000", runner.SeConvAssInputText);
+        var assConversion = Assert.Single(
+            converter.Calls,
+            call => call.OutputFormat == SubtitleOutputFormat.AdvancedSubStationAlpha);
+        Assert.Contains("00:00:00,000 --> 00:00:05,000", assConversion.InputText);
         Assert.Contains("00:00:00,000 --> 00:00:05,000", runner.MuxedSrtText);
         Assert.Equal(sourceText, await File.ReadAllTextAsync(srt));
     }
@@ -381,8 +397,9 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(ass, sourceText);
         var media = new MediaSet(new MediaKey(_root, "NegativeAss"), mkv, ass, null, null);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings { AttachAssStyleFonts = false },
@@ -393,7 +410,10 @@ public sealed class BatchProcessorTests : IDisposable
             warning.Contains("ASS", StringComparison.Ordinal)
             && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
         Assert.Contains("0:00:00.00,0:00:05.00", runner.MuxedAssText);
-        Assert.Contains("0:00:00.00,0:00:05.00", runner.SeConvSubRipInputText);
+        var srtConversion = Assert.Single(
+            converter.Calls,
+            call => call.OutputFormat == SubtitleOutputFormat.SubRip);
+        Assert.Contains("0:00:00.00,0:00:05.00", srtConversion.InputText);
         Assert.Equal(sourceText, await File.ReadAllTextAsync(ass));
     }
 
@@ -411,9 +431,11 @@ public sealed class BatchProcessorTests : IDisposable
                                     + "Style: Default,Test Family,40\n"
                                     + "[Events]\n"
                                     + "Dialogue: 0,0:00:-04.00,0:00:03.99,Default,,0,0,0,,Test\n";
-        var runner = new FakeProcessRunner(generatedAss);
+        var runner = new FakeProcessRunner();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new StaticAssSubtitleConverter(generatedAss)).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings { AttachAssStyleFonts = false },
@@ -440,8 +462,9 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(smi, sourceText);
         var media = new MediaSet(new MediaKey(_root, "NegativeSmi"), mkv, null, null, smi);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings { AttachAssStyleFonts = false },
@@ -451,7 +474,10 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(result.Warnings, static warning =>
             warning.Contains("SMI", StringComparison.Ordinal)
             && warning.Contains("음수 타임스탬프", StringComparison.Ordinal));
-        Assert.Contains("<SYNC Start=0><P>Test", runner.SeConvSmiInputText);
+        var smiConversion = Assert.Single(
+            converter.Calls,
+            call => call.InputExtension.Equals(".smi", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("<SYNC Start=0><P>Test", smiConversion.InputText);
         Assert.Equal(sourceText, await File.ReadAllTextAsync(smi));
     }
 
@@ -466,8 +492,9 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
         var media = new MediaSet(new MediaKey(_root, "StyleToggle"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
 
-        var result = await new BatchProcessor(runner).ProcessAsync(
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
             new AppSettings
@@ -480,11 +507,12 @@ public sealed class BatchProcessorTests : IDisposable
             CreateDependencies());
 
         Assert.Equal(JobState.Succeeded, result.State);
-        var assCall = Assert.Single(runner.SeConvCalls, static args => args.Contains("assa"));
-        Assert.Contains("--resolution:1920x1080", assCall);
-        Assert.Equal(
-            useCustomAssStyle,
-            assCall.Any(static argument => argument.StartsWith("--assa-style-file:", StringComparison.Ordinal)));
+        var assCall = Assert.Single(
+            converter.Calls,
+            call => call.OutputFormat == SubtitleOutputFormat.AdvancedSubStationAlpha);
+        Assert.Equal(1920, assCall.PlayResX);
+        Assert.Equal(1080, assCall.PlayResY);
+        Assert.Equal(useCustomAssStyle, assCall.StyleText is not null);
     }
 
     [Fact]
@@ -676,7 +704,7 @@ public sealed class BatchProcessorTests : IDisposable
             CreateDependencies());
 
         Assert.Equal(JobState.Skipped, result.State);
-        Assert.Contains(result.Warnings, static warning => warning.Contains("Test Family") && warning.Contains("찾지 못했습니다"));
+        Assert.Contains(result.Warnings, static warning => warning.Contains("맑은 고딕") && warning.Contains("찾지 못했습니다"));
         Assert.Empty(runner.MuxCalls);
         Assert.Null(result.OutputPath);
         Assert.Contains("건너뜁니다", result.Error);
@@ -722,8 +750,7 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     private static DependencyReport CreateDependencies() => new(
-        new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"),
-        new ToolDependency("Subtitle Edit seconv", "seconv.exe", "fake-seconv.exe", "test"));
+        new ToolDependency("MKVToolNix", "mkvmerge.exe", "fake-mkvmerge.exe", "test"));
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
@@ -793,15 +820,74 @@ public sealed class BatchProcessorTests : IDisposable
         public IReadOnlyList<FontAttachmentFile> FindByFamilyName(string familyName) => files;
     }
 
-    private sealed class FakeProcessRunner(string? assOutputText = null) : IProcessRunner
+    private sealed record SubtitleConversionCall(
+        SubtitleOutputFormat OutputFormat,
+        string InputExtension,
+        string InputText,
+        string? StyleText,
+        int PlayResX,
+        int PlayResY);
+
+    private sealed class RecordingSubtitleConverter : ISubtitleConverter
     {
-        public List<IReadOnlyList<string>> SeConvCalls { get; } = [];
+        private readonly LibSeSubtitleConverter _inner = new();
+
+        public List<SubtitleConversionCall> Calls { get; } = [];
+
+        public async Task<SubtitleConversionResult> ConvertAsync(
+            string inputPath,
+            string outputPath,
+            SubtitleOutputFormat outputFormat,
+            string? assStylePath,
+            int playResX,
+            int playResY,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add(new SubtitleConversionCall(
+                outputFormat,
+                Path.GetExtension(inputPath),
+                await File.ReadAllTextAsync(inputPath, cancellationToken),
+                assStylePath is null
+                    ? null
+                    : await File.ReadAllTextAsync(assStylePath, cancellationToken),
+                playResX,
+                playResY));
+            return await _inner.ConvertAsync(
+                inputPath,
+                outputPath,
+                outputFormat,
+                assStylePath,
+                playResX,
+                playResY,
+                onOutput,
+                cancellationToken);
+        }
+    }
+
+    private sealed class StaticAssSubtitleConverter(string generatedAss) : ISubtitleConverter
+    {
+        public async Task<SubtitleConversionResult> ConvertAsync(
+            string inputPath,
+            string outputPath,
+            SubtitleOutputFormat outputFormat,
+            string? assStylePath,
+            int playResX,
+            int playResY,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(SubtitleOutputFormat.AdvancedSubStationAlpha, outputFormat);
+            await File.WriteAllTextAsync(outputPath, generatedAss, cancellationToken);
+            return new SubtitleConversionResult([], "test", "utf-8", 1);
+        }
+    }
+
+    private sealed class FakeProcessRunner : IProcessRunner
+    {
         public List<IReadOnlyList<string>> MuxCalls { get; } = [];
         public string? MuxedAssText { get; private set; }
         public string? MuxedSrtText { get; private set; }
-        public string? SeConvAssInputText { get; private set; }
-        public string? SeConvSubRipInputText { get; private set; }
-        public string? SeConvSmiInputText { get; private set; }
         public string? MuxedGlobalTagsText { get; private set; }
 
         public Task<ProcessResult> RunAsync(
@@ -810,55 +896,6 @@ public sealed class BatchProcessorTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (request.FileName.Contains("seconv", StringComparison.OrdinalIgnoreCase))
-            {
-                SeConvCalls.Add(request.Arguments);
-                var outputFolder = ValueOf(request.Arguments, "--output-folder:");
-                var outputName = ValueOf(request.Arguments, "--output-filename:");
-                var workingDirectory = request.WorkingDirectory ?? Environment.CurrentDirectory;
-                var stagedInputPath = Path.Combine(workingDirectory, request.Arguments[0]);
-                if (Path.GetExtension(stagedInputPath).Equals(".smi", StringComparison.OrdinalIgnoreCase))
-                {
-                    SeConvSmiInputText = File.ReadAllText(stagedInputPath);
-                }
-                var output = Path.GetFullPath(Path.Combine(workingDirectory, outputFolder, outputName));
-                if (request.Arguments.Contains("subrip"))
-                {
-                    SeConvSubRipInputText = File.ReadAllText(stagedInputPath);
-                    File.WriteAllText(output, "1\n00:00:00,000 --> 00:00:01,000\n테스트\n");
-                }
-                else
-                {
-                    SeConvAssInputText = File.ReadAllText(Path.Combine(workingDirectory, request.Arguments[0]));
-                    File.WriteAllText(
-                        output,
-                        assOutputText
-                        ?? "[Script Info]\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Test Family,40\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\fs40}테스트\n");
-                }
-
-                var json = JsonSerializer.Serialize(new
-                {
-                    success = true,
-                    totalFiles = 1,
-                    successfulFiles = 1,
-                    failedFiles = 0,
-                    files = new[]
-                    {
-                        new
-                        {
-                            input = request.Arguments[0],
-                            output = $@".\{outputName}",
-                            success = true,
-                            error = (string?)null,
-                            warnings = (string[]?)null
-                        }
-                    },
-                    errors = Array.Empty<string>(),
-                    warnings = Array.Empty<string>()
-                });
-                return Task.FromResult(new ProcessResult(0, json, string.Empty));
-            }
-
             if (request.Arguments[0] == "-J")
             {
                 var inspectedPath = request.Arguments[1];
@@ -892,9 +929,6 @@ public sealed class BatchProcessorTests : IDisposable
             onOutput?.Invoke("#GUI#progress 100%");
             return Task.FromResult(new ProcessResult(0, "#GUI#progress 100%", string.Empty));
         }
-
-        private static string ValueOf(IReadOnlyList<string> arguments, string prefix) =>
-            arguments.First(argument => argument.StartsWith(prefix, StringComparison.Ordinal))[prefix.Length..];
 
         private List<AttachedFont> _muxAttachments = [];
 

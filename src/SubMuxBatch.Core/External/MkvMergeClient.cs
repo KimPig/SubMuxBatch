@@ -302,10 +302,11 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         if (fatalReadWarnings.Length > 0)
         {
             TryDeleteIncompleteOutput(outputPath);
+            var isMatroskaCorruption = fatalReadWarnings.Any(IsFatalMatroskaWarning);
             throw new InvalidOperationException(
                 CoreText.Get(
-                    "Mkv_SourceReadFailed",
-                    string.Join(Environment.NewLine, fatalReadWarnings)));
+                    isMatroskaCorruption ? "Mkv_MatroskaSourceCorrupted" : "Mkv_SourceReadFailed",
+                    string.Join(Environment.NewLine, warnings)));
         }
 
         if (result.ExitCode >= 2 || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
@@ -354,6 +355,11 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
 
     private static bool IsFatalSourceReadWarning(string warning)
     {
+        if (IsFatalMatroskaWarning(warning))
+        {
+            return true;
+        }
+
         if (!warning.Contains("Quicktime/MP4", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -366,6 +372,25 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                                 && warning.Contains("청크 번호", StringComparison.Ordinal)
                                 && warning.Contains("중단합니다", StringComparison.Ordinal);
         return isEnglishReadAbort || isKoreanReadAbort;
+    }
+
+    private static bool IsFatalMatroskaWarning(string warning)
+    {
+        var isEnglishStructureError = warning.Contains(
+                                          "Matroska file structure",
+                                          StringComparison.OrdinalIgnoreCase)
+                                      && warning.Contains("error", StringComparison.OrdinalIgnoreCase);
+        var isKoreanStructureError = warning.Contains("Matroska 파일 구조에 오류", StringComparison.Ordinal);
+        var isEnglishMissingTrackHeader = warning.Contains("track number", StringComparison.OrdinalIgnoreCase)
+                                          && warning.Contains("header", StringComparison.OrdinalIgnoreCase)
+                                          && warning.Contains("skipped", StringComparison.OrdinalIgnoreCase);
+        var isKoreanMissingTrackHeader = warning.Contains("트랙 번호", StringComparison.Ordinal)
+                                         && warning.Contains("헤더", StringComparison.Ordinal)
+                                         && warning.Contains("건너", StringComparison.Ordinal);
+        return isEnglishStructureError
+               || isKoreanStructureError
+               || isEnglishMissingTrackHeader
+               || isKoreanMissingTrackHeader;
     }
 
     private static void TryDeleteIncompleteOutput(string outputPath)

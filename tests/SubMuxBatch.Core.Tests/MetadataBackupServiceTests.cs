@@ -28,7 +28,9 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 0,
                 [new MediaInfoRawField("Title", "원본 제목")])
         ]);
-        var service = new MetadataBackupService(new BackupRunner(), reader);
+        var workingDirectory = Path.Combine(_root, "metadata-workspace");
+        Directory.CreateDirectory(workingDirectory);
+        var service = new MetadataBackupService(new BackupRunner(), reader, workingDirectory);
 
         var first = await service.BackupMetadataAsync(
             source,
@@ -57,6 +59,7 @@ public sealed class MetadataBackupServiceTests : IDisposable
         Assert.Equal("QuickTime/MP4", root.GetProperty("mkvMergeIdentification").GetProperty("container").GetProperty("type").GetString());
         Assert.Equal("원본 제목", root.GetProperty("mediaInfo")[0].GetProperty("fields")[0].GetProperty("value").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("matroskaTagsXml").ValueKind);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
     }
 
     [Fact]
@@ -67,7 +70,9 @@ public sealed class MetadataBackupServiceTests : IDisposable
             new MkvInspection([], [], 1, "Matroska"),
             "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
         var runner = new BackupRunner();
-        var service = new MetadataBackupService(runner, new StaticRawReader([]));
+        var workingDirectory = Path.Combine(_root, "matroska-metadata-workspace");
+        Directory.CreateDirectory(workingDirectory);
+        var service = new MetadataBackupService(runner, new StaticRawReader([]), workingDirectory);
 
         var backupPath = await service.BackupMetadataAsync(source, mkvMerge, identification);
 
@@ -75,6 +80,7 @@ public sealed class MetadataBackupServiceTests : IDisposable
         Assert.Contains("ORIGINAL_TITLE", document.RootElement.GetProperty("matroskaTagsXml").GetString());
         Assert.Contains("ChapterAtom", document.RootElement.GetProperty("matroskaChaptersXml").GetString());
         Assert.Equal(["tags", "chapters"], runner.ExtractModes);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
     }
 
     [Fact]
@@ -92,11 +98,12 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 "Matroska"),
             "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
         var runner = new BackupRunner();
-        var attachmentTemporaryRoot = Path.Combine(_root, "short-attachment-temp");
+        var workingDirectory = Path.Combine(_root, "short-workspace");
+        Directory.CreateDirectory(workingDirectory);
         var service = new MetadataBackupService(
             runner,
             new StaticRawReader([]),
-            attachmentTemporaryRoot);
+            workingDirectory);
 
         await service.BackupSubtitlesAsync(source, mkvMerge, identification);
         await service.BackupAttachmentsAsync(source, mkvMerge, identification);
@@ -120,17 +127,29 @@ public sealed class MetadataBackupServiceTests : IDisposable
         Assert.All(runner.AttachmentOutputPaths, path =>
         {
             Assert.StartsWith(
-                Path.GetFullPath(attachmentTemporaryRoot) + Path.DirectorySeparatorChar,
+                Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar,
                 Path.GetFullPath(path),
                 StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("attachment-", Path.GetFileName(path), StringComparison.Ordinal);
             Assert.EndsWith(".bin", path, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(MetadataBackupService.BackupDirectoryName, path, StringComparison.OrdinalIgnoreCase);
         });
-        Assert.Empty(Directory.EnumerateDirectories(attachmentTemporaryRoot));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
         Assert.All(
             runner.MuxCalls,
-            static arguments => Assert.Contains("--subtitle-tracks", arguments));
+            arguments =>
+            {
+                Assert.Contains("--subtitle-tracks", arguments);
+                var outputPath = arguments[arguments.ToList().IndexOf("-o") + 1];
+                Assert.StartsWith(
+                    Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar,
+                    Path.GetFullPath(outputPath),
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(
+                    MetadataBackupService.BackupDirectoryName,
+                    outputPath,
+                    StringComparison.OrdinalIgnoreCase);
+            });
     }
 
     [Fact]
@@ -161,7 +180,7 @@ public sealed class MetadataBackupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LongBackupDestinationUsesShortLocalAttachmentExtractionPath()
+    public async Task LongBackupDestinationUsesShortSourceWorkspaceExtractionPath()
     {
         var longSourceDirectory = Path.Combine(
             _root,
@@ -183,11 +202,12 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 "Matroska"),
             "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
         var runner = new BackupRunner();
-        var attachmentTemporaryRoot = Path.Combine(_root, "short-temp");
+        var workingDirectory = Path.Combine(_root, "short-workspace");
+        Directory.CreateDirectory(workingDirectory);
         var service = new MetadataBackupService(
             runner,
             new StaticRawReader([]),
-            attachmentTemporaryRoot);
+            workingDirectory);
 
         var paths = await service.BackupAttachmentsAsync(source, mkvMerge, identification);
 
@@ -196,12 +216,74 @@ public sealed class MetadataBackupServiceTests : IDisposable
         Assert.True(File.Exists(backup));
         var extractionPath = Assert.Single(runner.AttachmentOutputPaths);
         Assert.StartsWith(
-            Path.GetFullPath(attachmentTemporaryRoot) + Path.DirectorySeparatorChar,
+            Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar,
             Path.GetFullPath(extractionPath),
             StringComparison.OrdinalIgnoreCase);
         Assert.True(extractionPath.Length < 260);
         Assert.DoesNotContain(Path.GetFileName(source), extractionPath, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(Directory.EnumerateDirectories(attachmentTemporaryRoot));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
+    }
+
+    [Fact]
+    public async Task LongBackupDestinationUsesShortWorkspaceForSubtitleAndAudioSidecars()
+    {
+        var longSourceDirectory = Path.Combine(
+            _root,
+            new string('d', 60),
+            new string('e', 60),
+            new string('f', 60));
+        Directory.CreateDirectory(longSourceDirectory);
+        var source = Path.Combine(longSourceDirectory, $"{new string('v', 80)}.mkv");
+        var mkvMerge = Path.Combine(_root, "mkvmerge.exe");
+        await File.WriteAllBytesAsync(source, [1]);
+        await File.WriteAllBytesAsync(mkvMerge, [1]);
+        var identification = new MkvIdentification(
+            new MkvInspection(
+                [
+                    new MkvTrackInfo("subtitles", "S_TEXT/ASS", false, false, "kor", "ko", "Original", 2),
+                    new MkvTrackInfo("audio", "A_AAC", true, false, "jpn", "ja", "Japanese", 0),
+                    new MkvTrackInfo("audio", "A_AAC", false, false, "eng", "en", "English", 1)
+                ],
+                [],
+                0,
+                "Matroska"),
+            "{\"container\":{\"type\":\"Matroska\"},\"tracks\":[]}");
+        var runner = new BackupRunner();
+        var workingDirectory = Path.Combine(_root, "short-sidecar-workspace");
+        Directory.CreateDirectory(workingDirectory);
+        var service = new MetadataBackupService(
+            runner,
+            new StaticRawReader([]),
+            workingDirectory);
+
+        var subtitlePaths = await service.BackupSubtitlesAsync(source, mkvMerge, identification);
+        var audioPath = await service.BackupExcludedAudioTracksAsync(
+            source,
+            mkvMerge,
+            identification,
+            AudioTrackLanguage.Japanese);
+
+        var subtitlePath = Assert.Single(subtitlePaths);
+        Assert.NotNull(audioPath);
+        Assert.True(subtitlePath.Length > 260);
+        Assert.True(audioPath.Length > 260);
+        Assert.True(File.Exists(subtitlePath));
+        Assert.True(File.Exists(audioPath));
+        Assert.Equal(2, runner.MuxCalls.Count);
+        Assert.All(runner.MuxCalls, arguments =>
+        {
+            var outputPath = arguments[arguments.ToList().IndexOf("-o") + 1];
+            Assert.StartsWith(
+                Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar,
+                Path.GetFullPath(outputPath),
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(outputPath.Length < 260);
+            Assert.DoesNotContain(
+                MetadataBackupService.BackupDirectoryName,
+                outputPath,
+                StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
     }
 
     [Fact]
@@ -223,8 +305,10 @@ public sealed class MetadataBackupServiceTests : IDisposable
                 "MPEG-TS"),
             "{\"container\":{\"type\":\"MPEG-TS\"},\"tracks\":[]}");
         var runner = new BackupRunner();
+        var workingDirectory = Path.Combine(_root, "audio-workspace");
+        Directory.CreateDirectory(workingDirectory);
 
-        var path = await new MetadataBackupService(runner, new StaticRawReader([]))
+        var path = await new MetadataBackupService(runner, new StaticRawReader([]), workingDirectory)
             .BackupExcludedAudioTracksAsync(
                 source,
                 mkvMerge,
@@ -237,6 +321,16 @@ public sealed class MetadataBackupServiceTests : IDisposable
         var selector = arguments.ToList().IndexOf("--audio-tracks");
         Assert.Equal("1,2", arguments[selector + 1]);
         Assert.DoesNotContain("0", arguments[selector + 1].Split(','));
+        var outputPath = arguments[arguments.ToList().IndexOf("-o") + 1];
+        Assert.StartsWith(
+            Path.GetFullPath(workingDirectory) + Path.DirectorySeparatorChar,
+            Path.GetFullPath(outputPath),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            MetadataBackupService.BackupDirectoryName,
+            outputPath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workingDirectory));
     }
 
     [Fact]

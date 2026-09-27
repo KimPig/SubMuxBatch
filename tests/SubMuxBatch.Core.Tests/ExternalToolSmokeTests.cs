@@ -20,6 +20,100 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Integration")]
+    public async Task RealToolsStageBackupsInShortSourceWorkspaceBeforeLongDestination()
+    {
+        var mkvMergePath = FindExecutable(
+            "MKVMERGE_PATH",
+            "mkvmerge.exe",
+            @"C:\Program Files\MKVToolNix\mkvmerge.exe");
+        if (mkvMergePath is null)
+        {
+            output.WriteLine("mkvmerge를 찾지 못해 긴 백업 경로 smoke test를 건너뜁니다.");
+            return;
+        }
+
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"submux-long-backup-{Guid.NewGuid():N}",
+            new string('a', 50),
+            new string('b', 50));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var runner = new ExternalProcessRunner();
+            var subtitle = Path.Combine(Path.GetTempPath(), $"submux-long-{Guid.NewGuid():N}.srt");
+            var attachment = Path.Combine(Path.GetTempPath(), $"submux-long-{Guid.NewGuid():N}.txt");
+            var source = Path.Combine(root, $"{new string('v', 60)}.mkv");
+            var workspace = Path.Combine(root, $"{WorkspaceNaming.CurrentPrefix}123456789abc");
+            Directory.CreateDirectory(workspace);
+            try
+            {
+                await File.WriteAllTextAsync(
+                    subtitle,
+                    "1\r\n00:00:00,000 --> 00:00:01,000\r\nBackup test\r\n",
+                    new UTF8Encoding(false));
+                await File.WriteAllTextAsync(attachment, "attachment backup test", Encoding.ASCII);
+                var sourceResult = await runner.RunAsync(new ProcessRequest(
+                    mkvMergePath,
+                    [
+                        "-o", source,
+                        "--attachment-name", "backup-test.txt",
+                        "--attachment-mime-type", "text/plain",
+                        "--attach-file", attachment,
+                        subtitle
+                    ],
+                    root));
+                Assert.InRange(sourceResult.ExitCode, 0, 1);
+
+                var client = new MkvMergeClient(mkvMergePath, runner);
+                var identification = await client.IdentifyAsync(source);
+                var service = new MetadataBackupService(
+                    runner,
+                    workingDirectory: workspace);
+                var subtitleBackups = await service.BackupSubtitlesAsync(
+                    source,
+                    mkvMergePath,
+                    identification);
+                var attachmentBackups = await service.BackupAttachmentsAsync(
+                    source,
+                    mkvMergePath,
+                    identification);
+
+                var subtitleBackup = Assert.Single(subtitleBackups);
+                var attachmentBackup = Assert.Single(attachmentBackups);
+                Assert.True(subtitleBackup.Length > 260);
+                Assert.True(attachmentBackup.Length > 260);
+                Assert.True(File.Exists(subtitleBackup));
+                Assert.True(File.Exists(attachmentBackup));
+                Assert.Empty(Directory.EnumerateFileSystemEntries(workspace));
+                var subtitleInspection = await runner.RunAsync(new ProcessRequest(
+                    mkvMergePath,
+                    ["-J", subtitleBackup],
+                    workspace));
+                Assert.Equal(0, subtitleInspection.ExitCode);
+                Assert.Contains("S_TEXT/UTF8", subtitleInspection.StandardOutput);
+                Assert.Equal("attachment backup test", await File.ReadAllTextAsync(attachmentBackup));
+            }
+            finally
+            {
+                if (File.Exists(subtitle))
+                {
+                    File.Delete(subtitle);
+                }
+                if (File.Exists(attachment))
+                {
+                    File.Delete(attachment);
+                }
+            }
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task RealMkvMergeIncludesAddedFontAttachment()
     {
         var mkvMergePath = FindExecutable(
@@ -223,16 +317,12 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             "MKVMERGE_PATH",
             "mkvmerge.exe",
             @"C:\Program Files\MKVToolNix\mkvmerge.exe");
-        var seConvPath = FindExecutable(
-            "SECONV_PATH",
-            "seconv.exe",
-            @"C:\Program Files\Subtitle Edit\seconv.exe");
         var ffmpegPath = FindExecutable(
             "FFMPEG_PATH",
             "ffmpeg.exe",
             @"C:\Program Files\Jellyfin\Server\ffmpeg.exe");
 
-        if (mkvMergePath is null || seConvPath is null || ffmpegPath is null)
+        if (mkvMergePath is null || ffmpegPath is null)
         {
             output.WriteLine("외부 도구가 모두 설정되지 않아 실제 도구 smoke test를 건너뜁니다.");
             return;
@@ -319,8 +409,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
 
             var stylePath = Path.Combine(root, "style.ass");
             var convertedAssPath = Path.Combine(root, "converted.ass");
-            await File.WriteAllTextAsync(stylePath, AssStyleTemplateWriter.Create(settings), new UTF8Encoding(true));
-            await new SeConvClient(seConvPath, runner).ConvertAsync(
+            await File.WriteAllTextAsync(stylePath, AssStyleTemplateWriter.CreateHeader(settings), new UTF8Encoding(true));
+            await new LibSeSubtitleConverter().ConvertAsync(
                 srtPath,
                 convertedAssPath,
                 SubtitleOutputFormat.AdvancedSubStationAlpha,
@@ -340,8 +430,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 null);
             var plan = ConversionPlanFactory.Create(media);
             var dependencies = new DependencyReport(
-                new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"),
-                new ToolDependency("Subtitle Edit seconv", "seconv.exe", seConvPath, "smoke"));
+                new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"));
 
             var result = await new BatchProcessor(runner).ProcessAsync(media, plan, settings, dependencies);
 
@@ -445,15 +534,11 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             "MKVMERGE_PATH",
             "mkvmerge.exe",
             @"C:\Program Files\MKVToolNix\mkvmerge.exe");
-        var seConvPath = FindExecutable(
-            "SECONV_PATH",
-            "seconv.exe",
-            @"C:\Program Files\Subtitle Edit\seconv.exe");
         var ffmpegPath = FindExecutable(
             "FFMPEG_PATH",
             "ffmpeg.exe",
             @"C:\Program Files\Jellyfin\Server\ffmpeg.exe");
-        if (mkvMergePath is null || seConvPath is null || ffmpegPath is null)
+        if (mkvMergePath is null || ffmpegPath is null)
         {
             output.WriteLine("외부 도구가 모두 설정되지 않아 MP4 smoke test를 건너뜁니다.");
             return;
@@ -502,8 +587,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                     AttachAssStyleFonts = false
                 },
                 new DependencyReport(
-                    new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"),
-                    new ToolDependency("Subtitle Edit seconv", "seconv.exe", seConvPath, "smoke")));
+                    new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke")));
 
             Assert.True(result.State is JobState.Succeeded or JobState.SucceededWithWarnings, result.Error);
             Assert.Equal(Path.Combine(root, "result_Movie.mkv"), result.OutputPath);
@@ -535,8 +619,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
                 ConversionPlanFactory.Create(media),
                 preserveSettings,
                 new DependencyReport(
-                    new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke"),
-                    new ToolDependency("Subtitle Edit seconv", "seconv.exe", seConvPath, "smoke")));
+                    new ToolDependency("MKVToolNix", "mkvmerge.exe", mkvMergePath, "smoke")));
             Assert.True(
                 preservedResult.State is JobState.Succeeded or JobState.SucceededWithWarnings,
                 preservedResult.Error);
@@ -552,18 +635,8 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
     }
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task RealSeConvUsesCp949FallbackForSmi()
+    public async Task EmbeddedLibSeUsesCp949FallbackForSmi()
     {
-        var seConvPath = FindExecutable(
-            "SECONV_PATH",
-            "seconv.exe",
-            @"C:\Program Files\Subtitle Edit\seconv.exe");
-        if (seConvPath is null)
-        {
-            output.WriteLine("seconv가 설정되지 않아 CP949 smoke test를 건너뜁니다.");
-            return;
-        }
-
         var root = Path.Combine(Path.GetTempPath(), $"[Group] submux-batch-smi-smoke-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
 
@@ -579,7 +652,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             const string smi = "<SAMI><BODY><SYNC Start=0><P Class=KRCC><FONT COLOR=\"#00FF00\"><B>안녕하세요</B></FONT> <RUBY><RB>漢</RB><RT>かん</RT></RUBY><SYNC Start=1000><P Class=KRCC>&nbsp;</BODY></SAMI>";
             await File.WriteAllTextAsync(smiPath, smi, Encoding.GetEncoding(949));
 
-            var client = new SeConvClient(seConvPath, new ExternalProcessRunner());
+            var client = new LibSeSubtitleConverter();
             await client.ConvertAsync(
                 smiPath,
                 srtPath,
@@ -600,7 +673,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
 
             await File.WriteAllTextAsync(
                 stylePath,
-                AssStyleTemplateWriter.Create(new AppSettings { AssStyleLine = ArialStyleLine }),
+                AssStyleTemplateWriter.CreateHeader(new AppSettings { AssStyleLine = ArialStyleLine }),
                 new UTF8Encoding(true));
             await client.ConvertAsync(
                 normalizedSrtPath,

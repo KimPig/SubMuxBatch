@@ -3,6 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="libse" Version="5.1.0" />
     <PackageReference Include="MediaInfoDLL" Version="26.1.0" />
   </ItemGroup>
   <ItemGroup>

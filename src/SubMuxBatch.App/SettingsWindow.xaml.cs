@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using Microsoft.Win32;
 using SubMuxBatch.App.Localization;
@@ -45,15 +46,14 @@ public partial class SettingsWindow : Window
         }
         CheckForUpdatesAutomaticallyCheckBox.IsChecked = settings.CheckForUpdatesAutomatically;
 
-        detectedDependencies ??= new DependencyLocator().Locate(
-            settings.MkvMergePath,
-            settings.SeConvPath);
+        detectedDependencies ??= new DependencyLocator().Locate(settings.MkvMergePath);
         MkvMergePathTextBox.Text = detectedDependencies.MkvMerge.Path
                                    ?? settings.MkvMergePath
                                    ?? string.Empty;
-        SeConvPathTextBox.Text = detectedDependencies.SeConv.Path
-                                ?? settings.SeConvPath
-                                ?? string.Empty;
+        var version = typeof(SettingsWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? "unknown";
+        BuiltInVersionText.Text = AppText.Get("Settings_VersionSummary", version);
         OutputPrefixTextBox.Text = settings.OutputPrefix;
         IncludeSubdirectoriesCheckBox.IsChecked = settings.IncludeSubdirectories;
         AllowSubtitleSuffixMatchCheckBox.IsChecked = settings.AllowSubtitleSuffixMatch;
@@ -118,23 +118,10 @@ public partial class SettingsWindow : Window
     private void BrowseMkvMerge_Click(object sender, RoutedEventArgs e) =>
         BrowseExecutable(MkvMergePathTextBox, $"mkvmerge.exe|mkvmerge.exe|{AppText.Get("Common_Executable")}|*.exe");
 
-    private void BrowseSeConv_Click(object sender, RoutedEventArgs e) =>
-        BrowseExecutable(SeConvPathTextBox, $"seconv.exe|seconv.exe|{AppText.Get("Common_Executable")}|*.exe");
-
     private void AutoDetectMkvMerge_Click(object sender, RoutedEventArgs e)
     {
-        var dependency = _dependencyLocator.Locate(
-            configuredMkvMerge: null,
-            EmptyToNull(SeConvPathTextBox.Text)).MkvMerge;
+        var dependency = _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge;
         ApplyDetectedPath(MkvMergePathTextBox, dependency);
-    }
-
-    private void AutoDetectSeConv_Click(object sender, RoutedEventArgs e)
-    {
-        var dependency = _dependencyLocator.Locate(
-            EmptyToNull(MkvMergePathTextBox.Text),
-            configuredSeConv: null).SeConv;
-        ApplyDetectedPath(SeConvPathTextBox, dependency);
     }
 
     private void ApplyDetectedPath(
@@ -185,7 +172,6 @@ public partial class SettingsWindow : Window
             updated.Language = language;
             updated.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyCheckBox.IsChecked == true;
             updated.MkvMergePath = EmptyToNull(MkvMergePathTextBox.Text);
-            updated.SeConvPath = EmptyToNull(SeConvPathTextBox.Text);
             updated.OutputPrefix = OutputPrefixTextBox.Text.Trim();
             updated.IncludeSubdirectories = IncludeSubdirectoriesCheckBox.IsChecked == true;
             updated.AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatchCheckBox.IsChecked == true;

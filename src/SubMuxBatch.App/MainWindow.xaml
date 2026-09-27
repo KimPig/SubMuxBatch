@@ -293,13 +293,6 @@
                         <TextBlock x:Name="MkvStatusText" Margin="6,0,0,0" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Text="{loc:Loc Common_Checking}" />
                     </StackPanel>
                 </Border>
-                <Border Style="{StaticResource ToolBadgeStyle}" ToolTip="{Binding ToolTip, ElementName=SeConvStatusText}">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse x:Name="SeConvStatusDot" Width="7" Height="7" Fill="#D13438" Margin="0,0,6,0" VerticalAlignment="Center" />
-                        <TextBlock Text="seconv" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        <TextBlock x:Name="SeConvStatusText" Margin="6,0,0,0" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" Text="{loc:Loc Common_Checking}" />
-                    </StackPanel>
-                </Border>
             </WrapPanel>
 
             <Button x:Name="SettingsButton"
@@ -770,7 +763,7 @@
                                   Margin="12,7,8,8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="18" />
                                 </Grid.RowDefinitions>
                                 <Grid Grid.Row="0" ClipToBounds="True">
                                         <Grid.ColumnDefinitions>
@@ -837,23 +830,16 @@
                                         </Grid>
                                 </Grid>
                                 <TextBlock Grid.Row="1"
-                                           Margin="0,5,0,0"
-                                               Text="{Binding IssuesText}"
-                                               ToolTip="{Binding IssuesText}"
-                                               Foreground="{Binding StatusForeground}"
-                                               FontSize="11"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="CharacterEllipsis">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IssuesText}" Value="">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
+                                           Margin="0,2,0,0"
+                                           Text="{Binding IssuesText}"
+                                           ToolTip="{Binding IssuesText}"
+                                           ToolTipService.ShowDuration="60000"
+                                           Foreground="{Binding StatusForeground}"
+                                           FontSize="11"
+                                           LineHeight="14"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis">
                                 </TextBlock>
                             </Grid>
                         </Grid>
