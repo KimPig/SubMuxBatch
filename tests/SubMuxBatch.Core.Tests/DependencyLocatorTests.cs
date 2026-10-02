@@ -12,7 +12,7 @@ public sealed class DependencyLocatorTests : IDisposable
     public void MissingConfiguredPathsFallBackToBundledTools()
     {
         var mkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
-        var locator = new DependencyLocator(_root);
+        var locator = new DependencyLocator(_root, Path.Combine(_root, "missing-bundled", "mkvmerge.exe"));
 
         var report = locator.Locate(Path.Combine(_root, "deleted", "mkvmerge.exe"));
 
@@ -25,11 +25,47 @@ public sealed class DependencyLocatorTests : IDisposable
     {
         var configuredMkvMerge = CreateTool("configured", "mkvmerge.exe");
         CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
-        var locator = new DependencyLocator(_root);
+        var locator = new DependencyLocator(_root, Path.Combine(_root, "missing-bundled", "mkvmerge.exe"));
 
         var report = locator.Locate(configuredMkvMerge);
 
         Assert.Equal(configuredMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+    }
+
+    [Fact]
+    public void BundledToolIsPreferredOverPreviouslySavedAutomaticPath()
+    {
+        var bundledMkvMerge = CreateTool("bundled", "102.0", "mkvmerge.exe");
+        var automaticMkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
+        var locator = new DependencyLocator(_root, bundledMkvMerge);
+
+        var report = locator.Locate(automaticMkvMerge);
+
+        Assert.Equal(bundledMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+    }
+
+    [Fact]
+    public void ExplicitCustomPathIsPreferredOverBundledTool()
+    {
+        var bundledMkvMerge = CreateTool("bundled", "102.0", "mkvmerge.exe");
+        var configuredMkvMerge = CreateTool("custom", "mkvmerge.exe");
+        var locator = new DependencyLocator(_root, bundledMkvMerge);
+
+        var report = locator.Locate(configuredMkvMerge);
+
+        Assert.Equal(configuredMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+    }
+
+    [Fact]
+    public void ExplicitOverrideCanSelectAnOtherwiseAutomaticPath()
+    {
+        var bundledMkvMerge = CreateTool("bundled", "102.0", "mkvmerge.exe");
+        var automaticMkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
+        var locator = new DependencyLocator(_root, bundledMkvMerge);
+
+        var report = locator.Locate(automaticMkvMerge, preferConfigured: true);
+
+        Assert.Equal(automaticMkvMerge, report.MkvMerge.Path, ignoreCase: true);
     }
 
     public void Dispose()

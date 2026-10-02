@@ -3,6 +3,7 @@ namespace SubMuxBatch.Core.Domain;
 internal static class WorkspaceNaming
 {
     public const string CurrentPrefix = ".submuxbatch-";
+    public const string MaintenancePrefix = ".submuxbatch-m-";
     public const string LegacyPrefix = ".subtitlebatch-";
 
     public static bool IsWorkspaceDirectory(string path)

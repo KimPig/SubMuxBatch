@@ -24,6 +24,7 @@ public sealed class MaintenanceIntegrationTests
             var runner = new ExternalProcessRunner();
             var video = Path.Combine(root, "video.mp4");
             var ass = Path.Combine(root, "subtitle.ass");
+            var srt = Path.Combine(root, "subtitle.srt");
             var tags = Path.Combine(root, "tags.xml");
             var source = Path.Combine(root, "source.mkv");
             await File.WriteAllTextAsync(ass, $$"""
@@ -38,12 +39,19 @@ public sealed class MaintenanceIntegrationTests
                 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,test
                 """);
+            await File.WriteAllTextAsync(
+                srt,
+                "1\r\n00:00:00,000 --> 00:00:01,000\r\n<font color = FC8046 face = Arial>test</font>\r\n");
             await File.WriteAllTextAsync(tags, SubMuxMetadata.CreateGlobalTagsXml("2026.01.01"));
             var ffmpeg = await runner.RunAsync(new ProcessRequest(ffmpegPath,
                 ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=2", "-c:v", "mpeg4", video], root));
             Assert.Equal(0, ffmpeg.ExitCode);
             var mux = await runner.RunAsync(new ProcessRequest(mkvMergePath,
-                ["-o", source, "--global-tags", tags, video, "--language", "0:kor", "--track-name", "0:스타일 자막 (ASS)", ass], root));
+                [
+                    "-o", source, "--global-tags", tags, video,
+                    "--language", "0:kor", "--track-name", "0:스타일 자막 (ASS)", ass,
+                    "--language", "0:kor", "--track-name", "0:일반 자막 (SRT)", srt
+                ], root));
             Assert.InRange(mux.ExitCode, 0, 1);
             var extractedTags = await runner.RunAsync(new ProcessRequest(
                 Path.Combine(Path.GetDirectoryName(mkvMergePath)!, "mkvextract.exe"), [source, "tags"], root));
@@ -76,6 +84,8 @@ public sealed class MaintenanceIntegrationTests
             Assert.InRange(extract.ExitCode, 0, 1);
             var maintainedAssText = await File.ReadAllTextAsync(maintainedAss);
             Assert.Contains(AppSettings.DefaultAssStyleLine, maintainedAssText);
+            Assert.Contains(@"\c&H4680fc&", maintainedAssText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(@"\fnArial", maintainedAssText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains($"; SUBMUX_ASS_SOURCE={SubMuxMetadata.LegacySrtOrSmiSource}", maintainedAssText);
             var maintainedTags = await runner.RunAsync(new ProcessRequest(
                 Path.Combine(Path.GetDirectoryName(mkvMergePath)!, "mkvextract.exe"), [result.OutputPath!, "tags"], root));

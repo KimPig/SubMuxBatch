@@ -313,7 +313,7 @@ public sealed class BatchProcessorTests : IDisposable
             },
             dependencies);
 
-        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.True(result.State == JobState.Succeeded, result.Error);
         Assert.NotNull(runner.MuxedAssText);
         Assert.Contains(@"\fs40", runner.MuxedAssText);
         Assert.Contains(@"\pos(320,72)", runner.MuxedAssText);

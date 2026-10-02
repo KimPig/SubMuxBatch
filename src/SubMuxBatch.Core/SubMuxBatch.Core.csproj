@@ -15,5 +15,17 @@
     <EmbeddedResource Include="$(BundledFfmpegPath)"
                       LogicalName="SubMuxBatch.Core.Resources.ffmpeg.$(BundledFfmpegResourceRid).exe"
                       Condition="'$(BundledFfmpegPath)' != '' and Exists('$(BundledFfmpegPath)')" />
+    <EmbeddedResource Include="$(BundledMkvMergePath)"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.mkvmerge.exe"
+                      Condition="'$(BundledMkvMergePath)' != '' and Exists('$(BundledMkvMergePath)')" />
+    <EmbeddedResource Include="$(BundledMkvExtractPath)"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.mkvextract.exe"
+                      Condition="'$(BundledMkvExtractPath)' != '' and Exists('$(BundledMkvExtractPath)')" />
+    <EmbeddedResource Include="$(BundledMkvLocaleKoPath)"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.locale.ko.LC_MESSAGES.mkvtoolnix.mo"
+                      Condition="'$(BundledMkvLocaleKoPath)' != '' and Exists('$(BundledMkvLocaleKoPath)')" />
+    <EmbeddedResource Include="..\..\licenses\MKVToolNix-GPL-2.0.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"
+                      Condition="Exists('..\..\licenses\MKVToolNix-GPL-2.0.txt')" />
   </ItemGroup>
 </Project>

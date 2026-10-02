@@ -36,6 +36,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const double MinimumDragDistance = 6;
     private const double MinimumQueueColumnWidth = 48;
     private readonly DependencyLocator _dependencyLocator = new();
+    private readonly BundledMkvToolNixProvider _bundledMkvToolNixProvider = new();
     private readonly GitHubReleaseClient _releaseClient = new();
     private AppSettings _settings = new();
     private DependencyReport? _dependencies;
@@ -221,7 +222,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshQueueColumnPresentation();
         _logger = new SessionLogger();
         AppendLog(AppText.Get("Log_AppStarted"));
-        RefreshDependencies(persistResolvedPaths: true);
+        try
+        {
+            await _bundledMkvToolNixProvider.EnsureAvailableAsync();
+        }
+        catch (Exception exception)
+        {
+            AppendLog(AppText.Get("Log_BundledMkvToolNixFailed", exception.Message));
+        }
+        RefreshDependencies();
         UpdateControls();
         if (_settings.CheckForUpdatesAutomatically)
         {
@@ -1664,7 +1673,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 AppendLog(AppText.Get("Log_QueueRebuilt"));
             }
 
-            RefreshDependencies(persistResolvedPaths: true);
+            RefreshDependencies();
             UpdateControls();
 
             if (languageChanged)
@@ -1713,7 +1722,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        RefreshDependencies(persistResolvedPaths: true);
+        RefreshDependencies();
         if (_dependencies is null || !_dependencies.IsReady)
         {
             MessageBox.Show(
@@ -2162,51 +2171,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void RefreshDependencies(bool persistResolvedPaths = false)
+    private void RefreshDependencies()
     {
-        _dependencies = _dependencyLocator.Locate(_settings.MkvMergePath);
-        if (persistResolvedPaths)
-        {
-            PersistResolvedDependencyPaths(_dependencies);
-        }
-
-        SetDependencyStatus(MkvStatusDot, MkvStatusText, _dependencies.MkvMerge);
-    }
-
-    private void PersistResolvedDependencyPaths(DependencyReport dependencies)
-    {
-        var mkvMergeChanged = !string.Equals(
+        _dependencies = _dependencyLocator.Locate(
             _settings.MkvMergePath,
-            dependencies.MkvMerge.Path,
-            StringComparison.OrdinalIgnoreCase);
-        if (!mkvMergeChanged)
-        {
-            return;
-        }
-
-        _settings.MkvMergePath = dependencies.MkvMerge.Path;
-        try
-        {
-            _settings.Save();
-            AppendLog(AppText.Get("Log_ToolPathsUpdated"));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            AppendLog(AppText.Get("Log_ToolPathSaveFailed", exception.Message));
-        }
+            _settings.UseCustomMkvMergePath);
+        SetDependencyStatus(_dependencies.MkvMerge);
     }
 
-    private static void SetDependencyStatus(
-        System.Windows.Shapes.Ellipse dot,
-        System.Windows.Controls.TextBlock text,
-        ToolDependency dependency)
+    private void SetDependencyStatus(ToolDependency dependency)
     {
-        dot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
-            dependency.IsAvailable ? "#22C55E" : "#EF4444"));
-        text.Text = dependency.IsAvailable
-            ? AppText.Get("Tool_Available", FormatVersion(dependency.Version))
-            : AppText.Get("Tool_NotFound");
-        text.ToolTip = dependency.Path;
+        if (dependency.IsAvailable)
+        {
+            MkvToolStatusDot.Fill = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+            MkvToolVersionText.Text = $"MKVToolNix {FormatVersion(dependency.Version)}";
+            MkvToolBadge.ToolTip = dependency.Path;
+        }
+        else
+        {
+            MkvToolStatusDot.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+            MkvToolVersionText.Text = $"MKVToolNix {BundledMkvToolNixProvider.Version}";
+            MkvToolBadge.ToolTip = AppText.Get("Tool_MkvToolNixFailed");
+        }
     }
 
     private static string FormatVersion(string? version)

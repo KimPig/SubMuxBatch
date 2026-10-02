@@ -270,6 +270,7 @@ public sealed class BatchProcessor(
             }
 
             string finalAss;
+            string? assValidationSourceSrt = null;
             switch (plan.AssSource)
             {
                 case AssSourceKind.Existing:
@@ -280,10 +281,21 @@ public sealed class BatchProcessor(
                     Report(JobState.ConvertingSrtToAss, 24, CoreText.Get("Batch_ConvertSrtToAss"));
                     finalAss = Path.Combine(workspace.Path, "primary.ass");
                     var compatibleSrt = Path.Combine(workspace.Path, "ass-compatible.srt");
-                    await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
-                        finalSrt,
-                        compatibleSrt,
-                        cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
+                            finalSrt,
+                            compatibleSrt,
+                            settings.UseCustomAssStyle
+                                ? AssStyleDefinition.Parse(settings.AssStyleLine).FontSize
+                                : 20d,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (InvalidDataException exception)
+                    {
+                        throw new JobSkippedException(exception.Message);
+                    }
+                    assValidationSourceSrt = compatibleSrt;
                     string? stylePath = null;
                     if (settings.UseCustomAssStyle)
                     {
@@ -335,6 +347,31 @@ public sealed class BatchProcessor(
                 cancellationToken).ConfigureAwait(false);
             AddNegativeTimestampWarnings("ASS", finalAssAdjustments);
             finalAss = verifiedAss;
+
+            if (assValidationSourceSrt is not null)
+            {
+                try
+                {
+                    var generatedAss = await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false);
+                    var optimizedAss = AssInlineTagOptimizer.OptimizeGeneratedAss(generatedAss);
+                    SubtitleConversionValidator.ValidateAssOptimization(generatedAss, optimizedAss);
+                    SubtitleConversionValidator.ValidateSrtToAss(
+                        await File.ReadAllTextAsync(assValidationSourceSrt, cancellationToken).ConfigureAwait(false),
+                        optimizedAss);
+                    if (!string.Equals(generatedAss, optimizedAss, StringComparison.Ordinal))
+                    {
+                        await File.WriteAllTextAsync(
+                            finalAss,
+                            optimizedAss,
+                            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                catch (InvalidDataException exception)
+                {
+                    throw new JobSkippedException(exception.Message);
+                }
+            }
 
             if (settings.AddSubMuxTag)
             {

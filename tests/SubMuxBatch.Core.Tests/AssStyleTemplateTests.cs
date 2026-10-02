@@ -24,7 +24,7 @@ public sealed class AssStyleTemplateTests
         Assert.False(settings.ConvertAudioToAac);
         Assert.Equal(AudioChannelMode.PreserveChannels, settings.AudioChannelMode);
         Assert.Equal(
-            "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1",
+            "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,80,1",
             settings.AssStyleLine);
     }
 
@@ -132,6 +132,8 @@ public sealed class AssStyleTemplateTests
     {
         var settings = new AppSettings
         {
+            MkvMergePath = @"C:\Tools\mkvmerge.exe",
+            UseCustomMkvMergePath = true,
             UseCustomAssStyle = false,
             PlayResX = 1280,
             PlayResY = 720,
@@ -151,6 +153,8 @@ public sealed class AssStyleTemplateTests
 
         var copy = settings.Copy();
 
+        Assert.Equal(settings.MkvMergePath, copy.MkvMergePath);
+        Assert.True(copy.UseCustomMkvMergePath);
         Assert.False(copy.UseCustomAssStyle);
         Assert.Equal(1280, copy.PlayResX);
         Assert.Equal(720, copy.PlayResY);

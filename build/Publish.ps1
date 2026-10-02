@@ -20,6 +20,39 @@ $ffmpegAssetName = switch ($Runtime) {
 $ffmpegCache = Join-Path $projectRoot "artifacts\dependencies\ffmpeg\$Runtime"
 $ffmpegExecutable = Join-Path $ffmpegCache 'ffmpeg.exe'
 $ffmpegDigestPath = Join-Path $ffmpegCache 'archive.sha256'
+$mkvToolNixVersion = '102.0'
+$mkvToolNixArchiveUrl = "https://mkvtoolnix.download/windows/releases/$mkvToolNixVersion/mkvtoolnix-64-bit-$mkvToolNixVersion.zip"
+$mkvToolNixArchiveHash = 'C02E918900F6D945D9307B426237E456378B79A200589AC6928DE39064409A44'
+$mkvMergeHash = 'B56FFD0ED62224CF24C640F418E21538026ED444E143DDD5175E3AA7D7539196'
+$mkvExtractHash = 'BD79D648762787226E8AEE23F003C0825B4FF17BC515ADAA9D61FACCEDA52346'
+$mkvLocaleKoHash = '0F7568F1834CDD4F56F5EBBF293B3A5EFDBF995C89B4BBECDCF37DC66165A6C0'
+$mkvToolNixCache = Join-Path $projectRoot "artifacts\dependencies\mkvtoolnix\$mkvToolNixVersion"
+$mkvMergeExecutable = Join-Path $mkvToolNixCache 'mkvmerge.exe'
+$mkvExtractExecutable = Join-Path $mkvToolNixCache 'mkvextract.exe'
+$mkvLocaleKo = Join-Path $mkvToolNixCache 'locale\ko\LC_MESSAGES\mkvtoolnix.mo'
+
+function Test-FileHash([string] $Path, [string] $ExpectedHash) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant() -eq $ExpectedHash
+}
+
+function Remove-VerifiedCacheDirectory([string] $Path, [string] $CacheRoot) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $resolvedRoot = ([System.IO.Path]::GetFullPath($CacheRoot)).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedPath.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean unexpected dependency extraction path: $resolvedPath"
+    }
+
+    Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+}
 
 function Get-BundledFfmpeg {
     [System.IO.Directory]::CreateDirectory($ffmpegCache) | Out-Null
@@ -102,7 +135,61 @@ function Get-BundledFfmpeg {
     }
 }
 
+function Get-BundledMkvToolNix {
+    [System.IO.Directory]::CreateDirectory($mkvToolNixCache) | Out-Null
+    if ((Test-FileHash $mkvMergeExecutable $mkvMergeHash) `
+        -and (Test-FileHash $mkvExtractExecutable $mkvExtractHash) `
+        -and (Test-FileHash $mkvLocaleKo $mkvLocaleKoHash)) {
+        return
+    }
+
+    $archivePath = Join-Path $mkvToolNixCache "mkvtoolnix-64-bit-$mkvToolNixVersion.zip"
+    $extractPath = Join-Path $mkvToolNixCache 'extract'
+    if (-not (Test-Path -LiteralPath $archivePath) `
+        -or (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToUpperInvariant() -ne $mkvToolNixArchiveHash) {
+        Invoke-WebRequest `
+            -Headers @{ 'User-Agent' = 'SubMuxBatch-Publish' } `
+            -Uri $mkvToolNixArchiveUrl `
+            -OutFile $archivePath
+    }
+
+    $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($actualHash -ne $mkvToolNixArchiveHash) {
+        throw "MKVToolNix archive hash mismatch. Expected $mkvToolNixArchiveHash but received $actualHash."
+    }
+
+    Remove-VerifiedCacheDirectory $extractPath $mkvToolNixCache
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+    $extractedRoot = Join-Path $extractPath 'mkvtoolnix'
+    $extractedMkvMerge = Join-Path $extractedRoot 'mkvmerge.exe'
+    $extractedMkvExtract = Join-Path $extractedRoot 'mkvextract.exe'
+    $extractedLocaleKo = Join-Path $extractedRoot 'locale\ko\LC_MESSAGES\mkvtoolnix.mo'
+    if (-not (Test-FileHash $extractedMkvMerge $mkvMergeHash) `
+        -or -not (Test-FileHash $extractedMkvExtract $mkvExtractHash) `
+        -or -not (Test-FileHash $extractedLocaleKo $mkvLocaleKoHash)) {
+        throw 'The extracted MKVToolNix files did not pass the pinned SHA-256 checks.'
+    }
+
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $mkvLocaleKo)) | Out-Null
+    Copy-Item -LiteralPath $extractedMkvMerge -Destination $mkvMergeExecutable -Force
+    Copy-Item -LiteralPath $extractedMkvExtract -Destination $mkvExtractExecutable -Force
+    Copy-Item -LiteralPath $extractedLocaleKo -Destination $mkvLocaleKo -Force
+    Remove-VerifiedCacheDirectory $extractPath $mkvToolNixCache
+
+    $mkvMergeVersion = & $mkvMergeExecutable --version 2>&1
+    $mkvMergeExitCode = $LASTEXITCODE
+    $mkvExtractVersion = & $mkvExtractExecutable --version 2>&1
+    $mkvExtractExitCode = $LASTEXITCODE
+    if ($mkvMergeExitCode -ne 0 `
+        -or $mkvExtractExitCode -ne 0 `
+        -or ($mkvMergeVersion -join "`n") -notmatch 'mkvmerge v102\.0' `
+        -or ($mkvExtractVersion -join "`n") -notmatch 'mkvextract v102\.0') {
+        throw 'The extracted MKVToolNix executables did not pass the version smoke test.'
+    }
+}
+
 Get-BundledFfmpeg
+Get-BundledMkvToolNix
 
 if (-not $SkipTests) {
     dotnet test $testPath -c Release --nologo
@@ -139,6 +226,9 @@ dotnet publish $projectPath `
     -p:InformationalVersion=$version `
     -p:BundledFfmpegPath=$ffmpegExecutable `
     -p:BundledFfmpegResourceRid=$Runtime `
+    -p:BundledMkvMergePath=$mkvMergeExecutable `
+    -p:BundledMkvExtractPath=$mkvExtractExecutable `
+    -p:BundledMkvLocaleKoPath=$mkvLocaleKo `
     -o $outputPath
 
 if ($LASTEXITCODE -ne 0) {
@@ -151,7 +241,6 @@ if ($LASTEXITCODE -ne 0) {
 Get-ChildItem -LiteralPath $outputPath -Filter '*.pdb' -File |
     Remove-Item -Force
 
-Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $outputPath -Force
 if ($CreateArchive) {
     $releasePath = Join-Path $projectRoot "artifacts\release\v$version"
     $releaseArchivePath = Join-Path $releasePath "SubMuxBatch-v$version-$Runtime.zip"
@@ -159,8 +248,8 @@ if ($CreateArchive) {
     if (Test-Path -LiteralPath $releaseArchivePath) {
         Remove-Item -LiteralPath $releaseArchivePath -Force
     }
-    Compress-Archive -Path (Join-Path $outputPath '*') -DestinationPath $releaseArchivePath -CompressionLevel Optimal
+    Compress-Archive -Path (Join-Path $outputPath 'SubMuxBatch.exe') -DestinationPath $releaseArchivePath -CompressionLevel Optimal
     Write-Host "Release archive: $releaseArchivePath"
 }
 Write-Host "Published: $outputPath"
-Write-Host 'MediaInfoLib, libse, FFmpeg, and SubMux Sans are bundled. MKVToolNix remains an external dependency.'
+Write-Host 'MediaInfoLib, libse, FFmpeg, MKVToolNix 102.0, and SubMux Sans are bundled.'

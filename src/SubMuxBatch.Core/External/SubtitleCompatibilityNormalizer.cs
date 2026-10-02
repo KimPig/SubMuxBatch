@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using SubMuxBatch.Core.Localization;
 
 namespace SubMuxBatch.Core.External;
 
@@ -23,6 +25,9 @@ public sealed record NegativeSubtitleTimestampAdjustment(
 
 public static partial class SubtitleCompatibilityNormalizer
 {
+    private const double DefaultRubyBaseFontSize = 75;
+    private const double RubyFontSizeRatio = 0.5;
+
     public static async Task<IReadOnlyList<NegativeSubtitleTimestampAdjustment>> NormalizeNegativeSrtTimestampsAsync(
         string sourcePath,
         string outputPath,
@@ -257,9 +262,27 @@ public static partial class SubtitleCompatibilityNormalizer
         string outputPath,
         CancellationToken cancellationToken = default)
     {
+        await PrepareSrtForAssAsync(
+            sourcePath,
+            outputPath,
+            DefaultRubyBaseFontSize,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task PrepareSrtForAssAsync(
+        string sourcePath,
+        string outputPath,
+        double rubyBaseFontSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (!double.IsFinite(rubyBaseFontSize) || rubyBaseFontSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rubyBaseFontSize));
+        }
+
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
         var text = DecodeSubtitle(bytes);
-        var normalized = FlattenRuby(text);
+        var normalized = FlattenRuby(text, rubyBaseFontSize * RubyFontSizeRatio);
         normalized = NormalizeSupportedHtmlTags(normalized);
         await File.WriteAllTextAsync(
             outputPath,
@@ -551,19 +574,21 @@ public static partial class SubtitleCompatibilityNormalizer
         scannedIndex = targetIndex;
     }
 
-    private static string FlattenRuby(string text)
+    private static string FlattenRuby(string text, double rubyFontSize)
     {
-        var result = RubyBlockRegex().Replace(text, static match =>
+        var size = rubyFontSize.ToString("0.##", CultureInfo.InvariantCulture);
+        var result = RubyBlockRegex().Replace(text, match =>
         {
             var content = match.Groups["content"].Value;
-            var readings = RubyTextRegex().Matches(content)
-                .Select(static reading => StripTags(reading.Groups["text"].Value).Trim())
-                .Where(static reading => reading.Length > 0)
-                .ToArray();
-            var baseText = RubyTextRegex().Replace(content, string.Empty);
-            baseText = RubyParenthesisRegex().Replace(baseText, string.Empty);
-            baseText = RubyBaseTagRegex().Replace(baseText, string.Empty);
-            return readings.Length == 0 ? baseText : $"{baseText}({string.Join("/", readings)})";
+            content = RubyParenthesisRegex().Replace(content, string.Empty);
+            content = RubyBaseTagRegex().Replace(content, string.Empty);
+            return RubyTextRegex().Replace(content, readingMatch =>
+            {
+                var reading = StripTags(readingMatch.Groups["text"].Value).Trim();
+                return reading.Length == 0
+                    ? string.Empty
+                    : $"<font size=\"{size}\">{WebUtility.HtmlEncode(reading)}</font>";
+            });
         });
 
         // Avoid literal tag leakage for malformed or unclosed ruby fragments.
@@ -575,9 +600,265 @@ public static partial class SubtitleCompatibilityNormalizer
         var normalized = SupportedTagNameRegex().Replace(text, static match =>
             $"<{match.Groups["slash"].Value}{match.Groups["name"].Value.ToLowerInvariant()}");
 
-        return FontTagRegex().Replace(normalized, static tag =>
-            FontAttributeNameRegex().Replace(tag.Value, static attribute =>
-                $"{attribute.Groups["name"].Value.ToLowerInvariant()}="));
+        normalized = FontTagRegex().Replace(normalized, static tag => NormalizeFontTag(tag.Value));
+        return FlattenFontTagsPerCue(normalized);
+    }
+
+    private static string FlattenFontTagsPerCue(string text)
+    {
+        var parts = SrtBlockSeparatorRegex().Split(text);
+        for (var index = 0; index < parts.Length; index += 2)
+        {
+            parts[index] = FlattenFontTagsInBlock(parts[index]);
+        }
+
+        return string.Concat(parts);
+    }
+
+    private static string FlattenFontTagsInBlock(string block)
+    {
+        var position = 0;
+        var builder = new StringBuilder(block.Length + 32);
+        var states = new Stack<IReadOnlyList<FontAttribute>>();
+        states.Push([]);
+
+        foreach (Match match in AnyFontTagRegex().Matches(block))
+        {
+            AppendTextWithFontState(
+                builder,
+                block.AsSpan(position, match.Index - position),
+                states.Peek());
+
+            var isClosing = match.Value.StartsWith("</", StringComparison.OrdinalIgnoreCase);
+            var isSelfClosing = match.Value.TrimEnd().EndsWith("/>", StringComparison.Ordinal);
+            if (isClosing)
+            {
+                if (states.Count > 1)
+                {
+                    states.Pop();
+                }
+            }
+            else if (!isSelfClosing)
+            {
+                states.Push(MergeFontAttributes(states.Peek(), ParseNormalizedFontAttributes(match.Value)));
+            }
+
+            position = match.Index + match.Length;
+        }
+
+        AppendTextWithFontState(builder, block.AsSpan(position), states.Peek());
+        return builder.ToString();
+    }
+
+    private static void AppendTextWithFontState(
+        StringBuilder builder,
+        ReadOnlySpan<char> text,
+        IReadOnlyList<FontAttribute> attributes)
+    {
+        if (text.IsEmpty)
+        {
+            return;
+        }
+
+        if (attributes.Count == 0)
+        {
+            builder.Append(text);
+            return;
+        }
+
+        var trailingStart = text.Length;
+        while (trailingStart > 0 && text[trailingStart - 1] is '\r' or '\n')
+        {
+            trailingStart--;
+        }
+
+        if (trailingStart == 0)
+        {
+            builder.Append(text);
+            return;
+        }
+
+        AppendFontOpenTag(builder, attributes);
+        builder.Append(text[..trailingStart]);
+        builder.Append("</font>");
+        builder.Append(text[trailingStart..]);
+    }
+
+    private static IReadOnlyList<FontAttribute> ParseNormalizedFontAttributes(string tag)
+    {
+        var bodyStart = tag.IndexOf("font", StringComparison.OrdinalIgnoreCase) + 4;
+        var bodyEnd = tag.LastIndexOf('>');
+        var body = tag[bodyStart..bodyEnd].TrimEnd();
+        if (body.EndsWith("/", StringComparison.Ordinal))
+        {
+            body = body[..^1];
+        }
+
+        return ParseFontAttributes(body, tag);
+    }
+
+    private static IReadOnlyList<FontAttribute> MergeFontAttributes(
+        IReadOnlyList<FontAttribute> inherited,
+        IReadOnlyList<FontAttribute> overrides)
+    {
+        var merged = inherited.ToList();
+        foreach (var attribute in overrides)
+        {
+            var existing = merged.FindIndex(item =>
+                string.Equals(item.Name, attribute.Name, StringComparison.OrdinalIgnoreCase));
+            if (existing >= 0)
+            {
+                merged[existing] = attribute;
+            }
+            else
+            {
+                merged.Add(attribute);
+            }
+        }
+
+        return merged;
+    }
+
+    private static void AppendFontOpenTag(StringBuilder builder, IReadOnlyList<FontAttribute> attributes)
+    {
+        builder.Append("<font");
+        foreach (var attribute in attributes)
+        {
+            builder.Append(' ')
+                .Append(attribute.Name.ToLowerInvariant())
+                .Append("=\"")
+                .Append(WebUtility.HtmlEncode(attribute.Value))
+                .Append('"');
+        }
+
+        builder.Append('>');
+    }
+
+    private static string NormalizeFontTag(string tag)
+    {
+        var bodyStart = tag.IndexOf("font", StringComparison.OrdinalIgnoreCase) + 4;
+        var bodyEnd = tag.LastIndexOf('>');
+        if (bodyStart < 4 || bodyEnd < bodyStart)
+        {
+            throw new InvalidDataException(CoreText.Get("Subtitle_InvalidFontTag", tag));
+        }
+
+        var body = tag[bodyStart..bodyEnd];
+        var selfClosing = body.TrimEnd().EndsWith("/", StringComparison.Ordinal);
+        if (selfClosing)
+        {
+            body = body.TrimEnd();
+            body = body[..^1];
+        }
+
+        var attributes = ParseFontAttributes(body, tag);
+        if (attributes.Count == 0)
+        {
+            return selfClosing ? "<font />" : "<font>";
+        }
+
+        var builder = new StringBuilder("<font");
+        foreach (var attribute in attributes)
+        {
+            var name = attribute.Name.ToLowerInvariant();
+            var value = attribute.Value.Trim();
+            if (value.Length == 0)
+            {
+                throw new InvalidDataException(CoreText.Get("Subtitle_EmptyFontAttribute", name));
+            }
+
+            if (string.Equals(name, "color", StringComparison.OrdinalIgnoreCase))
+            {
+                var colour = FontHexColourRegex().Match(value);
+                if (colour.Success)
+                {
+                    value = $"#{colour.Groups["hex"].Value.ToUpperInvariant()}";
+                }
+            }
+
+            builder.Append(' ')
+                .Append(name)
+                .Append("=\"")
+                .Append(WebUtility.HtmlEncode(value))
+                .Append('"');
+        }
+
+        builder.Append(selfClosing ? " />" : ">");
+        return builder.ToString();
+    }
+
+    private static List<FontAttribute> ParseFontAttributes(string body, string originalTag)
+    {
+        var attributes = new List<FontAttribute>();
+        var index = 0;
+        while (index < body.Length)
+        {
+            while (index < body.Length && char.IsWhiteSpace(body[index])) index++;
+            if (index >= body.Length) break;
+
+            var nameStart = index;
+            while (index < body.Length && !char.IsWhiteSpace(body[index]) && body[index] != '=') index++;
+            var name = body[nameStart..index];
+            while (index < body.Length && char.IsWhiteSpace(body[index])) index++;
+            if (name.Length == 0 || index >= body.Length || body[index] != '=')
+            {
+                throw new InvalidDataException(CoreText.Get("Subtitle_InvalidFontTag", originalTag));
+            }
+
+            index++;
+            while (index < body.Length && char.IsWhiteSpace(body[index])) index++;
+            if (index >= body.Length)
+            {
+                throw new InvalidDataException(CoreText.Get("Subtitle_EmptyFontAttribute", name));
+            }
+
+            string value;
+            if (body[index] is '"' or '\'')
+            {
+                var quote = body[index++];
+                var valueStart = index;
+                while (index < body.Length && body[index] != quote) index++;
+                if (index >= body.Length)
+                {
+                    throw new InvalidDataException(CoreText.Get("Subtitle_InvalidFontTag", originalTag));
+                }
+
+                value = body[valueStart..index];
+                index++;
+            }
+            else
+            {
+                var valueStart = index;
+                index = FindNextFontAttribute(body, index);
+                value = body[valueStart..index].TrimEnd();
+            }
+
+            attributes.Add(new FontAttribute(name, WebUtility.HtmlDecode(value)));
+        }
+
+        return attributes;
+    }
+
+    private static int FindNextFontAttribute(string body, int valueStart)
+    {
+        for (var index = valueStart; index < body.Length; index++)
+        {
+            if (!char.IsWhiteSpace(body[index])) continue;
+            var candidate = index;
+            while (candidate < body.Length && char.IsWhiteSpace(body[candidate])) candidate++;
+            var nameStart = candidate;
+            while (candidate < body.Length && !char.IsWhiteSpace(body[candidate]) && body[candidate] != '=') candidate++;
+            var name = body[nameStart..candidate];
+            while (candidate < body.Length && char.IsWhiteSpace(body[candidate])) candidate++;
+            if (candidate < body.Length
+                && body[candidate] == '='
+                && name.Length > 0)
+            {
+                return index;
+            }
+        }
+
+        return body.Length;
     }
 
     private static string StripTags(string text) =>
@@ -604,8 +885,14 @@ public static partial class SubtitleCompatibilityNormalizer
     [GeneratedRegex(@"<font\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex FontTagRegex();
 
-    [GeneratedRegex(@"(?<name>color|face|size)\s*=", RegexOptions.IgnoreCase)]
-    private static partial Regex FontAttributeNameRegex();
+    [GeneratedRegex(@"</?font\b[^>]*>", RegexOptions.IgnoreCase)]
+    private static partial Regex AnyFontTagRegex();
+
+    [GeneratedRegex(@"(\r?\n[\t ]*\r?\n)")]
+    private static partial Regex SrtBlockSeparatorRegex();
+
+    [GeneratedRegex(@"^#?(?<hex>[0-9a-f]{6})$", RegexOptions.IgnoreCase)]
+    private static partial Regex FontHexColourRegex();
 
     [GeneratedRegex(@"<[^>]+>", RegexOptions.Singleline)]
     private static partial Regex AnyHtmlTagRegex();
@@ -627,6 +914,8 @@ public static partial class SubtitleCompatibilityNormalizer
 
     [GeneratedRegex(@"^[ \t]*Comment[ \t]*:", RegexOptions.IgnoreCase)]
     private static partial Regex AssCommentPrefixRegex();
+
+    private sealed record FontAttribute(string Name, string Value);
 
     [GeneratedRegex(@"^[ \t]*Dialogue[ \t]*:", RegexOptions.IgnoreCase)]
     private static partial Regex AssDialoguePrefixRegex();

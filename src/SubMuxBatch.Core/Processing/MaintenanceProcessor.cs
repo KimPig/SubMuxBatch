@@ -13,10 +13,12 @@ namespace SubMuxBatch.Core.Processing;
 public sealed class MaintenanceProcessor(
     IProcessRunner processRunner,
     IInstalledFontResolver? fontResolver = null,
-    IAudioTranscoder? audioTranscoder = null)
+    IAudioTranscoder? audioTranscoder = null,
+    ISubtitleConverter? subtitleConverter = null)
 {
     private readonly IInstalledFontResolver _fontResolver = fontResolver ?? InstalledFontResolver.System;
     private readonly IAudioTranscoder _audioTranscoder = audioTranscoder ?? new BundledFfmpegAudioTranscoder(processRunner);
+    private readonly ISubtitleConverter _subtitleConverter = subtitleConverter ?? new LibSeSubtitleConverter();
 
     public async Task<JobResult> ProcessAsync(
         string sourcePath,
@@ -36,8 +38,7 @@ public sealed class MaintenanceProcessor(
         }
 
         var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
-        var workspace = Path.Combine(sourceDirectory, $"{WorkspaceNaming.CurrentPrefix}maintenance-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(workspace);
+        var workspace = CreateWorkspace(sourceDirectory);
         try
         {
             void Report(JobState state, int percent, string message) =>
@@ -116,16 +117,42 @@ public sealed class MaintenanceProcessor(
                 if (selected is not null)
                 {
                     var shouldUpdateStyle = settings.MaintenanceUpdateAssStyle && IsGeneratedAssSource(sourceKind);
-                    refreshStyleFonts = shouldUpdateStyle;
-                    var updated = shouldUpdateStyle
-                        ? ReplaceDefaultStyle(selected.Text, settings.AssStyleLine)
-                        : selected.Text;
+                    var regenerated = false;
+                    var updated = selected.Text;
+                    if (shouldUpdateStyle)
+                    {
+                        var standardSrt = SelectStandardSrtTrack(sourceInspection.Tracks, selected.Track);
+                        if (standardSrt?.Id is null)
+                        {
+                            warnings.Add(CoreText.Get("Maintenance_StandardSrtMissing"));
+                        }
+                        else
+                        {
+                            Report(
+                                JobState.UpdatingAssStyle,
+                                18,
+                                CoreText.Get("Maintenance_RegenerateAss", standardSrt.Id.Value));
+                            updated = await RegenerateAssAsync(
+                                mkvExtractPath,
+                                sourcePath,
+                                standardSrt.Id.Value,
+                                settings,
+                                workspace,
+                                cancellationToken).ConfigureAwait(false);
+                            regenerated = true;
+                            refreshStyleFonts = true;
+                            Report(
+                                JobState.UpdatingAssStyle,
+                                20,
+                                CoreText.Get("Maintenance_RegeneratedAss", selected.Track.Id?.ToString() ?? "?"));
+                        }
+                    }
                     if (sourceKind is not null)
                     {
                         updated = SubMuxMetadata.AddAssSourceMarker(updated, sourceKind);
                     }
 
-                    if (shouldUpdateStyle || !string.Equals(updated, selected.Text, StringComparison.Ordinal))
+                    if (regenerated || !string.Equals(updated, selected.Text, StringComparison.Ordinal))
                     {
                         replacementAssPath = Path.Combine(workspace, "maintained.ass");
                         await File.WriteAllTextAsync(
@@ -141,7 +168,7 @@ public sealed class MaintenanceProcessor(
                         JobState.UpdatingAssStyle,
                         19,
                         CoreText.Get("Maintenance_AssSourceMarked", sourceKind ?? "—"));
-                    if (shouldUpdateStyle)
+                    if (regenerated)
                     {
                         var style = AssStyleDefinition.Parse(settings.AssStyleLine);
                         Report(
@@ -152,7 +179,7 @@ public sealed class MaintenanceProcessor(
                                 selected.Track.Id?.ToString() ?? "?",
                                 style.FontName));
                     }
-                    else if (settings.MaintenanceUpdateAssStyle)
+                    else if (settings.MaintenanceUpdateAssStyle && !shouldUpdateStyle)
                     {
                         Report(JobState.Verifying, 20, CoreText.Get("Maintenance_OriginalAssRetained"));
                     }
@@ -379,6 +406,90 @@ public sealed class MaintenanceProcessor(
             || track.CodecName?.Contains("ASS", StringComparison.OrdinalIgnoreCase) == true
             || track.CodecName?.Contains("SSA", StringComparison.OrdinalIgnoreCase) == true);
 
+    private static bool IsSrtTrack(MkvTrackInfo track) =>
+        string.Equals(track.Type, "subtitles", StringComparison.OrdinalIgnoreCase)
+        && (track.CodecId.Contains("UTF8", StringComparison.OrdinalIgnoreCase)
+            || track.CodecId.Contains("SRT", StringComparison.OrdinalIgnoreCase)
+            || track.CodecName?.Contains("SubRip", StringComparison.OrdinalIgnoreCase) == true
+            || track.CodecName?.Contains("SRT", StringComparison.OrdinalIgnoreCase) == true);
+
+    private static MkvTrackInfo? SelectStandardSrtTrack(
+        IReadOnlyList<MkvTrackInfo> tracks,
+        MkvTrackInfo styledTrack)
+    {
+        var srtTracks = tracks.Where(IsSrtTrack).ToArray();
+        if (srtTracks.Length == 1) return srtTracks[0];
+
+        var named = srtTracks.Where(static track =>
+            track.TrackName?.Contains("일반 자막", StringComparison.OrdinalIgnoreCase) == true
+            || track.TrackName?.Contains("standard subtitles", StringComparison.OrdinalIgnoreCase) == true).ToArray();
+        if (named.Length == 1) return named[0];
+
+        var sameLanguage = named.Where(track => LanguagesMatch(track, styledTrack)).ToArray();
+        return sameLanguage.Length == 1 ? sameLanguage[0] : null;
+    }
+
+    private static bool LanguagesMatch(MkvTrackInfo left, MkvTrackInfo right)
+    {
+        var leftLanguage = left.LanguageIetf ?? left.Language;
+        var rightLanguage = right.LanguageIetf ?? right.Language;
+        return !string.IsNullOrWhiteSpace(leftLanguage)
+               && !string.IsNullOrWhiteSpace(rightLanguage)
+               && string.Equals(leftLanguage, rightLanguage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<string> RegenerateAssAsync(
+        string mkvExtract,
+        string source,
+        int srtTrackId,
+        AppSettings settings,
+        string workspace,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var extractedSrt = Path.Combine(workspace, $"standard-{srtTrackId}.srt");
+            await ExtractTrackAsync(mkvExtract, source, srtTrackId, extractedSrt, cancellationToken)
+                .ConfigureAwait(false);
+
+            var compatibleSrt = Path.Combine(workspace, "maintenance-ass-compatible.srt");
+            await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
+                extractedSrt,
+                compatibleSrt,
+                AssStyleDefinition.Parse(settings.AssStyleLine).FontSize,
+                cancellationToken).ConfigureAwait(false);
+
+            var stylePath = Path.Combine(workspace, "maintenance-default-style.ass");
+            await File.WriteAllTextAsync(
+                stylePath,
+                AssStyleTemplateWriter.CreateHeader(settings),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+                cancellationToken).ConfigureAwait(false);
+
+            var convertedPath = Path.Combine(workspace, "maintenance-regenerated.ass");
+            await _subtitleConverter.ConvertAsync(
+                compatibleSrt,
+                convertedPath,
+                SubtitleOutputFormat.AdvancedSubStationAlpha,
+                stylePath,
+                settings.PlayResX,
+                settings.PlayResY,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var sourceSrt = await File.ReadAllTextAsync(compatibleSrt, cancellationToken).ConfigureAwait(false);
+            var convertedAss = await File.ReadAllTextAsync(convertedPath, cancellationToken).ConfigureAwait(false);
+            var adjustedAss = AssInlineStylePostProcessor.Apply(convertedAss, sourceSrt);
+            var optimizedAss = AssInlineTagOptimizer.OptimizeGeneratedAss(adjustedAss);
+            SubtitleConversionValidator.ValidateAssOptimization(adjustedAss, optimizedAss);
+            SubtitleConversionValidator.ValidateSrtToAss(sourceSrt, optimizedAss);
+            return optimizedAss;
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new JobSkippedException(exception.Message);
+        }
+    }
+
     private static AssCandidate? SelectStyledTrack(IReadOnlyList<AssCandidate> candidates)
     {
         if (candidates.Count == 1) return candidates[0];
@@ -563,5 +674,19 @@ public sealed class MaintenanceProcessor(
                 && Directory.Exists(full)) Directory.Delete(full, true);
         }
         catch { }
+    }
+
+    private static string CreateWorkspace(string sourceDirectory)
+    {
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var id = Guid.NewGuid().ToString("N")[..12];
+            var path = Path.Combine(sourceDirectory, $"{WorkspaceNaming.MaintenancePrefix}{id}");
+            if (Directory.Exists(path) || File.Exists(path)) continue;
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        throw new IOException(CoreText.Get("Batch_CreateWorkspaceFailed"));
     }
 }

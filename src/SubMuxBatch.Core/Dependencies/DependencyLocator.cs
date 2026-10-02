@@ -16,20 +16,31 @@ public sealed record DependencyReport(ToolDependency MkvMerge)
     public bool IsReady => MkvMerge.IsAvailable;
 }
 
-public sealed class DependencyLocator(string? applicationDirectory = null)
+public sealed class DependencyLocator
 {
-    private readonly string _applicationDirectory = applicationDirectory ?? AppContext.BaseDirectory;
+    private readonly string _applicationDirectory;
+    private readonly string _bundledMkvMergePath;
 
-    public DependencyReport Locate(string? configuredMkvMerge)
+    public DependencyLocator(string? applicationDirectory = null, string? bundledMkvMergePath = null)
     {
+        _applicationDirectory = applicationDirectory ?? AppContext.BaseDirectory;
+        _bundledMkvMergePath = bundledMkvMergePath ?? BundledMkvToolNixProvider.MkvMergePath;
+    }
+
+    public DependencyReport Locate(string? configuredMkvMerge, bool preferConfigured = false)
+    {
+        var automaticCandidates = new[]
+        {
+            _bundledMkvMergePath,
+            Path.Combine(_applicationDirectory, "tools", "mkvtoolnix", "mkvmerge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MKVToolNix", "mkvmerge.exe")
+        };
         var mkvMerge = LocateTool(
             "MKVToolNix",
             "mkvmerge.exe",
             configuredMkvMerge,
-            [
-                Path.Combine(_applicationDirectory, "tools", "mkvtoolnix", "mkvmerge.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MKVToolNix", "mkvmerge.exe")
-            ]);
+            automaticCandidates,
+            preferConfigured);
 
         return new DependencyReport(mkvMerge);
     }
@@ -38,15 +49,33 @@ public sealed class DependencyLocator(string? applicationDirectory = null)
         string displayName,
         string executableName,
         string? configuredPath,
-        IReadOnlyList<string> candidates)
+        IReadOnlyList<string> candidates,
+        bool preferConfigured)
     {
         var paths = new List<string>();
-        if (!string.IsNullOrWhiteSpace(configuredPath))
+        var normalizedAutomaticCandidates = candidates
+            .Select(TryNormalize)
+            .Where(static path => path is not null)
+            .Cast<string>()
+            .ToArray();
+        var normalizedConfiguredPath = string.IsNullOrWhiteSpace(configuredPath)
+            ? null
+            : TryNormalize(configuredPath);
+        var configuredPathIsAutomatic = !preferConfigured
+                                        && normalizedConfiguredPath is not null
+                                        && normalizedAutomaticCandidates.Contains(
+                                            normalizedConfiguredPath,
+                                            StringComparer.OrdinalIgnoreCase);
+        if (normalizedConfiguredPath is not null && !configuredPathIsAutomatic)
         {
-            paths.Add(configuredPath);
+            paths.Add(normalizedConfiguredPath);
         }
 
         paths.AddRange(candidates);
+        if (normalizedConfiguredPath is not null && configuredPathIsAutomatic)
+        {
+            paths.Add(normalizedConfiguredPath);
+        }
 
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (!string.IsNullOrWhiteSpace(pathValue))

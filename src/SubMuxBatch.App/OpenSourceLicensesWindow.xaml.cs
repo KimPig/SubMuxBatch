@@ -79,6 +79,12 @@ public partial class OpenSourceLicensesWindow : Window
                 "SubMuxBatch.App.Resources.FFmpeg-LGPL-3.0.txt"),
             "https://ffmpeg.org/"),
         new(
+            "MKVToolNix 102.0 — GPL-2.0-only",
+            ReadResource(
+                typeof(AppSettings).Assembly,
+                "SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"),
+            "https://mkvtoolnix.download/"),
+        new(
             "SubMux Sans — SIL Open Font License 1.1",
             ReadResource(
                 typeof(AppSettings).Assembly,

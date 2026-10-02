@@ -679,11 +679,16 @@
                                                        TextWrapping="Wrap"
                                                        Text="{loc:Loc Settings_AssStyleDetailsHelp}" />
                                         </StackPanel>
-                                        <Button Grid.Column="1"
-                                                Content="{loc:Loc Settings_ManualStyleInput}"
-                                                Margin="0"
-                                                VerticalAlignment="Center"
-                                                Click="OpenManualStyleInput_Click" />
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    VerticalAlignment="Center">
+                                            <Button Content="{loc:Loc Settings_UseDefaultAssStyle}"
+                                                    Margin="0,0,8,0"
+                                                    Click="UseDefaultAssStyle_Click" />
+                                            <Button Content="{loc:Loc Settings_ManualStyleInput}"
+                                                    Margin="0"
+                                                    Click="OpenManualStyleInput_Click" />
+                                        </StackPanel>
                                     </Grid>
 
                                     <Grid>
@@ -884,34 +889,6 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{loc:Loc Settings_TabTools}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,12,4,0">
-                    <StackPanel>
-                        <Border Style="{StaticResource SectionCardStyle}">
-                            <StackPanel>
-                                <TextBlock Text="MKVToolNix" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock Margin="0,4,0,10" Foreground="{StaticResource SecondaryTextBrush}" Text="mkvmerge.exe" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="MkvMergePathTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0" />
-                                    <Button Grid.Column="1" Content="{loc:Loc Settings_AutoDetect}" Margin="8,0,0,0" Click="AutoDetectMkvMerge_Click" />
-                                    <Button Grid.Column="2" Content="{loc:Loc Common_Browse}" Margin="8,0,0,0" Click="BrowseMkvMerge_Click" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <TextBlock Margin="4,0,4,12"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   TextWrapping="Wrap"
-                                   Text="{loc:Loc Settings_ToolPathHelp}" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-
             <TabItem Header="{loc:Loc Settings_TabOther}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
@@ -966,6 +943,54 @@
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_PlaySoundHelp}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="MKVToolNix"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="MkvToolNixSelectionText"
+                                           Margin="0,7,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" />
+                                <TextBox x:Name="MkvToolNixPathText"
+                                         Margin="0,8,0,0"
+                                         Style="{StaticResource FieldTextBoxStyle}"
+                                         IsReadOnly="True"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         TextWrapping="NoWrap" />
+                                <TextBlock Margin="0,7,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_MkvToolNixHelp}" />
+                                <StackPanel Margin="0,14,0,0"
+                                            Orientation="Horizontal">
+                                    <Button x:Name="UseBundledMkvToolNixButton"
+                                            Content="{loc:Loc Settings_UseBundledMkvToolNix}"
+                                            Click="UseBundledMkvToolNix_Click" />
+                                    <Button Margin="8,0,0,0"
+                                            Content="{loc:Loc Common_Change}"
+                                            Click="ChangeMkvToolNix_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_SettingsManagement}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Margin="0,7,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_ResetAllSettingsHelp}" />
+                                <Button Margin="0,14,0,0"
+                                        HorizontalAlignment="Left"
+                                        Content="{loc:Loc Settings_ResetAllSettings}"
+                                        Click="ResetAllSettings_Click" />
                             </StackPanel>
                         </Border>
 

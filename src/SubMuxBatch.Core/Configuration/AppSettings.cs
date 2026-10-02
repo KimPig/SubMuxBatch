@@ -44,13 +44,14 @@ public sealed class AppSettings
     public const double DefaultStatusColumnWeight = 1;
 
     public const string DefaultAssStyleLine =
-        "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1";
+        "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,80,1";
     public const string LegacyMalgunGothicAssStyleLine =
         "Style: Default,맑은 고딕,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,-1,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1";
     public static string DefaultMaintenanceLegacyAssStyles =>
         string.Join(Environment.NewLine, LegacyMalgunGothicAssStyleLine, DefaultAssStyleLine);
 
     public string? MkvMergePath { get; set; }
+    public bool UseCustomMkvMergePath { get; set; }
     public AppLanguage Language { get; set; } = AppLanguage.System;
     public bool CheckForUpdatesAutomatically { get; set; } = true;
     public string OutputPrefix { get; set; } = OutputFileNaming.DefaultPrefix;
@@ -225,6 +226,7 @@ public sealed class AppSettings
     public AppSettings Copy() => new()
     {
         MkvMergePath = MkvMergePath,
+        UseCustomMkvMergePath = UseCustomMkvMergePath,
         Language = Language,
         CheckForUpdatesAutomatically = CheckForUpdatesAutomatically,
         OutputPrefix = OutputPrefix,

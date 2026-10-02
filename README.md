@@ -8,7 +8,7 @@ You can add individual files, select folders, or drag files and folders from Fil
 
 Prebuilt, self-contained Windows x64 packages are available on the [Releases](https://github.com/KimPig/SubMuxBatch/releases) page.
 
-MKVToolNix is an external dependency and is not bundled. Subtitle conversion uses the bundled Subtitle Edit library (`libse` 5.1.0), media inspection uses bundled MediaInfoLib, and optional audio conversion uses bundled FFmpeg 8.1; none of these bundled components requires a separate installation or path setting.
+MKVToolNix 102.0, Subtitle Edit's `libse` 5.1.0, MediaInfoLib, and FFmpeg 8.1 are bundled. None requires a separate installation or path setting.
 
 The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
 
@@ -52,20 +52,19 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 - The finished MKV structure is inspected before the temporary output is committed to its final filename.
 - New subtitle tracks use the Korean language tag (`kor`). ASS is the default track, SRT is non-default, and neither track is forced.
 
-## External dependencies
+## Bundled tools and path overrides
 
-The repository and release packages do not include this application:
-
-- `mkvmerge.exe` from [MKVToolNix](https://mkvtoolnix.download/)
+Release builds include the `mkvmerge.exe` and `mkvextract.exe` command-line tools from [MKVToolNix 102.0](https://mkvtoolnix.download/). On first launch they are verified and extracted to `%LocalAppData%\SubMuxBatch\tools\mkvtoolnix\102.0`. A missing or modified extracted file is restored from the application automatically.
 
 SubMux Batch searches for `mkvmerge.exe` in this order:
 
 1. The path selected in Settings
-2. `tools\mkvtoolnix\mkvmerge.exe` below the application directory
-3. Standard installation directories
-4. The Windows `PATH`
+2. The bundled MKVToolNix 102.0 copy
+3. `tools\mkvtoolnix\mkvmerge.exe` below the application directory
+4. Standard installation directories
+5. The Windows `PATH`
 
-Development and integration testing used MKVToolNix 88.0. Test a small copy of your media first when using another version. Installation and redistribution are governed by the MKVToolNix license.
+Selecting a custom executable keeps that override ahead of the bundled copy. `mkvextract` is resolved beside the selected `mkvmerge` executable. MKVToolNix is redistributed under GPL-2.0-only; its license is available in the application and the exact corresponding 102.0 source archive is stored under `third-party-sources` in this repository.
 
 Media information shown in the queue and detail panel is read primarily with the bundled MediaInfoLib. This includes the actual container format, duration, overall and per-track bit rates, video frame rate and frame count, resolution, and audio properties. `mkvmerge` identification remains authoritative for remuxing track IDs, attachments, chapters, and output validation. The bundled library notice is included below.
 
@@ -102,7 +101,7 @@ Default values:
 ```ini
 PlayResX: 1920
 PlayResY: 1080
-Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1
+Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,80,1
 ```
 
 ### ASS font attachments
@@ -119,13 +118,11 @@ Font files can have separate redistribution terms. **The user is responsible for
 
 ## Usage
 
-1. Install or extract MKVToolNix.
-2. Run `SubMuxBatch.exe`.
-3. If a dependency is not detected automatically, select its executable in **Settings**.
-4. Add files or folders, or drag them into the application window.
-5. Optionally sort by a column header or drag rows to change the processing order.
-6. Right-click the queue header to show or hide the Name, Composition, Format, Duration, Codec, Action, and Status columns. The selection is saved immediately.
-7. Review the detected files and processing plan, then select **Start all ready jobs**. The queue automatically scrolls to the most recently started job while preserving the current selection.
+1. Run `SubMuxBatch.exe`.
+2. Add files or folders, or drag them into the application window.
+3. Optionally sort by a column header or drag rows to change the processing order.
+4. Right-click the queue header to show or hide the Name, Composition, Format, Duration, Codec, Action, and Status columns. The selection is saved immediately.
+5. Review the detected files and processing plan, then select **Start all ready jobs**. The queue automatically scrolls to the most recently started job while preserving the current selection.
 
 The number of concurrent jobs can be set from 1 to 8. One job at a time is recommended when the source and output are on the same hard drive; faster storage may benefit from a higher value.
 
@@ -171,7 +168,7 @@ Create a self-contained Windows build:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The publish script downloads the matching FFmpeg 8.1 LGPL build, verifies its release SHA-256 digest and license configuration, and embeds it with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE. Only MKVToolNix remains an external dependency.
+The default output is written to `artifacts\publish\win-x64`. The publish script downloads the matching FFmpeg 8.1 LGPL build and the pinned official MKVToolNix 102.0 portable package, verifies their SHA-256 digests, and embeds the required tools with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE.
 
 ## Project structure
 
@@ -182,7 +179,7 @@ The default output is written to `artifacts\publish\win-x64`. The publish script
 
 ## Third-party notices
 
-Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion; the in-app notice links to the corresponding source and build information.
+Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion. MKVToolNix 102.0 command-line tools are bundled under GPL-2.0-only and executed as separate processes; the exact corresponding source archive is available in [`third-party-sources`](third-party-sources/README.md).
 
 This product uses [MediaInfo](https://mediaarea.net/MediaInfo) library, Copyright (c) 2002-2025 [MediaArea.net SARL](https://mediaarea.net/).
 

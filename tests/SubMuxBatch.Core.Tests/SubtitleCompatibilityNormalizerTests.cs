@@ -28,8 +28,135 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
 
         var normalized = await File.ReadAllTextAsync(output);
         Assert.Contains("<font color=\"#FF0000\" face=\"Arial\" size=\"42\"><b>굵게</b></font>", normalized);
-        Assert.Contains("漢(かん)", normalized);
+        Assert.Contains("漢<font size=\"37.5\">かん</font>", normalized);
         Assert.DoesNotContain("<ruby", normalized, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task KeepsRubyReadingTextAndOnlyReducesItsFontSize()
+    {
+        var source = Path.Combine(_root, "ruby.srt");
+        var output = Path.Combine(_root, "ruby-prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<ruby>테스트<rt>test</rt></ruby> "
+                            + "<ruby>레나<rt>[零奈]</rt></ruby>\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output, 80);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains("테스트<font size=\"40\">test</font>", normalized);
+        Assert.Contains("레나<font size=\"40\">[零奈]</font>", normalized);
+        Assert.DoesNotContain("<ruby", normalized, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task FlattensNestedFontTagsWhileKeepingInheritedFaceForEveryTextRun()
+    {
+        var source = Path.Combine(_root, "nested-font.srt");
+        var output = Path.Combine(_root, "nested-font-prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<font face = a시골b>"
+                            + "<font color = FFA29B>변</font>"
+                            + "<font color = F9F177>하</font>"
+                            + "<font color = F3C2FC>고</font> "
+                            + "<font color = 96E4F7>마</font>"
+                            + "<font color = DEFF9E>는</font>"
+                            + "</font>\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains("<font face=\"a시골b\" color=\"#FFA29B\">변</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"#F9F177\">하</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"#F3C2FC\">고</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\"> </font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"#96E4F7\">마</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"#DEFF9E\">는</font>", normalized);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task RubyReadingInheritsOuterFontAttributesAndUsesFiftyPercentSize()
+    {
+        var source = Path.Combine(_root, "nested-ruby.srt");
+        var output = Path.Combine(_root, "nested-ruby-prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<font face=\"Example\" color=\"#112233\">"
+                            + "<ruby>레나<rt>[零奈]</rt></ruby>"
+                            + "</font>\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output, 90);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains(
+            "<font face=\"Example\" color=\"#112233\">레나</font>"
+            + "<font face=\"Example\" color=\"#112233\" size=\"45\">[零奈]</font>",
+            normalized);
+    }
+
+    [Fact]
+    public async Task CanonicalizesWhitespaceUnquotedColoursAndFontNamesBeforeAssConversion()
+    {
+        var source = Path.Combine(_root, "legacy-font-spacing.srt");
+        var output = Path.Combine(_root, "prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<FONT COLOR = FC8046 FACE = 휴먼편지체>첫째</FONT>\r\n\r\n"
+                            + "2\r\n"
+                            + "00:00:01,000 --> 00:00:02,000\r\n"
+                            + "<font face = Malgun Gothic color = #46FFFF>둘째</font>\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains("<font color=\"#FC8046\" face=\"휴먼편지체\">첫째</font>", normalized);
+        Assert.Contains("<font face=\"Malgun Gothic\" color=\"#46FFFF\">둘째</font>", normalized);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task RejectsAnEmptyFontAttributeInsteadOfGuessing()
+    {
+        var source = Path.Combine(_root, "empty-font-attribute.srt");
+        var output = Path.Combine(_root, "prepared.srt");
+        await File.WriteAllTextAsync(
+            source,
+            "1\n00:00:00,000 --> 00:00:01,000\n<font color = >Test</font>\n",
+            new UTF8Encoding(false));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output));
+
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public async Task RemovesOrphanFontClosingsAndClosesOpenFontsOnlyInTheAssWorkingCopy()
+    {
+        var source = Path.Combine(_root, "unbalanced-fonts.srt");
+        var output = Path.Combine(_root, "prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<font color = #BBDDF7><font face = Test Family>첫째</font></font>\r\n"
+                            + "<font color = #B4EDE2>둘째</font></font>\r\n"
+                            + "<font color = ff00ff>셋째\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains("<font color=\"#B4EDE2\">둘째</font>\r\n", normalized);
+        Assert.DoesNotContain("둘째</font></font>", normalized);
+        Assert.EndsWith("<font color=\"#FF00FF\">셋째</font>\r\n", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 

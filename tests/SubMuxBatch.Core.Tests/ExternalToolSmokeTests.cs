@@ -665,11 +665,11 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             Assert.Contains("안녕하세요", converted);
             Assert.DoesNotContain("&nbsp;", converted, StringComparison.OrdinalIgnoreCase);
 
-            await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(srtPath, normalizedSrtPath);
+            await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(srtPath, normalizedSrtPath, 42);
             var normalized = await File.ReadAllTextAsync(normalizedSrtPath);
             Assert.DoesNotContain("<FONT", normalized, StringComparison.Ordinal);
             Assert.DoesNotContain("<RUBY", normalized, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("漢(かん)", normalized);
+            Assert.Contains("漢<font size=\"21\">かん</font>", normalized);
 
             await File.WriteAllTextAsync(
                 stylePath,
@@ -687,7 +687,9 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             Assert.DoesNotContain("<RUBY", ass, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(@"\c&H00ff00&", ass, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(@"\b1", ass, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("漢(かん)", ass);
+            Assert.Contains("漢", ass);
+            Assert.Contains("かん", ass);
+            Assert.Contains(@"\fs21", ass, StringComparison.OrdinalIgnoreCase);
 
             await client.ConvertAsync(
                 assPath,

@@ -31,9 +31,12 @@ public partial class SettingsWindow : Window
 
     private int _playResX;
     private int _playResY;
-    private string _assStyleLine;
-    private AssStyleDefinition _styleDefinition;
+    private string _assStyleLine = AppSettings.DefaultAssStyleLine;
+    private AssStyleDefinition _styleDefinition = AssStyleDefinition.Parse(AppSettings.DefaultAssStyleLine);
     private readonly DependencyLocator _dependencyLocator = new();
+    private string? _mkvMergePath;
+    private bool _useCustomMkvMergePath;
+    private ToolDependency? _detectedMkvToolNix;
     private bool _fontStatusRefreshInProgress;
 
     public SettingsWindow(
@@ -47,22 +50,41 @@ public partial class SettingsWindow : Window
             SettingsTabControl.SelectedItem = MaintenanceTabItem;
         }
         Settings = settings;
+        AlignmentComboBox.ItemsSource = _alignmentOptions;
+        detectedDependencies ??= new DependencyLocator().Locate(
+            settings.MkvMergePath,
+            settings.UseCustomMkvMergePath);
+        var version = typeof(SettingsWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? "unknown";
+        BuiltInVersionText.Text = AppText.Get("Settings_VersionSummary", version);
+        LoadSettingsIntoControls(settings, detectedDependencies.MkvMerge);
 
+        Loaded += async (_, _) =>
+        {
+            WindowPlacementHelper.FitToCurrentWorkingArea(this);
+            await RefreshSubMuxSansStatusAsync();
+        };
+        Activated += async (_, _) => await RefreshSubMuxSansStatusAsync();
+    }
+
+    public AppSettings Settings { get; private set; }
+    public Func<Window, Task>? UpdateCheckRequested { get; set; }
+
+    private void LoadSettingsIntoControls(AppSettings settings, ToolDependency? detectedMkvToolNix = null)
+    {
         LanguageComboBox.SelectedValue = settings.Language.ToString();
         if (LanguageComboBox.SelectedIndex < 0)
         {
             LanguageComboBox.SelectedValue = AppLanguage.System.ToString();
         }
         CheckForUpdatesAutomaticallyCheckBox.IsChecked = settings.CheckForUpdatesAutomatically;
-
-        detectedDependencies ??= new DependencyLocator().Locate(settings.MkvMergePath);
-        MkvMergePathTextBox.Text = detectedDependencies.MkvMerge.Path
-                                   ?? settings.MkvMergePath
-                                   ?? string.Empty;
-        var version = typeof(SettingsWindow).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? "unknown";
-        BuiltInVersionText.Text = AppText.Get("Settings_VersionSummary", version);
+        _mkvMergePath = settings.MkvMergePath;
+        _useCustomMkvMergePath = settings.UseCustomMkvMergePath;
+        _detectedMkvToolNix = detectedMkvToolNix ?? _dependencyLocator.Locate(
+            _mkvMergePath,
+            _useCustomMkvMergePath).MkvMerge;
+        UpdateMkvToolNixControls();
         OutputPrefixTextBox.Text = settings.OutputPrefix;
         IncludeSubdirectoriesCheckBox.IsChecked = settings.IncludeSubdirectories;
         AllowSubtitleSuffixMatchCheckBox.IsChecked = settings.AllowSubtitleSuffixMatch;
@@ -109,19 +131,8 @@ public partial class SettingsWindow : Window
         _playResY = settings.PlayResY;
         _styleDefinition = ParseStyleOrDefault(settings.AssStyleLine);
         _assStyleLine = _styleDefinition.ToStyleLine();
-        AlignmentComboBox.ItemsSource = _alignmentOptions;
         PopulateAssStyleFields();
-
-        Loaded += async (_, _) =>
-        {
-            WindowPlacementHelper.FitToCurrentWorkingArea(this);
-            await RefreshSubMuxSansStatusAsync();
-        };
-        Activated += async (_, _) => await RefreshSubMuxSansStatusAsync();
     }
-
-    public AppSettings Settings { get; private set; }
-    public Func<Window, Task>? UpdateCheckRequested { get; set; }
 
     private async void CheckForUpdatesNow_Click(object sender, RoutedEventArgs e)
     {
@@ -144,47 +155,75 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void BrowseMkvMerge_Click(object sender, RoutedEventArgs e) =>
-        BrowseExecutable(MkvMergePathTextBox, $"mkvmerge.exe|mkvmerge.exe|{AppText.Get("Common_Executable")}|*.exe");
-
-    private void AutoDetectMkvMerge_Click(object sender, RoutedEventArgs e)
-    {
-        var dependency = _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge;
-        ApplyDetectedPath(MkvMergePathTextBox, dependency);
-    }
-
-    private void ApplyDetectedPath(
-        System.Windows.Controls.TextBox target,
-        ToolDependency dependency)
-    {
-        if (dependency.Path is not null)
-        {
-            target.Text = dependency.Path;
-            target.CaretIndex = target.Text.Length;
-            return;
-        }
-
-        MessageBox.Show(
-            this,
-            AppText.Get("Settings_AutoDetectFailed", dependency.ExecutableName),
-            AppText.Get("Settings_AutoDetectTitle"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
-    }
-
-    private void BrowseExecutable(System.Windows.Controls.TextBox target, string filter)
+    private void ChangeMkvToolNix_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
-            Filter = filter,
+            Filter = $"mkvmerge.exe|mkvmerge.exe|{AppText.Get("Common_Executable")}|*.exe",
             CheckFileExists = true,
             Multiselect = false
         };
 
         if (dialog.ShowDialog(this) == true)
         {
-            target.Text = dialog.FileName;
+            _mkvMergePath = dialog.FileName;
+            _useCustomMkvMergePath = true;
+            _detectedMkvToolNix = _dependencyLocator.Locate(
+                _mkvMergePath,
+                preferConfigured: true).MkvMerge;
+            UpdateMkvToolNixControls();
         }
+    }
+
+    private void UseBundledMkvToolNix_Click(object sender, RoutedEventArgs e)
+    {
+        _mkvMergePath = null;
+        _useCustomMkvMergePath = false;
+        _detectedMkvToolNix = _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge;
+        UpdateMkvToolNixControls();
+    }
+
+    private void UpdateMkvToolNixControls()
+    {
+        if (MkvToolNixSelectionText is null
+            || MkvToolNixPathText is null
+            || UseBundledMkvToolNixButton is null)
+        {
+            return;
+        }
+
+        var dependency = _detectedMkvToolNix;
+        var version = FormatToolVersion(dependency?.Version);
+        var configuredPathIsActive = _useCustomMkvMergePath
+                                     && !string.IsNullOrWhiteSpace(_mkvMergePath)
+                                     && string.Equals(
+                                         NormalizePath(_mkvMergePath),
+                                         NormalizePath(dependency?.Path),
+                                         StringComparison.OrdinalIgnoreCase);
+        if (configuredPathIsActive)
+        {
+            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixCustom", version);
+        }
+        else if (_useCustomMkvMergePath && dependency?.IsAvailable == true)
+        {
+            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixCustomFallback", version);
+        }
+        else if (dependency?.IsAvailable == true && BundledMkvToolNixProvider.IsBundledPath(dependency.Path))
+        {
+            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixBundled", version);
+        }
+        else if (dependency?.IsAvailable == true)
+        {
+            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixDetected", version);
+        }
+        else
+        {
+            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixUnavailable");
+        }
+
+        MkvToolNixPathText.Text = dependency?.Path ?? string.Empty;
+        MkvToolNixPathText.ToolTip = dependency?.Path;
+        UseBundledMkvToolNixButton.IsEnabled = _useCustomMkvMergePath;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -200,7 +239,8 @@ public partial class SettingsWindow : Window
             }
             updated.Language = language;
             updated.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyCheckBox.IsChecked == true;
-            updated.MkvMergePath = EmptyToNull(MkvMergePathTextBox.Text);
+            updated.MkvMergePath = _useCustomMkvMergePath ? _mkvMergePath : null;
+            updated.UseCustomMkvMergePath = _useCustomMkvMergePath && updated.MkvMergePath is not null;
             updated.OutputPrefix = OutputPrefixTextBox.Text.Trim();
             updated.IncludeSubdirectories = IncludeSubdirectoriesCheckBox.IsChecked == true;
             updated.AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatchCheckBox.IsChecked == true;
@@ -415,6 +455,37 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void UseDefaultAssStyle_Click(object sender, RoutedEventArgs e)
+    {
+        var defaults = new AppSettings();
+        _playResX = defaults.PlayResX;
+        _playResY = defaults.PlayResY;
+        _styleDefinition = AssStyleDefinition.Parse(AppSettings.DefaultAssStyleLine);
+        _assStyleLine = _styleDefinition.ToStyleLine();
+        UseCustomAssStyleCheckBox.IsChecked = true;
+        PopulateAssStyleFields();
+    }
+
+    private void ResetAllSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var answer = MessageBox.Show(
+            this,
+            AppText.Get("Settings_ResetAllSettingsConfirm"),
+            AppText.Get("Settings_ResetAllSettingsTitle"),
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        Settings = new AppSettings();
+        LoadSettingsIntoControls(
+            Settings,
+            _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge);
+    }
+
     private void CommitAssStyleFields()
     {
         if (!TryParseResolution(PlayResXTextBox.Text, out var playResX)
@@ -518,8 +589,27 @@ public partial class SettingsWindow : Window
             ? definition!
             : AssStyleDefinition.Parse(AppSettings.DefaultAssStyleLine);
 
-    private static string? EmptyToNull(string value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string FormatToolVersion(string? version) =>
+        string.IsNullOrWhiteSpace(version)
+            ? AppText.Get("Tool_UnknownVersion")
+            : version.Split([' ', '+'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+
+    private static string? NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return path;
+        }
+    }
 
     private sealed record AlignmentOption(int Value, string Label)
     {
