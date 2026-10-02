@@ -8,6 +8,7 @@ using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
+using SubMuxBatch.Core.Fonts;
 
 namespace SubMuxBatch.App;
 
@@ -33,10 +34,18 @@ public partial class SettingsWindow : Window
     private string _assStyleLine;
     private AssStyleDefinition _styleDefinition;
     private readonly DependencyLocator _dependencyLocator = new();
+    private bool _fontStatusRefreshInProgress;
 
-    public SettingsWindow(AppSettings settings, DependencyReport? detectedDependencies = null)
+    public SettingsWindow(
+        AppSettings settings,
+        DependencyReport? detectedDependencies = null,
+        bool openMaintenanceTab = false)
     {
         InitializeComponent();
+        if (openMaintenanceTab)
+        {
+            SettingsTabControl.SelectedItem = MaintenanceTabItem;
+        }
         Settings = settings;
 
         LanguageComboBox.SelectedValue = settings.Language.ToString();
@@ -73,6 +82,12 @@ public partial class SettingsWindow : Window
         {
             AudioLanguageComboBox.SelectedValue = AudioTrackLanguage.Japanese.ToString();
         }
+        ConvertAudioToAacCheckBox.IsChecked = settings.ConvertAudioToAac;
+        AudioChannelModeComboBox.SelectedValue = settings.AudioChannelMode.ToString();
+        if (AudioChannelModeComboBox.SelectedIndex < 0)
+        {
+            AudioChannelModeComboBox.SelectedValue = AudioChannelMode.PreserveChannels.ToString();
+        }
         ConcurrentJobCountComboBox.SelectedValue = settings.ConcurrentJobCount.ToString();
         if (ConcurrentJobCountComboBox.SelectedIndex < 0)
         {
@@ -81,6 +96,15 @@ public partial class SettingsWindow : Window
         ShowCompletionNotificationCheckBox.IsChecked = settings.ShowCompletionNotification;
         PlayCompletionSoundCheckBox.IsChecked = settings.PlayCompletionSound;
         UseCustomAssStyleCheckBox.IsChecked = settings.UseCustomAssStyle;
+        MaintenanceUpdateAssStyleCheckBox.IsChecked = settings.MaintenanceUpdateAssStyle;
+        MaintenanceUpdateFontsCheckBox.IsChecked = settings.MaintenanceUpdateFonts;
+        MaintenanceApplyAudioSettingsCheckBox.IsChecked = settings.MaintenanceApplyAudioSettings;
+        MaintenanceRefreshTagsCheckBox.IsChecked = settings.MaintenanceRefreshTags;
+        MaintenanceDetectLegacyAssCheckBox.IsChecked = settings.MaintenanceDetectLegacyAss;
+        MaintenanceLegacyAssStylesTextBox.Text = settings.MaintenanceLegacyAssStyles;
+        MaintenanceOutputPrefixTextBox.Text = settings.MaintenanceOutputPrefix;
+        MaintenanceReplaceOriginalCheckBox.IsChecked = settings.MaintenanceReplaceOriginal;
+        UpdateMaintenanceOutputControls();
         _playResX = settings.PlayResX;
         _playResY = settings.PlayResY;
         _styleDefinition = ParseStyleOrDefault(settings.AssStyleLine);
@@ -88,7 +112,12 @@ public partial class SettingsWindow : Window
         AlignmentComboBox.ItemsSource = _alignmentOptions;
         PopulateAssStyleFields();
 
-        Loaded += (_, _) => WindowPlacementHelper.FitToCurrentWorkingArea(this);
+        Loaded += async (_, _) =>
+        {
+            WindowPlacementHelper.FitToCurrentWorkingArea(this);
+            await RefreshSubMuxSansStatusAsync();
+        };
+        Activated += async (_, _) => await RefreshSubMuxSansStatusAsync();
     }
 
     public AppSettings Settings { get; private set; }
@@ -193,6 +222,14 @@ public partial class SettingsWindow : Window
                 throw new InvalidOperationException(AppText.Get("Settings_SelectAudioLanguageError"));
             }
             updated.SelectedAudioLanguage = audioLanguage;
+            updated.ConvertAudioToAac = ConvertAudioToAacCheckBox.IsChecked == true;
+            if (AudioChannelModeComboBox.SelectedValue is not string selectedAudioChannelMode
+                || !Enum.TryParse(selectedAudioChannelMode, out AudioChannelMode audioChannelMode)
+                || !Enum.IsDefined(audioChannelMode))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_SelectAudioChannelModeError"));
+            }
+            updated.AudioChannelMode = audioChannelMode;
             if (ConcurrentJobCountComboBox.SelectedValue is not string concurrentJobCountText
                 || !int.TryParse(concurrentJobCountText, out var concurrentJobCount))
             {
@@ -209,6 +246,14 @@ public partial class SettingsWindow : Window
             updated.PlayResX = _playResX;
             updated.PlayResY = _playResY;
             updated.AssStyleLine = _assStyleLine;
+            updated.MaintenanceUpdateAssStyle = MaintenanceUpdateAssStyleCheckBox.IsChecked == true;
+            updated.MaintenanceUpdateFonts = MaintenanceUpdateFontsCheckBox.IsChecked == true;
+            updated.MaintenanceApplyAudioSettings = MaintenanceApplyAudioSettingsCheckBox.IsChecked == true;
+            updated.MaintenanceRefreshTags = MaintenanceRefreshTagsCheckBox.IsChecked == true;
+            updated.MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAssCheckBox.IsChecked == true;
+            updated.MaintenanceLegacyAssStyles = MaintenanceLegacyAssStylesTextBox.Text.Trim();
+            updated.MaintenanceOutputPrefix = MaintenanceOutputPrefixTextBox.Text.Trim();
+            updated.MaintenanceReplaceOriginal = MaintenanceReplaceOriginalCheckBox.IsChecked == true;
             updated.Validate();
             updated.Save();
             Settings = updated;
@@ -229,6 +274,26 @@ public partial class SettingsWindow : Window
             expand ? "Settings_CollapseAssStyle" : "Settings_ExpandAssStyle");
     }
 
+    private void ToggleMaintenanceAdvancedStyles_Click(object sender, RoutedEventArgs e)
+    {
+        var expand = MaintenanceAdvancedStylesPanel.Visibility != Visibility.Visible;
+        MaintenanceAdvancedStylesPanel.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;
+        MaintenanceAdvancedStylesArrowTransform.Angle = expand ? 180 : 0;
+        MaintenanceAdvancedStylesToggleButton.ToolTip = AppText.Get(
+            expand ? "Settings_CollapseAssStyle" : "Settings_ExpandAssStyle");
+    }
+
+    private void MaintenanceReplaceOriginal_Changed(object sender, RoutedEventArgs e) =>
+        UpdateMaintenanceOutputControls();
+
+    private void UpdateMaintenanceOutputControls()
+    {
+        if (MaintenanceOutputPrefixTextBox is not null && MaintenanceReplaceOriginalCheckBox is not null)
+        {
+            MaintenanceOutputPrefixTextBox.IsEnabled = MaintenanceReplaceOriginalCheckBox.IsChecked != true;
+        }
+    }
+
     private void OpenSettingsFolder_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -247,6 +312,81 @@ public partial class SettingsWindow : Window
                 AppText.Get("Settings_OpenFolderErrorTitle"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+        }
+    }
+
+    private async void OpenSubMuxSansFont_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            const string resourceName = "SubMuxBatch.Core.Resources.SubMuxSans-Medium.otf";
+            var fontDirectory = Path.Combine(AppSettings.SettingsDirectory, "fonts");
+            Directory.CreateDirectory(fontDirectory);
+            var fontPath = Path.Combine(fontDirectory, "SubMuxSans-Medium.otf");
+            await using (var source = typeof(AppSettings).Assembly.GetManifestResourceStream(resourceName)
+                                      ?? throw new InvalidOperationException("The bundled SubMux Sans resource is missing."))
+            await using (var destination = new FileStream(
+                             fontPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.Read,
+                             81920,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await source.CopyToAsync(destination);
+            }
+
+            var fontViewer = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "fontview.exe");
+            var startInfo = new ProcessStartInfo(fontViewer)
+            {
+                UseShellExecute = true
+            };
+            startInfo.ArgumentList.Add(fontPath);
+            Process.Start(startInfo);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                AppText.Get("Settings_OpenFontError", exception.Message),
+                AppText.Get("Settings_OpenFontErrorTitle"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void OpenSourceLicenses_Click(object sender, RoutedEventArgs e)
+    {
+        new OpenSourceLicensesWindow
+        {
+            Owner = this
+        }.ShowDialog();
+    }
+
+    private async Task RefreshSubMuxSansStatusAsync()
+    {
+        if (_fontStatusRefreshInProgress || !IsLoaded)
+        {
+            return;
+        }
+
+        _fontStatusRefreshInProgress = true;
+        try
+        {
+            var installed = await Task.Run(() =>
+                new InstalledFontResolver().Resolve(new AssFontRequirement("SubMux Sans", 500, false)) is not null);
+            SubMuxSansStatusText.Text = AppText.Get(
+                installed ? "Settings_FontInstalled" : "Settings_FontNotInstalled");
+        }
+        catch
+        {
+            SubMuxSansStatusText.Text = AppText.Get("Settings_FontStatusUnknown");
+        }
+        finally
+        {
+            _fontStatusRefreshInProgress = false;
         }
     }
 

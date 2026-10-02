@@ -13,12 +13,15 @@ namespace SubMuxBatch.Core.Processing;
 public sealed class BatchProcessor(
     IProcessRunner processRunner,
     IInstalledFontResolver? installedFontResolver = null,
-    ISubtitleConverter? subtitleConverter = null)
+    ISubtitleConverter? subtitleConverter = null,
+    IAudioTranscoder? audioTranscoder = null)
 {
     private readonly IInstalledFontResolver _installedFontResolver =
         installedFontResolver ?? InstalledFontResolver.System;
     private readonly ISubtitleConverter _subtitleConverter =
         subtitleConverter ?? new LibSeSubtitleConverter();
+    private readonly IAudioTranscoder _audioTranscoder =
+        audioTranscoder ?? new BundledFfmpegAudioTranscoder(processRunner);
 
     public async Task<JobResult> ProcessAsync(
         MediaSet media,
@@ -156,6 +159,11 @@ public sealed class BatchProcessor(
         {
             settings.Validate();
             ValidateInputs(media, plan);
+            var assSourceTag = GetAssSourceTagValue(media, plan);
+            Report(
+                JobState.Verifying,
+                2,
+                CoreText.Get("Batch_SubtitleDecision", plan.Description, assSourceTag));
 
             var preferredOutputPath = Path.Combine(
                 media.Key.DirectoryPath,
@@ -328,6 +336,18 @@ public sealed class BatchProcessor(
             AddNegativeTimestampWarnings("ASS", finalAssAdjustments);
             finalAss = verifiedAss;
 
+            if (settings.AddSubMuxTag)
+            {
+                var markedAss = SubMuxMetadata.AddAssSourceMarker(
+                    await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false),
+                    assSourceTag);
+                await File.WriteAllTextAsync(
+                    finalAss,
+                    markedAss,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             IReadOnlyList<FontAttachmentFile> fontAttachments = [];
             if (settings.AttachAssStyleFonts)
             {
@@ -336,9 +356,14 @@ public sealed class BatchProcessor(
                     finalAss,
                     plan,
                     settings,
+                    workspace.Path,
                     warnings,
                     LogToolOutput,
                     cancellationToken).ConfigureAwait(false);
+                Report(
+                    JobState.Verifying,
+                    33,
+                    ProcessingDecisionFormatter.DescribeFontAttachments(fontAttachments));
             }
 
             Report(JobState.Verifying, 34, CoreText.Get("Batch_InspectSource"));
@@ -346,6 +371,44 @@ public sealed class BatchProcessor(
                 .IdentifyAsync(media.VideoPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var sourceInspection = sourceIdentification.Inspection;
+            var audioDecisionPlan = settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage
+                ? AudioConversionPlanner.Create(sourceInspection, settings)
+                : null;
+            var audioDecisionMessages = audioDecisionPlan is null
+                ? ProcessingDecisionFormatter.DescribeUnchangedAudio(sourceInspection)
+                : ProcessingDecisionFormatter.DescribeAudioPlan(sourceInspection, audioDecisionPlan);
+            foreach (var message in audioDecisionMessages)
+            {
+                Report(JobState.Verifying, 35, message);
+            }
+            if (settings.RemoveExistingSubtitles)
+            {
+                Report(JobState.Verifying, 35, CoreText.Get("Batch_RemoveExistingSubtitlesDecision"));
+            }
+            if (settings.RemoveExistingFontAttachments)
+            {
+                Report(JobState.Verifying, 35, CoreText.Get("Batch_RemoveExistingFontsDecision"));
+            }
+            if (settings.RemoveChapters)
+            {
+                Report(JobState.Verifying, 35, CoreText.Get("Batch_RemoveChaptersDecision"));
+            }
+            if (settings.CleanOutputMetadata)
+            {
+                Report(JobState.Verifying, 35, CoreText.Get("Batch_CleanMetadataDecision"));
+            }
+            if (settings.AddSubMuxTag)
+            {
+                Report(
+                    JobState.Verifying,
+                    35,
+                    CoreText.Get("Batch_AddTagsDecision", SubMuxMetadata.GetApplicationVersion(), assSourceTag));
+            }
+            var needsAudioPlan = settings.ConvertAudioToAac
+                                 || (settings.BackupExcludedAudioTracks && settings.FilterAudioTracksByLanguage);
+            var audioConversionPlan = needsAudioPlan
+                ? audioDecisionPlan ?? AudioConversionPlanner.Create(sourceInspection, settings)
+                : null;
             var backupService = new MetadataBackupService(
                 processRunner,
                 workingDirectory: workspace.Path);
@@ -396,18 +459,25 @@ public sealed class BatchProcessor(
                         onBackupDirectoryCreated)).ConfigureAwait(false);
             }
 
-            if (settings.BackupExcludedAudioTracks && settings.FilterAudioTracksByLanguage)
+            if (settings.BackupExcludedAudioTracks && audioConversionPlan is not null)
             {
+                var retainedAudioIds = audioConversionPlan.RetainedSourceTrackIds;
+                var excludedAudioIds = sourceInspection.Tracks
+                    .Where(static track => string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase))
+                    .Select(static track => track.Id
+                        ?? throw new InvalidOperationException(CoreText.Get("Mkv_AudioTrackIdMissing")))
+                    .Where(trackId => !retainedAudioIds.Contains(trackId))
+                    .ToArray();
                 await TryBackupAsync(
                     CoreText.Get("Backup_ExcludedAudio"),
                     CoreText.Get("Batch_BackupExcludedAudio"),
                     async (onBackupCreated, onBackupDirectoryCreated) =>
                     {
-                        var path = await backupService.BackupExcludedAudioTracksAsync(
+                        var path = await backupService.BackupAudioTracksAsync(
                             media.VideoPath,
                             dependencies.MkvMerge.Path,
                             sourceIdentification,
-                            settings.SelectedAudioLanguage,
+                            excludedAudioIds,
                             cancellationToken,
                             onBackupCreated,
                             onBackupDirectoryCreated).ConfigureAwait(false);
@@ -415,8 +485,69 @@ public sealed class BatchProcessor(
                     }).ConfigureAwait(false);
             }
 
+            AudioMuxPlan? audioMuxPlan = null;
+            if (settings.ConvertAudioToAac)
+            {
+                audioConversionPlan ??= AudioConversionPlanner.Create(sourceInspection, settings);
+                var generatedTracks = new List<GeneratedAudioTrack>();
+                for (var index = 0; index < audioConversionPlan.Transcodes.Count; index++)
+                {
+                    var transcode = audioConversionPlan.Transcodes[index];
+                    var audioPath = Path.Combine(workspace.Path, $"audio-{index + 1:00}.mka");
+                    Report(
+                        JobState.ConvertingAudio,
+                        38 + (int)Math.Round(index / (double)Math.Max(1, audioConversionPlan.Transcodes.Count) * 16),
+                        CoreText.Get("Batch_ConvertAudio", index + 1, audioConversionPlan.Transcodes.Count));
+                    var transcodeResult = await _audioTranscoder.TranscodeAsync(
+                        new AudioTranscodeRequest(
+                            media.VideoPath,
+                            transcode.SourceAudioIndex,
+                            audioPath,
+                            transcode.OutputChannels,
+                            transcode.BitrateKbps,
+                            sourceInspection.DurationNanoseconds),
+                        audioPercent =>
+                        {
+                            var itemStart = index / (double)Math.Max(1, audioConversionPlan.Transcodes.Count);
+                            var itemProgress = audioPercent / 100d / Math.Max(1, audioConversionPlan.Transcodes.Count);
+                            var totalPercent = 38 + (int)Math.Round((itemStart + itemProgress) * 16);
+                            Report(
+                                JobState.ConvertingAudio,
+                                totalPercent,
+                                CoreText.Get("Batch_ConvertAudioProgress", index + 1, audioConversionPlan.Transcodes.Count, audioPercent));
+                        },
+                        LogToolOutput,
+                        cancellationToken).ConfigureAwait(false);
+                    foreach (var warning in transcodeResult.Warnings)
+                    {
+                        warnings.Add($"FFmpeg: {warning}");
+                    }
+
+                    var audioInspection = await mkvMerge
+                        .InspectAsync(audioPath, cancellationToken: cancellationToken)
+                        .ConfigureAwait(false);
+                    ValidateGeneratedAudio(audioInspection, transcode.OutputChannels);
+                    generatedTracks.Add(new GeneratedAudioTrack(
+                        audioPath,
+                        transcode.SourceTrack,
+                        transcode.OutputChannels,
+                        transcode.BitrateKbps,
+                        transcode.DefaultTrack,
+                        transcode.ForcedTrack,
+                        transcode.TrackName));
+                }
+
+                audioMuxPlan = new AudioMuxPlan(
+                    audioConversionPlan.RetainedSourceTrackIds,
+                    generatedTracks,
+                    audioConversionPlan.SourceDefaultTrackOverrides);
+            }
+
             var partialPath = Path.Combine(workspace.Path, "output.partial.mkv");
-            Report(JobState.Muxing, 38, CoreText.Get("Batch_MuxSubtitles"));
+            var encodedAnyAudio = audioMuxPlan?.GeneratedTracks.Count > 0;
+            var muxStartPercent = encodedAnyAudio ? 54 : 38;
+            var muxRangePercent = encodedAnyAudio ? 38 : 54;
+            Report(JobState.Muxing, muxStartPercent, CoreText.Get("Batch_MuxSubtitles"));
             var muxResult = await mkvMerge.MuxAsync(
                 media.VideoPath,
                 finalAss,
@@ -424,7 +555,7 @@ public sealed class BatchProcessor(
                 partialPath,
                 muxPercent =>
                 {
-                    var totalPercent = 38 + (int)Math.Round(muxPercent * 0.54);
+                    var totalPercent = muxStartPercent + (int)Math.Round(muxPercent * (muxRangePercent / 100d));
                     Report(JobState.Muxing, totalPercent, CoreText.Get("Batch_MuxProgress", muxPercent));
                 },
                 LogToolOutput,
@@ -432,12 +563,13 @@ public sealed class BatchProcessor(
                 removeExistingSubtitles: settings.RemoveExistingSubtitles,
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
                 removeChapters: settings.RemoveChapters,
-                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                keepOnlyAudioLanguage: !settings.ConvertAudioToAac && settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
                 fontAttachments: fontAttachments,
                 globalTagsPath: globalTagsPath,
-                cleanOutputMetadata: settings.CleanOutputMetadata).ConfigureAwait(false);
+                cleanOutputMetadata: settings.CleanOutputMetadata,
+                audioMuxPlan: audioMuxPlan).ConfigureAwait(false);
 
             Report(JobState.Verifying, 94, CoreText.Get("Batch_VerifyOutput"));
             var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
@@ -448,11 +580,12 @@ public sealed class BatchProcessor(
                 removeExistingSubtitles: settings.RemoveExistingSubtitles,
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
                 removeChapters: settings.RemoveChapters,
-                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                keepOnlyAudioLanguage: !settings.ConvertAudioToAac && settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
                 addedFontAttachments: fontAttachments,
-                cleanOutputMetadata: settings.CleanOutputMetadata);
+                cleanOutputMetadata: settings.CleanOutputMetadata,
+                audioMuxPlan: audioMuxPlan);
             if (validationErrors.Count > 0)
             {
                 throw new InvalidOperationException(
@@ -482,11 +615,12 @@ public sealed class BatchProcessor(
                 removeExistingSubtitles: settings.RemoveExistingSubtitles,
                 removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
                 removeChapters: settings.RemoveChapters,
-                keepOnlyAudioLanguage: settings.FilterAudioTracksByLanguage
+                keepOnlyAudioLanguage: !settings.ConvertAudioToAac && settings.FilterAudioTracksByLanguage
                     ? settings.SelectedAudioLanguage
                     : null,
                 addedFontAttachments: fontAttachments,
-                cleanOutputMetadata: settings.CleanOutputMetadata);
+                cleanOutputMetadata: settings.CleanOutputMetadata,
+                audioMuxPlan: audioMuxPlan);
             if (committedValidationErrors.Count > 0)
             {
                 throw new InvalidOperationException(
@@ -494,6 +628,7 @@ public sealed class BatchProcessor(
                     + Environment.NewLine
                     + string.Join(Environment.NewLine, committedValidationErrors));
             }
+            Report(JobState.Verifying, 99, ProcessingDecisionFormatter.DescribeVerifiedOutput(committedInspection));
 
             Report(JobState.Verifying, 99, CoreText.Get("Batch_CleanupWorkspace"));
             await workspace.DisposeAsync().ConfigureAwait(false);
@@ -521,6 +656,16 @@ public sealed class BatchProcessor(
             Report(JobState.Failed, currentPercent, exception.Message);
             return new JobResult(JobState.Failed, null, warnings, exception.Message);
         }
+    }
+
+    internal static string GetAssSourceTagValue(MediaSet media, ConversionPlan plan)
+    {
+        if (plan.AssSource == AssSourceKind.Existing)
+        {
+            return "ASS";
+        }
+
+        return plan.SrtSource == SrtSourceKind.ConvertFromSmi ? "SMI" : "SRT";
     }
 
     private static void ValidateInputs(MediaSet media, ConversionPlan plan)
@@ -561,10 +706,24 @@ public sealed class BatchProcessor(
         }
     }
 
+    private static void ValidateGeneratedAudio(MkvInspection inspection, int? expectedChannels)
+    {
+        var audioTracks = inspection.Tracks
+            .Where(static track => string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (audioTracks.Length != 1
+            || !audioTracks[0].CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
+            || (expectedChannels.HasValue && audioTracks[0].AudioChannels != expectedChannels))
+        {
+            throw new InvalidOperationException(CoreText.Get("Ffmpeg_OutputValidationFailed"));
+        }
+    }
+
     private async Task<IReadOnlyList<FontAttachmentFile>> ResolveAssFontAttachmentsAsync(
         string assPath,
         ConversionPlan plan,
         AppSettings settings,
+        string workspacePath,
         ICollection<string> warnings,
         Action<string> log,
         CancellationToken cancellationToken)
@@ -618,9 +777,24 @@ public sealed class BatchProcessor(
 
             if (match is null)
             {
-                var warning = CoreText.Get("Batch_FontNotFound", requirement.FamilyName);
-                warnings.Add(warning);
-                throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+                if (string.Equals(requirement.FamilyName.Trim(), "SubMux Sans", StringComparison.OrdinalIgnoreCase))
+                {
+                    var bundledFontPath = await ExtractBundledSubMuxFontAsync(workspacePath, cancellationToken)
+                        .ConfigureAwait(false);
+                    match = new InstalledFontMatch(
+                        new FontAttachmentFile(bundledFontPath, "font/otf", "SubMuxSans-Medium.otf"),
+                        InstalledFontMatchKind.Compatibility,
+                        500,
+                        false,
+                        "SubMux Sans");
+                    log(CoreText.Get("Batch_BundledFontSelected", requirement.FamilyName));
+                }
+                else
+                {
+                    var warning = CoreText.Get("Batch_FontNotFound", requirement.FamilyName);
+                    warnings.Add(warning);
+                    throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+                }
             }
 
             var matchLabel = CoreText.Get($"FontMatch_{match.MatchKind}");
@@ -644,6 +818,25 @@ public sealed class BatchProcessor(
 
         return await DeduplicateAndNameFontAttachmentsAsync(attachments, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    internal static async Task<string> ExtractBundledSubMuxFontAsync(
+        string workspacePath,
+        CancellationToken cancellationToken)
+    {
+        const string resourceName = "SubMuxBatch.Core.Resources.SubMuxSans-Medium.otf";
+        await using var source = typeof(BatchProcessor).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(CoreText.Get("Batch_BundledFontMissing"));
+        var destination = Path.Combine(workspacePath, "SubMuxSans-Medium.otf");
+        await using var output = new FileStream(
+            destination,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await source.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+        return destination;
     }
 
     internal static async Task<IReadOnlyList<FontAttachmentFile>> DeduplicateAndNameFontAttachmentsAsync(

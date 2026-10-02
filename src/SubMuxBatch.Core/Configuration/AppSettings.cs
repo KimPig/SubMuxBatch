@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.Localization;
 
@@ -12,6 +13,14 @@ public enum AudioTrackLanguage
     English,
     Japanese,
     Korean
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<AudioChannelMode>))]
+public enum AudioChannelMode
+{
+    PreserveChannels,
+    ConvertToStereo,
+    KeepMultichannelAndAddStereo
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<AppLanguage>))]
@@ -35,7 +44,11 @@ public sealed class AppSettings
     public const double DefaultStatusColumnWeight = 1;
 
     public const string DefaultAssStyleLine =
-        "Style: Default,\uB9D1\uC740 \uACE0\uB515,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1";
+        "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1";
+    public const string LegacyMalgunGothicAssStyleLine =
+        "Style: Default,맑은 고딕,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,-1,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1";
+    public static string DefaultMaintenanceLegacyAssStyles =>
+        string.Join(Environment.NewLine, LegacyMalgunGothicAssStyleLine, DefaultAssStyleLine);
 
     public string? MkvMergePath { get; set; }
     public AppLanguage Language { get; set; } = AppLanguage.System;
@@ -57,6 +70,8 @@ public sealed class AppSettings
     public bool CleanOutputMetadata { get; set; } = false;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
+    public bool ConvertAudioToAac { get; set; } = false;
+    public AudioChannelMode AudioChannelMode { get; set; } = AudioChannelMode.PreserveChannels;
     public int ConcurrentJobCount { get; set; } = MinConcurrentJobCount;
     public bool ShowFileColumn { get; set; } = true;
     public bool ShowCompositionColumn { get; set; } = true;
@@ -78,6 +93,14 @@ public sealed class AppSettings
     public int PlayResX { get; set; } = 1920;
     public int PlayResY { get; set; } = 1080;
     public string AssStyleLine { get; set; } = DefaultAssStyleLine;
+    public bool MaintenanceUpdateAssStyle { get; set; } = true;
+    public bool MaintenanceUpdateFonts { get; set; } = true;
+    public bool MaintenanceApplyAudioSettings { get; set; } = true;
+    public bool MaintenanceRefreshTags { get; set; } = true;
+    public bool MaintenanceDetectLegacyAss { get; set; } = true;
+    public string MaintenanceLegacyAssStyles { get; set; } = DefaultMaintenanceLegacyAssStyles;
+    public string MaintenanceOutputPrefix { get; set; } = GetDefaultMaintenanceOutputPrefix(AppLanguage.System);
+    public bool MaintenanceReplaceOriginal { get; set; }
 
     public static string SettingsDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -119,6 +142,12 @@ public sealed class AppSettings
 
     internal static AppSettings Deserialize(string json)
     {
+        using var document = JsonDocument.Parse(json);
+        var hasMaintenanceOutputPrefix = document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Any(property => string.Equals(
+                property.Name,
+                nameof(MaintenanceOutputPrefix),
+                StringComparison.OrdinalIgnoreCase));
         var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
         if (!settings.ShowFileColumn && !settings.ShowCompositionColumn && !settings.ShowMediaFormatColumn && !settings.ShowDurationColumn
             && !settings.ShowVideoCodecColumn && !settings.ShowWorkColumn && !settings.ShowStatusColumn)
@@ -142,7 +171,26 @@ public sealed class AppSettings
             settings.BackupOriginalAttachments = true;
             settings.BackupOriginalSubtitlesAndAttachments = false;
         }
+        if (string.IsNullOrWhiteSpace(settings.MaintenanceLegacyAssStyles))
+        {
+            settings.MaintenanceLegacyAssStyles = DefaultMaintenanceLegacyAssStyles;
+        }
+        if (!hasMaintenanceOutputPrefix || string.IsNullOrWhiteSpace(settings.MaintenanceOutputPrefix))
+        {
+            settings.MaintenanceOutputPrefix = GetDefaultMaintenanceOutputPrefix(settings.Language);
+        }
         return settings;
+    }
+
+    public static string GetDefaultMaintenanceOutputPrefix(AppLanguage language)
+    {
+        var korean = language == AppLanguage.Korean
+                     || language == AppLanguage.System
+                     && string.Equals(
+                         CultureInfo.CurrentUICulture.TwoLetterISOLanguageName,
+                         "ko",
+                         StringComparison.OrdinalIgnoreCase);
+        return korean ? "유지보수_" : "Maintained_";
     }
 
     private static double NormalizeQueueColumnWeight(double weight, double defaultWeight) =>
@@ -194,6 +242,8 @@ public sealed class AppSettings
         CleanOutputMetadata = CleanOutputMetadata,
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,
+        ConvertAudioToAac = ConvertAudioToAac,
+        AudioChannelMode = AudioChannelMode,
         ConcurrentJobCount = ConcurrentJobCount,
         ShowFileColumn = ShowFileColumn,
         ShowCompositionColumn = ShowCompositionColumn,
@@ -214,7 +264,15 @@ public sealed class AppSettings
         UseCustomAssStyle = UseCustomAssStyle,
         PlayResX = PlayResX,
         PlayResY = PlayResY,
-        AssStyleLine = AssStyleLine
+        AssStyleLine = AssStyleLine,
+        MaintenanceUpdateAssStyle = MaintenanceUpdateAssStyle,
+        MaintenanceUpdateFonts = MaintenanceUpdateFonts,
+        MaintenanceApplyAudioSettings = MaintenanceApplyAudioSettings,
+        MaintenanceRefreshTags = MaintenanceRefreshTags,
+        MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAss,
+        MaintenanceLegacyAssStyles = MaintenanceLegacyAssStyles,
+        MaintenanceOutputPrefix = MaintenanceOutputPrefix,
+        MaintenanceReplaceOriginal = MaintenanceReplaceOriginal
     };
 
     public void Validate()
@@ -225,9 +283,21 @@ public sealed class AppSettings
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidOutputPrefix"));
         }
 
+        if (!MaintenanceReplaceOriginal
+            && (string.IsNullOrWhiteSpace(MaintenanceOutputPrefix)
+                || MaintenanceOutputPrefix.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidMaintenanceOutputPrefix"));
+        }
+
         if (FilterAudioTracksByLanguage && !Enum.IsDefined(SelectedAudioLanguage))
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioLanguage"));
+        }
+
+        if (ConvertAudioToAac && !Enum.IsDefined(AudioChannelMode))
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioChannelMode"));
         }
 
         if (ConcurrentJobCount is < MinConcurrentJobCount or > MaxConcurrentJobCount)
@@ -241,6 +311,17 @@ public sealed class AppSettings
         if (PlayResX is < 16 or > 16384 || PlayResY is < 16 or > 16384)
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidPlayRes"));
+        }
+
+        if (MaintenanceDetectLegacyAss)
+        {
+            var legacyStyles = MaintenanceLegacyAssStyles
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (legacyStyles.Length == 0
+                || legacyStyles.Any(style => !AssStyleDefinition.TryParse(style, out _)))
+            {
+                throw new InvalidOperationException(CoreText.Get("Maintenance_InvalidLegacyStyles"));
+            }
         }
 
         if (UseCustomAssStyle)

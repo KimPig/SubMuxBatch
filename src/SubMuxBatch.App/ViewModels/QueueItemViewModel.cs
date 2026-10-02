@@ -29,11 +29,16 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private Stopwatch? _elapsedStopwatch;
     private TimeSpan _elapsedTime;
     private bool _hasElapsedTime;
+    private bool _maintenanceMode;
 
-    public QueueItemViewModel(MediaSet media, AppSettings settings)
+    public QueueItemViewModel(MediaSet media, AppSettings settings, bool maintenanceMode = false)
     {
         _media = media;
-        _plan = ConversionPlanFactory.Create(media);
+        _maintenanceMode = maintenanceMode;
+        _plan = maintenanceMode
+            ? new ConversionPlan(true, AssSourceKind.Existing, SrtSourceKind.Existing,
+                AppText.Get("Main_MaintenanceMode"), [], null)
+            : ConversionPlanFactory.Create(media);
         _state = _plan.IsValid ? JobState.Ready : JobState.Invalid;
         RefreshPresentation(settings);
     }
@@ -245,7 +250,12 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             if (_displayInspection?.VideoStreams.Count > 0)
             {
                 var stream = _displayInspection.VideoStreams[0];
-                var mediaParts = new List<string> { FormatCodec(stream.Format, stream.CodecId) };
+                var codec = FormatCodec(stream.Format, stream.CodecId);
+                if (stream.BitDepth is > 0)
+                {
+                    codec += $" {stream.BitDepth}-bit";
+                }
+                var mediaParts = new List<string> { codec };
                 if (stream.Width is > 0 && stream.Height is > 0)
                 {
                     mediaParts.Add($"{stream.Width}×{stream.Height}");
@@ -253,6 +263,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 if (stream.FrameRate is > 0)
                 {
                     mediaParts.Add($"{stream.FrameRate.Value:0.###} fps");
+                }
+                if (stream.Bitrate is > 0)
+                {
+                    mediaParts.Add(FormatBitrate(stream.Bitrate.Value));
                 }
 
                 return string.Join(" · ", mediaParts);
@@ -279,6 +293,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 var fps = 1_000_000_000d / track.DefaultDurationNanoseconds.Value;
                 parts.Add($"{fps:0.###} fps");
             }
+            if (track.Bitrate is > 0)
+            {
+                parts.Add(FormatBitrate(track.Bitrate.Value));
+            }
             return string.Join(" · ", parts);
         }
     }
@@ -303,6 +321,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                     if (stream.SamplingRate is > 0)
                     {
                         parts.Add($"{stream.SamplingRate.Value / 1000d:0.#} kHz");
+                    }
+                    if (stream.Bitrate is > 0)
+                    {
+                        parts.Add(FormatBitrate(stream.Bitrate.Value));
                     }
                     var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
                     return prefix + string.Join(" · ", parts);
@@ -336,6 +358,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 if (track.AudioSamplingFrequency is > 0)
                 {
                     parts.Add($"{track.AudioSamplingFrequency.Value / 1000d:0.#} kHz");
+                }
+                if (track.Bitrate is > 0)
+                {
+                    parts.Add(FormatBitrate(track.Bitrate.Value));
                 }
                 var prefix = tracks.Length > 1 ? $"{index + 1}. " : string.Empty;
                 return prefix + string.Join(" · ", parts);
@@ -577,6 +603,66 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         }
     }
     public bool IsValid => _plan.IsValid;
+    public bool IsMaintenanceMode => _maintenanceMode;
+
+    public void SetProcessingMode(bool maintenanceMode, AppSettings settings)
+    {
+        if (_maintenanceMode == maintenanceMode)
+        {
+            return;
+        }
+
+        _maintenanceMode = maintenanceMode;
+        Error = null;
+        OutputPath = null;
+        Progress = 0;
+        ResetElapsedTime();
+        RefreshPlan(settings, resetState: true);
+        RefreshPresentation(settings);
+        OnPropertyChanged(nameof(IsMaintenanceMode));
+    }
+
+    public void RefreshMaintenancePlan(AppSettings settings)
+    {
+        if (!_maintenanceMode) return;
+        var isMkv = string.Equals(Path.GetExtension(_media.VideoPath), ".mkv", StringComparison.OrdinalIgnoreCase);
+        var processed = _displayInspection?.ProcessedBySubMux == true;
+        var actions = new List<string>();
+        var hasOperation = false;
+        if (settings.MaintenanceUpdateAssStyle)
+        {
+            actions.Add(AppText.Get("Maintenance_PlanInspectAssSource"));
+            hasOperation = true;
+        }
+        if (settings.MaintenanceApplyAudioSettings
+            && (settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage))
+        {
+            actions.Add(AppText.Get("Maintenance_PlanApplyAudio"));
+            hasOperation = true;
+        }
+        if (settings.MaintenanceRefreshTags)
+        {
+            actions.Add(AppText.Get("Maintenance_PlanRefreshTags"));
+            hasOperation = true;
+        }
+        var valid = isMkv && processed && hasOperation;
+        var error = !isMkv
+            ? AppText.Get("Maintenance_ErrorMkvOnly")
+            : !processed
+                ? AppText.Get("Maintenance_ErrorNotSubMux")
+                : !hasOperation ? AppText.Get("Maintenance_ErrorNoActions") : null;
+        _plan = new ConversionPlan(valid, AssSourceKind.Existing, SrtSourceKind.Existing,
+            actions.Count == 0 ? AppText.Get("Main_MaintenanceMode") : string.Join(" · ", actions), [], error);
+        State = valid ? JobState.Ready : JobState.Invalid;
+        OnPropertyChanged(nameof(Plan));
+        OnPropertyChanged(nameof(PlanDescription));
+        OnPropertyChanged(nameof(IsValid));
+        OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(Details));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(StatusForeground));
+        OnPropertyChanged(nameof(StatusBackground));
+    }
 
     public JobState State
     {
@@ -639,6 +725,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         JobState.ConvertingSmiToSrt => "SMI → SRT",
         JobState.ConvertingAssToSrt => "ASS → SRT",
         JobState.ConvertingSrtToAss => "SRT → ASS",
+        JobState.UpdatingAssStyle => AppText.Get("Status_UpdatingAssStyle"),
+        JobState.ConvertingAudio => AppText.Get("Status_ConvertingAudio", Progress),
         JobState.Muxing => AppText.Get("Status_Muxing", Progress),
         JobState.Verifying => AppText.Get("Status_Verifying"),
         JobState.Succeeded => AppText.Get("Status_Succeeded"),
@@ -748,14 +836,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             _mediaInfoStatus = AppText.Get("MediaInfo_Loading");
             RaiseMediaInfoChanged();
         }
-        _plan = ConversionPlanFactory.Create(_media);
-        if (State is JobState.Ready or JobState.Invalid or JobState.Failed or JobState.Skipped)
-        {
-            State = _plan.IsValid ? JobState.Ready : JobState.Invalid;
-        }
+        RefreshPlan(settings, resetState: false);
 
         OnPropertyChanged(nameof(Media));
-        OnPropertyChanged(nameof(Plan));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(FileName));
         OnPropertyChanged(nameof(Folder));
@@ -768,19 +851,44 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(VideoFileNamesDisplay));
         OnPropertyChanged(nameof(SubtitlePathsDisplay));
         OnPropertyChanged(nameof(SubtitlePathDisplay));
-        OnPropertyChanged(nameof(PlanDescription));
-        OnPropertyChanged(nameof(IsValid));
         OnPropertyChanged(nameof(Details));
         OnPropertyChanged(nameof(OutputPathDisplay));
-        OnPropertyChanged(nameof(IssuesText));
         RefreshPresentation(settings);
+    }
+
+    private void RefreshPlan(AppSettings settings, bool resetState)
+    {
+        if (_maintenanceMode)
+        {
+            RefreshMaintenancePlan(settings);
+            return;
+        }
+
+        _plan = ConversionPlanFactory.Create(_media);
+        if (resetState || State is JobState.Ready or JobState.Invalid or JobState.Failed or JobState.Skipped)
+        {
+            State = _plan.IsValid ? JobState.Ready : JobState.Invalid;
+        }
+
+        OnPropertyChanged(nameof(Plan));
+        OnPropertyChanged(nameof(PlanDescription));
+        OnPropertyChanged(nameof(IsValid));
+        OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(Details));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(StatusForeground));
+        OnPropertyChanged(nameof(StatusBackground));
     }
 
     public void RefreshPresentation(AppSettings settings)
     {
         _plannedOutputFile = _media.VideoPath is null
             ? "—"
-            : OutputFileNaming.Create(_media.VideoPath, settings.OutputPrefix);
+            : _maintenanceMode
+                ? settings.MaintenanceReplaceOriginal
+                    ? Path.GetFileName(_media.VideoPath)
+                    : $"{settings.MaintenanceOutputPrefix}{Path.GetFileName(_media.VideoPath)}"
+                : OutputFileNaming.Create(_media.VideoPath, settings.OutputPrefix);
         OnPropertyChanged(nameof(OutputFile));
         OnPropertyChanged(nameof(Details));
         OnPropertyChanged(nameof(OutputPathDisplay));

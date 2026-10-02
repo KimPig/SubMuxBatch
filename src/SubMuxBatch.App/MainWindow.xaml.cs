@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -62,6 +63,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _queueUserScrollInputActive;
     private bool _queueScrollBarPointerDown;
     private bool _queueColumnWidthsDirty;
+    private bool _maintenanceMode;
+    private bool _openMaintenanceSettingsRequested;
     private ScrollViewer? _queueScrollViewer;
     private bool _queueEndSpacerVisible;
     private readonly QueueEndSpacerViewModel _queueEndSpacer = new();
@@ -88,6 +91,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         int Warnings,
         int Failed,
         int Skipped);
+
+    private sealed class WindowsNaturalStringComparer : IComparer<string>
+    {
+        public static WindowsNaturalStringComparer Instance { get; } = new();
+
+        public int Compare(string? x, string? y) =>
+            StrCmpLogicalW(x ?? string.Empty, y ?? string.Empty);
+
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int StrCmpLogicalW(string left, string right);
+    }
 
     private bool IsInteractionLocked => _isBusy || _isScanning;
 
@@ -295,12 +309,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var dialog = new OpenFileDialog
         {
-            Title = AppText.Get("Dialog_AddFilesTitle"),
-            Filter = AppText.Get(
-                "Dialog_FileFilter",
-                MediaInputFormats.SupportedDialogPattern,
-                MediaInputFormats.VideoDialogPattern,
-                MediaInputFormats.SubtitleDialogPattern),
+            Title = AppText.Get(_maintenanceMode ? "Dialog_AddMaintenanceFilesTitle" : "Dialog_AddFilesTitle"),
+            Filter = _maintenanceMode
+                ? "MKV (*.mkv)|*.mkv"
+                : AppText.Get(
+                    "Dialog_FileFilter",
+                    MediaInputFormats.SupportedDialogPattern,
+                    MediaInputFormats.VideoDialogPattern,
+                    MediaInputFormats.SubtitleDialogPattern),
             Multiselect = true,
             CheckFileExists = true
         };
@@ -309,6 +325,60 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await AddPathsAsync(dialog.FileNames);
         }
+    }
+
+    private void ProcessingMode_Checked(object sender, RoutedEventArgs e)
+    {
+        if (NormalModeRadioButton is null || MaintenanceModeRadioButton is null)
+        {
+            return;
+        }
+
+        var requestedMaintenance = MaintenanceModeRadioButton.IsChecked == true;
+        if (requestedMaintenance == _maintenanceMode)
+        {
+            return;
+        }
+
+        _maintenanceMode = requestedMaintenance;
+        if (!IsInitialized)
+        {
+            return;
+        }
+        if (QueueHelpText is not null)
+        {
+            QueueHelpText.Text = AppText.Get(_maintenanceMode ? "Main_MaintenanceQueueHelp" : "Main_QueueHelp");
+        }
+        if (EmptyDropPromptText is not null)
+        {
+            EmptyDropPromptText.Text = AppText.Get(
+                _maintenanceMode ? "Main_MaintenanceDropPrompt" : "Main_DropPrompt");
+        }
+        if (StartButton is not null)
+        {
+            StartButton.Content = AppText.Get(_maintenanceMode ? "Main_StartMaintenance" : "Main_StartAllReady");
+        }
+        if (MaintenanceSettingsButton is not null)
+        {
+            MaintenanceSettingsButton.Visibility = _maintenanceMode
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        foreach (var job in Jobs)
+        {
+            job.SetProcessingMode(_maintenanceMode, _settings);
+        }
+        if (Jobs.Count > 0)
+        {
+            OverallStatusText.Text = AppText.Get("Main_JobCount", Jobs.Count, Jobs.Count(static job => job.IsValid));
+        }
+        UpdateControls();
+    }
+
+    private void MaintenanceSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        _openMaintenanceSettingsRequested = true;
+        SettingsButton_Click(sender, e);
     }
 
     private async void AddFolderButton_Click(object sender, RoutedEventArgs e)
@@ -360,13 +430,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 JobsList.SelectedItem = null;
             }
 
-            foreach (var media in discovered)
+            foreach (var media in discovered.Where(media => !_maintenanceMode
+                         || string.Equals(Path.GetExtension(media.VideoPath), ".mkv", StringComparison.OrdinalIgnoreCase)))
             {
                 var existing = Jobs.FirstOrDefault(job =>
                     string.Equals(job.Key, media.Key.Canonical, StringComparison.OrdinalIgnoreCase));
                 if (existing is null)
                 {
-                    Jobs.Add(new QueueItemViewModel(media, _settings));
+                    Jobs.Add(new QueueItemViewModel(media, _settings, _maintenanceMode));
                 }
                 else
                 {
@@ -497,6 +568,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     await Dispatcher.InvokeAsync(() =>
                     {
                         target.SetMediaInspections(mkvInspection, displayInspection);
+                        target.RefreshMaintenancePlan(_settings);
                         foreach (var error in errors)
                         {
                             AppendJobLog(target, AppText.Get("Log_MediaInspectionPartial", error));
@@ -727,9 +799,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _ => throw new ArgumentOutOfRangeException(nameof(propertyName), propertyName, null)
         };
 
+        IComparer<string> comparer = string.Equals(propertyName, nameof(QueueItemViewModel.Name), StringComparison.Ordinal)
+            ? WindowsNaturalStringComparer.Instance
+            : StringComparer.CurrentCultureIgnoreCase;
         return direction == ListSortDirection.Ascending
-            ? Jobs.OrderBy(keySelector, StringComparer.CurrentCultureIgnoreCase)
-            : Jobs.OrderByDescending(keySelector, StringComparer.CurrentCultureIgnoreCase);
+            ? Jobs.OrderBy(keySelector, comparer)
+            : Jobs.OrderByDescending(keySelector, comparer);
     }
 
     private void ApplyQueueOrder(IReadOnlyList<QueueItemViewModel> ordered)
@@ -1554,7 +1629,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var dialog = new SettingsWindow(_settings.Copy(), _dependencies)
+        var openMaintenanceTab = _openMaintenanceSettingsRequested;
+        _openMaintenanceSettingsRequested = false;
+        var dialog = new SettingsWindow(_settings.Copy(), _dependencies, openMaintenanceTab)
         {
             Owner = this,
             UpdateCheckRequested = owner => CheckForUpdatesAsync(owner, showResult: true)
@@ -1568,6 +1645,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             foreach (var job in Jobs)
             {
                 job.RefreshPresentation(_settings);
+                job.RefreshMaintenancePlan(_settings);
             }
 
             AppendLog(AppText.Get("Log_SettingsSaved"));
@@ -1775,14 +1853,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             try
             {
-                var processor = new BatchProcessor(new ExternalProcessRunner());
-                var result = await processor.ProcessAsync(
-                    target.Media,
-                    target.Plan,
-                    batchSettings,
-                    batchDependencies,
-                    progress,
-                    processingCancellation.Token);
+                JobResult result;
+                if (_maintenanceMode)
+                {
+                    var processor = new MaintenanceProcessor(new ExternalProcessRunner());
+                    result = await processor.ProcessAsync(
+                        target.Media.VideoPath!,
+                        batchSettings,
+                        batchDependencies,
+                        progress,
+                        processingCancellation.Token);
+                }
+                else
+                {
+                    var processor = new BatchProcessor(new ExternalProcessRunner());
+                    result = await processor.ProcessAsync(
+                        target.Media,
+                        target.Plan,
+                        batchSettings,
+                        batchDependencies,
+                        progress,
+                        processingCancellation.Token);
+                }
 
                 terminal[index] = true;
                 target.State = result.State;
@@ -2228,6 +2320,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                      or JobState.ConvertingAssToSrt
                      or JobState.ConvertingSmiToSrt
                      or JobState.ConvertingSrtToAss
+                     or JobState.UpdatingAssStyle
+                     or JobState.ConvertingAudio
                      or JobState.Verifying))
         {
             item.State = JobState.Cancelling;
@@ -2323,6 +2417,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AddFilesButton.IsEnabled = !locked;
         AddFolderButton.IsEnabled = !locked;
         SettingsButton.IsEnabled = !locked;
+        NormalModeRadioButton.IsEnabled = !locked;
+        MaintenanceModeRadioButton.IsEnabled = !locked;
+        MaintenanceSettingsButton.IsEnabled = !locked;
         RemoveButton.IsEnabled = !locked && JobsList.SelectedItems.Count > 0;
         ClearButton.IsEnabled = !locked && Jobs.Count > 0;
         CancelButton.IsEnabled = _isBusy && _processingCancellation?.IsCancellationRequested == false;

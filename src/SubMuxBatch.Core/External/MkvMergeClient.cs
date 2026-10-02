@@ -22,7 +22,12 @@ public sealed record MkvTrackInfo(
     long? DefaultDurationNanoseconds = null,
     int? AudioChannels = null,
     double? AudioSamplingFrequency = null,
-    long? Bitrate = null);
+    long? Bitrate = null,
+    bool HearingImpaired = false,
+    bool VisualImpaired = false,
+    bool TextDescriptions = false,
+    bool OriginalLanguage = false,
+    bool Commentary = false);
 
 public sealed record MkvAttachmentInfo(
     string? FileName,
@@ -138,7 +143,8 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         AudioTrackLanguage? keepOnlyAudioLanguage = null,
         IReadOnlyList<FontAttachmentFile>? fontAttachments = null,
         string? globalTagsPath = null,
-        bool cleanOutputMetadata = false)
+        bool cleanOutputMetadata = false,
+        AudioMuxPlan? audioMuxPlan = null)
     {
         var arguments = new List<string>
         {
@@ -169,7 +175,9 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         MkvInspection? sourceInspection = null;
         if (!removeExistingSubtitles
             || removeExistingFontAttachments
-            || keepOnlyAudioLanguage.HasValue)
+            || keepOnlyAudioLanguage.HasValue
+            || cleanOutputMetadata
+            || audioMuxPlan is not null)
         {
             sourceInspection = await InspectAsync(sourceVideo, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -233,16 +241,40 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             }
         }
 
-        if (keepOnlyAudioLanguage is { } audioLanguage && sourceInspection is not null)
+        MkvTrackInfo[] retainedAudioTracks = sourceInspection is null
+            ? []
+            : audioMuxPlan is null
+                ? GetRetainedAudioTracks(sourceInspection, keepOnlyAudioLanguage)
+                : sourceInspection.Tracks
+                    .Where(track => IsTrackType(track, "audio")
+                                    && track.Id.HasValue
+                                    && audioMuxPlan.RetainedSourceTrackIds.Contains(track.Id.Value))
+                    .ToArray();
+        if (audioMuxPlan is not null && sourceInspection is not null)
+        {
+            if (audioMuxPlan.RetainedSourceTrackIds.Count == 0)
+            {
+                arguments.Add("--no-audio");
+            }
+            else
+            {
+                arguments.Add("--audio-tracks");
+                arguments.Add(string.Join(",", audioMuxPlan.RetainedSourceTrackIds.Order()));
+            }
+
+            foreach (var (trackId, isDefault) in audioMuxPlan.SourceDefaultTrackOverrides.OrderBy(static pair => pair.Key))
+            {
+                arguments.Add("--default-track-flag");
+                arguments.Add($"{trackId}:{(isDefault ? "yes" : "no")}");
+            }
+        }
+        else if (keepOnlyAudioLanguage is { } audioLanguage && sourceInspection is not null)
         {
             var sourceAudioTracks = sourceInspection.Tracks
                 .Where(static track => IsTrackType(track, "audio"))
                 .ToArray();
             if (sourceAudioTracks.Length > 1)
             {
-                var retainedAudioTracks = sourceAudioTracks
-                    .Where(track => MatchesAudioLanguage(track, audioLanguage))
-                    .ToArray();
                 if (retainedAudioTracks.Length == 0)
                 {
                     throw new JobSkippedException(
@@ -265,7 +297,33 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             }
         }
 
+        var outputAudioTrackCount = retainedAudioTracks.Length + (audioMuxPlan?.GeneratedTracks.Count ?? 0);
+        if (cleanOutputMetadata && sourceInspection is not null)
+        {
+            foreach (var videoTrack in sourceInspection.Tracks.Where(static track => IsTrackType(track, "video")))
+            {
+                AddClearedTrackName(arguments, videoTrack);
+            }
+
+            // A single retained audio track needs no free-form label: its language,
+            // codec and channel layout remain as structured track metadata.
+            // Preserve names when multiple audio tracks remain so labels such as
+            // commentary or dubbed audio can still distinguish them.
+            if (outputAudioTrackCount == 1 && retainedAudioTracks.Length == 1)
+            {
+                AddClearedTrackName(arguments, retainedAudioTracks[0]);
+            }
+        }
+
         arguments.Add(sourceVideo);
+
+        foreach (var generatedAudioTrack in audioMuxPlan?.GeneratedTracks ?? [])
+        {
+            AddGeneratedAudio(
+                arguments,
+                generatedAudioTrack,
+                cleanOutputMetadata && outputAudioTrackCount == 1);
+        }
 
         AddSubtitle(
             arguments,
@@ -320,6 +378,134 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             warnings,
             result.StandardOutput,
             result.StandardError);
+    }
+
+    public async Task<MuxResult> MaintainAsync(
+        string sourceVideo,
+        string outputPath,
+        string? replacementAssPath,
+        MkvTrackInfo? replacementAssTrack,
+        IReadOnlyList<FontAttachmentFile>? fontAttachments,
+        bool removeExistingFontAttachments,
+        string? globalTagsPath,
+        AudioMuxPlan? audioMuxPlan,
+        Action<int>? onProgress = null,
+        Action<string>? onOutput = null,
+        CancellationToken cancellationToken = default)
+    {
+        var inspection = await InspectAsync(sourceVideo, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        var arguments = new List<string>
+        {
+            "--gui-mode", "--ui-language", GetUiLanguageCode(), "-o", outputPath
+        };
+
+        if (!string.IsNullOrWhiteSpace(globalTagsPath))
+        {
+            arguments.Add("--no-global-tags");
+            arguments.Add("--global-tags");
+            arguments.Add(globalTagsPath);
+        }
+
+        if (replacementAssTrack?.Id is { } replacementId)
+        {
+            var retainedSubtitleIds = inspection.Tracks
+                .Where(static track => IsTrackType(track, "subtitles"))
+                .Where(track => track.Id != replacementId)
+                .Select(track => track.Id ?? throw new InvalidOperationException(CoreText.Get("Mkv_SubtitleTrackIdMissing")))
+                .ToArray();
+            if (retainedSubtitleIds.Length == 0)
+            {
+                arguments.Add("--no-subtitles");
+            }
+            else
+            {
+                arguments.Add("--subtitle-tracks");
+                arguments.Add(string.Join(",", retainedSubtitleIds));
+            }
+        }
+
+        if (removeExistingFontAttachments && inspection.Attachments.Any(IsFontAttachment))
+        {
+            var retainedAttachmentIds = inspection.Attachments
+                .Where(static attachment => !IsFontAttachment(attachment))
+                .Select(static attachment => attachment.Id
+                    ?? throw new InvalidOperationException(CoreText.Get("Mkv_NonFontAttachmentIdMissing")))
+                .ToArray();
+            if (retainedAttachmentIds.Length == 0)
+            {
+                arguments.Add("--no-attachments");
+            }
+            else
+            {
+                arguments.Add("--attachments");
+                arguments.Add(string.Join(",", retainedAttachmentIds));
+            }
+        }
+
+        if (audioMuxPlan is not null)
+        {
+            if (audioMuxPlan.RetainedSourceTrackIds.Count == 0)
+            {
+                arguments.Add("--no-audio");
+            }
+            else
+            {
+                arguments.Add("--audio-tracks");
+                arguments.Add(string.Join(",", audioMuxPlan.RetainedSourceTrackIds.Order()));
+            }
+            foreach (var (trackId, isDefault) in audioMuxPlan.SourceDefaultTrackOverrides.OrderBy(static pair => pair.Key))
+            {
+                arguments.Add("--default-track-flag");
+                arguments.Add($"{trackId}:{(isDefault ? "yes" : "no")}");
+            }
+        }
+
+        arguments.Add(sourceVideo);
+        foreach (var generatedAudioTrack in audioMuxPlan?.GeneratedTracks ?? [])
+        {
+            AddGeneratedAudio(arguments, generatedAudioTrack, clearTrackName: false);
+        }
+
+        if (replacementAssPath is not null && replacementAssTrack is not null)
+        {
+            arguments.Add("--language");
+            arguments.Add($"0:{replacementAssTrack.LanguageIetf ?? replacementAssTrack.Language ?? "und"}");
+            arguments.Add("--track-name");
+            arguments.Add($"0:{replacementAssTrack.TrackName ?? CoreText.Get("Mkv_AssTrackName")}");
+            arguments.Add("--default-track-flag");
+            arguments.Add($"0:{(replacementAssTrack.DefaultTrack ? "yes" : "no")}");
+            arguments.Add("--forced-display-flag");
+            arguments.Add($"0:{(replacementAssTrack.ForcedTrack ? "yes" : "no")}");
+            arguments.Add(replacementAssPath);
+        }
+
+        foreach (var attachment in fontAttachments ?? [])
+        {
+            AddFontAttachment(arguments, attachment);
+        }
+
+        void HandleOutput(string line)
+        {
+            onOutput?.Invoke(line);
+            var match = ProgressPattern.Match(line);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var percent))
+            {
+                onProgress?.Invoke(Math.Clamp(percent, 0, 100));
+            }
+        }
+
+        var result = await processRunner.RunAsync(
+            new ProcessRequest(executablePath, arguments, Path.GetDirectoryName(outputPath)),
+            HandleOutput,
+            cancellationToken).ConfigureAwait(false);
+        var warnings = ExtractWarnings(result);
+        if (result.ExitCode >= 2 || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        {
+            var details = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+            throw new InvalidOperationException(CoreText.Get("Mkv_MuxFailed", result.ExitCode, details.Trim()));
+        }
+        return new MuxResult(warnings, result.StandardOutput, result.StandardError);
     }
 
     private static IReadOnlyList<string> ExtractWarnings(ProcessResult result)
@@ -437,17 +623,29 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         bool removeChapters = false,
         AudioTrackLanguage? keepOnlyAudioLanguage = null,
         IReadOnlyList<FontAttachmentFile>? addedFontAttachments = null,
-        bool cleanOutputMetadata = false)
+        bool cleanOutputMetadata = false,
+        AudioMuxPlan? audioMuxPlan = null)
     {
         var errors = new List<string>();
         var sourceAudioTracks = source.Tracks.Where(static track => IsTrackType(track, "audio")).ToArray();
-        var audioFilterApplies = keepOnlyAudioLanguage.HasValue && sourceAudioTracks.Length > 1;
+        var audioFilterApplies = audioMuxPlan is null
+                                 && keepOnlyAudioLanguage.HasValue
+                                 && sourceAudioTracks.Length > 1;
         var sourceMediaTracks = source.Tracks
             .Where(track => !IsTrackType(track, "subtitles")
-                            && (!audioFilterApplies
-                                || !IsTrackType(track, "audio")
-                                || MatchesAudioLanguage(track, keepOnlyAudioLanguage!.Value)))
+                            && (audioMuxPlan is not null
+                                ? !IsTrackType(track, "audio")
+                                  || (track.Id.HasValue
+                                      && audioMuxPlan.RetainedSourceTrackIds.Contains(track.Id.Value))
+                                : !audioFilterApplies
+                                  || !IsTrackType(track, "audio")
+                                  || MatchesAudioLanguage(track, keepOnlyAudioLanguage!.Value)))
             .ToArray();
+        var retainedSourceAudioTracks = sourceMediaTracks
+            .Where(static track => IsTrackType(track, "audio"))
+            .ToArray();
+        var expectedOutputAudioTrackCount = retainedSourceAudioTracks.Length
+                                            + (audioMuxPlan?.GeneratedTracks.Count ?? 0);
         var outputMediaTracks = output.Tracks
             .Where(static track => !IsTrackType(track, "subtitles"))
             .ToArray();
@@ -457,7 +655,8 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
             errors.Add(CoreText.Get("Mkv_ValidationAudioMissing", GetAudioLanguageDisplayName(keepOnlyAudioLanguage!.Value)));
         }
 
-        if (sourceMediaTracks.Length != outputMediaTracks.Length)
+        var expectedMediaTrackCount = sourceMediaTracks.Length + (audioMuxPlan?.GeneratedTracks.Count ?? 0);
+        if (expectedMediaTrackCount != outputMediaTracks.Length)
         {
             errors.Add(CoreText.Get("Mkv_ValidationMediaTrackCount"));
         }
@@ -465,41 +664,99 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         {
             for (var index = 0; index < sourceMediaTracks.Length; index++)
             {
-                if (!string.Equals(sourceMediaTracks[index].Type, outputMediaTracks[index].Type, StringComparison.OrdinalIgnoreCase)
-                    || !CodecMetadataEquals(sourceMediaTracks[index], outputMediaTracks[index]))
+                var sourceTrack = sourceMediaTracks[index];
+                var outputTrack = outputMediaTracks[index];
+                if (!string.Equals(sourceTrack.Type, outputTrack.Type, StringComparison.OrdinalIgnoreCase)
+                    || !CodecMetadataEquals(sourceTrack, outputTrack))
                 {
                     errors.Add(CoreText.Get("Mkv_ValidationMediaTrackMismatch", index + 1));
+                    continue;
                 }
-                else if (audioFilterApplies
-                         && IsTrackType(sourceMediaTracks[index], "audio")
-                         && !MatchesAudioLanguage(outputMediaTracks[index], keepOnlyAudioLanguage!.Value))
+
+                if (audioFilterApplies
+                    && IsTrackType(sourceTrack, "audio")
+                    && !MatchesAudioLanguage(outputTrack, keepOnlyAudioLanguage!.Value))
                 {
                     errors.Add(
                         CoreText.Get("Mkv_ValidationWrongAudio", index + 1, GetAudioLanguageDisplayName(keepOnlyAudioLanguage.Value)));
                 }
-                else if (audioFilterApplies
-                         && IsTrackType(sourceMediaTracks[index], "audio")
-                         && (!LanguageMetadataPreserved(
-                                 sourceMediaTracks[index],
-                                 outputMediaTracks[index])
-                             || (!cleanOutputMetadata
-                                 && !string.Equals(
-                                     sourceMediaTracks[index].TrackName,
-                                     outputMediaTracks[index].TrackName,
-                                     StringComparison.Ordinal))
-                             || sourceMediaTracks[index].ForcedTrack != outputMediaTracks[index].ForcedTrack))
+
+                if (IsTrackType(sourceTrack, "audio"))
                 {
-                    errors.Add(
-                        CoreText.Get("Mkv_ValidationAudioMetadata", index + 1));
+                    if (!LanguageMetadataPreserved(sourceTrack, outputTrack)
+                        || sourceTrack.ForcedTrack != outputTrack.ForcedTrack
+                        || !AudioFlagsPreserved(sourceTrack, outputTrack)
+                        || !AudioTechnicalMetadataPreserved(sourceTrack, outputTrack))
+                    {
+                        errors.Add(CoreText.Get("Mkv_ValidationAudioMetadata", index + 1));
+                    }
+
+                    if (audioMuxPlan is not null)
+                    {
+                        var expectedDefault = sourceTrack.Id.HasValue
+                                              && audioMuxPlan.SourceDefaultTrackOverrides.TryGetValue(
+                                                  sourceTrack.Id.Value,
+                                                  out var overriddenDefault)
+                            ? overriddenDefault
+                            : sourceTrack.DefaultTrack;
+                        if (outputTrack.DefaultTrack != expectedDefault)
+                        {
+                            errors.Add(CoreText.Get("Mkv_ValidationAudioDefault", index + 1));
+                        }
+                    }
                 }
 
-                if (cleanOutputMetadata
-                    && !string.Equals(
-                        sourceMediaTracks[index].TrackName,
-                        outputMediaTracks[index].TrackName,
-                        StringComparison.Ordinal))
+                var shouldClearTrackName = cleanOutputMetadata
+                                           && (IsTrackType(sourceTrack, "video")
+                                               || (IsTrackType(sourceTrack, "audio")
+                                                   && expectedOutputAudioTrackCount == 1));
+                if (shouldClearTrackName)
+                {
+                    if (!string.IsNullOrWhiteSpace(outputTrack.TrackName))
+                    {
+                        errors.Add(CoreText.Get("Mkv_ValidationMediaTrackNameNotRemoved", index + 1));
+                    }
+                }
+                else if (!string.Equals(sourceTrack.TrackName, outputTrack.TrackName, StringComparison.Ordinal))
                 {
                     errors.Add(CoreText.Get("Mkv_ValidationMediaTrackNameNotPreserved", index + 1));
+                }
+            }
+
+            if (audioMuxPlan is not null)
+            {
+                for (var index = 0; index < audioMuxPlan.GeneratedTracks.Count; index++)
+                {
+                    var expected = audioMuxPlan.GeneratedTracks[index];
+                    var outputTrack = outputMediaTracks[sourceMediaTracks.Length + index];
+                    var displayIndex = sourceMediaTracks.Length + index + 1;
+                    if (!IsTrackType(outputTrack, "audio")
+                        || !outputTrack.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(CoreText.Get("Mkv_ValidationGeneratedAudioCodec", displayIndex));
+                        continue;
+                    }
+
+                    if (!LanguageMetadataPreserved(expected.SourceTrack, outputTrack)
+                        || outputTrack.ForcedTrack != expected.ForcedTrack
+                        || !AudioFlagsPreserved(expected.SourceTrack, outputTrack)
+                        || outputTrack.DefaultTrack != expected.DefaultTrack
+                        || (expected.OutputChannels.HasValue
+                            && outputTrack.AudioChannels != expected.OutputChannels))
+                    {
+                        errors.Add(CoreText.Get("Mkv_ValidationGeneratedAudioMetadata", displayIndex));
+                    }
+
+                    var expectedName = cleanOutputMetadata && expectedOutputAudioTrackCount == 1
+                        ? null
+                        : expected.TrackName;
+                    if (!string.Equals(
+                            expectedName ?? string.Empty,
+                            outputTrack.TrackName ?? string.Empty,
+                            StringComparison.Ordinal))
+                    {
+                        errors.Add(CoreText.Get("Mkv_ValidationMediaTrackNameNotPreserved", displayIndex));
+                    }
                 }
             }
         }
@@ -642,6 +899,34 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         }
     }
 
+    private static MkvTrackInfo[] GetRetainedAudioTracks(
+        MkvInspection source,
+        AudioTrackLanguage? keepOnlyAudioLanguage)
+    {
+        var sourceAudioTracks = source.Tracks
+            .Where(static track => IsTrackType(track, "audio"))
+            .ToArray();
+        if (keepOnlyAudioLanguage is not { } audioLanguage || sourceAudioTracks.Length <= 1)
+        {
+            return sourceAudioTracks;
+        }
+
+        return sourceAudioTracks
+            .Where(track => MatchesAudioLanguage(track, audioLanguage))
+            .ToArray();
+    }
+
+    private static void AddClearedTrackName(List<string> arguments, MkvTrackInfo track)
+    {
+        if (track.Id is null)
+        {
+            throw new InvalidOperationException(CoreText.Get("Mkv_TrackNameCleanupIdMissing"));
+        }
+
+        arguments.Add("--track-name");
+        arguments.Add($"{track.Id}:");
+    }
+
     private static void AddSubtitle(List<string> arguments, string path, string trackName, bool isDefault)
     {
         arguments.Add("--language");
@@ -661,6 +946,48 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
         }
 
         arguments.Add(path);
+    }
+
+    private static void AddGeneratedAudio(
+        List<string> arguments,
+        GeneratedAudioTrack track,
+        bool clearTrackName)
+    {
+        if (!File.Exists(track.FilePath))
+        {
+            throw new FileNotFoundException(CoreText.Get("Mkv_GeneratedAudioMissing"), track.FilePath);
+        }
+
+        var language = !IsUndeterminedLanguage(track.SourceTrack.LanguageIetf)
+            ? track.SourceTrack.LanguageIetf
+            : track.SourceTrack.Language;
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            arguments.Add("--language");
+            arguments.Add($"0:{language}");
+        }
+        arguments.Add("--track-name");
+        arguments.Add($"0:{(clearTrackName ? string.Empty : track.TrackName ?? string.Empty)}");
+        arguments.Add("--default-track-flag");
+        arguments.Add($"0:{(track.DefaultTrack ? "yes" : "no")}");
+        arguments.Add("--forced-display-flag");
+        arguments.Add($"0:{(track.ForcedTrack ? "yes" : "no")}");
+        AddTrackFlag(arguments, "--hearing-impaired-flag", track.SourceTrack.HearingImpaired);
+        AddTrackFlag(arguments, "--visual-impaired-flag", track.SourceTrack.VisualImpaired);
+        AddTrackFlag(arguments, "--text-descriptions-flag", track.SourceTrack.TextDescriptions);
+        AddTrackFlag(arguments, "--original-flag", track.SourceTrack.OriginalLanguage);
+        AddTrackFlag(arguments, "--commentary-flag", track.SourceTrack.Commentary);
+        // The temporary MKA is an implementation detail. Do not copy FFmpeg's
+        // encoder/global tags into the final MKV, regardless of metadata cleanup.
+        arguments.Add("--no-global-tags");
+        arguments.Add("--no-track-tags");
+        arguments.Add(track.FilePath);
+    }
+
+    private static void AddTrackFlag(List<string> arguments, string option, bool value)
+    {
+        arguments.Add(option);
+        arguments.Add($"0:{(value ? "yes" : "no")}");
     }
 
     private static void AddFontAttachment(List<string> arguments, FontAttachmentFile attachment)
@@ -740,6 +1067,19 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
     private static bool LanguageMetadataPreserved(MkvTrackInfo source, MkvTrackInfo output) =>
         LanguageFieldPreserved(source.Language, output.Language)
         && LanguageFieldPreserved(source.LanguageIetf, output.LanguageIetf);
+
+    private static bool AudioTechnicalMetadataPreserved(MkvTrackInfo source, MkvTrackInfo output) =>
+        (!source.AudioChannels.HasValue || source.AudioChannels == output.AudioChannels)
+        && (!source.AudioSamplingFrequency.HasValue
+            || (output.AudioSamplingFrequency.HasValue
+                && Math.Abs(source.AudioSamplingFrequency.Value - output.AudioSamplingFrequency.Value) < 0.01));
+
+    private static bool AudioFlagsPreserved(MkvTrackInfo source, MkvTrackInfo output) =>
+        source.HearingImpaired == output.HearingImpaired
+        && source.VisualImpaired == output.VisualImpaired
+        && source.TextDescriptions == output.TextDescriptions
+        && source.OriginalLanguage == output.OriginalLanguage
+        && source.Commentary == output.Commentary;
 
     private static bool LanguageFieldPreserved(string? source, string? output) =>
         IsUndeterminedLanguage(source)
@@ -869,7 +1209,12 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                         GetInt64(properties, "default_duration"),
                         GetInt32(properties, "audio_channels"),
                         GetDouble(properties, "audio_sampling_frequency"),
-                        GetFlexibleInt64(properties, "tag_bps")));
+                        GetFlexibleInt64(properties, "tag_bps"),
+                        GetBoolean(properties, "hearing_impaired"),
+                        GetBoolean(properties, "visual_impaired"),
+                        GetBoolean(properties, "text_descriptions"),
+                        GetBoolean(properties, "original"),
+                        GetBoolean(properties, "commentary")));
                 }
             }
 

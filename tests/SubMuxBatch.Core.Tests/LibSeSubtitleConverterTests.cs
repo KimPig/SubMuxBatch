@@ -132,7 +132,7 @@ public sealed class LibSeSubtitleConverterTests : IDisposable
                 PlayResX = 1920,
                 PlayResY = 1080,
                 AssStyleLine = AppSettings.DefaultAssStyleLine.Replace(
-                    "맑은 고딕",
+                    "SubMux Sans",
                     "Test Family",
                     StringComparison.Ordinal)
             }));

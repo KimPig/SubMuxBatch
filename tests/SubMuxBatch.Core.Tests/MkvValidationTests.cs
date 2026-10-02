@@ -520,14 +520,16 @@ public sealed class MkvValidationTests
             Assert.DoesNotContain("--disable-track-statistics-tags", arguments);
             Assert.Contains("--no-global-tags", arguments);
             Assert.Contains("--no-track-tags", arguments);
-            Assert.DoesNotContain("0:", arguments);
-            Assert.DoesNotContain("1:", arguments);
-            Assert.Equal(2, arguments.Count(static argument => argument == "--track-name"));
+            Assert.Contains("0:", arguments);
+            Assert.Contains("1:", arguments);
+            Assert.Equal(4, arguments.Count(static argument => argument == "--track-name"));
             Assert.Contains($"0:{CoreText.Get("Mkv_AssTrackName")}", arguments);
             Assert.Contains($"0:{CoreText.Get("Mkv_SrtTrackName")}", arguments);
             Assert.True(arguments.IndexOf("--no-global-tags") < arguments.IndexOf(source));
             Assert.True(arguments.IndexOf("--no-track-tags") < arguments.IndexOf(source));
             Assert.True(arguments.IndexOf("--global-tags") < arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf("0:") < arguments.IndexOf(source));
+            Assert.True(arguments.IndexOf("1:") < arguments.IndexOf(source));
             Assert.True(arguments.IndexOf($"0:{CoreText.Get("Mkv_AssTrackName")}") > arguments.IndexOf(source));
             Assert.True(arguments.IndexOf($"0:{CoreText.Get("Mkv_SrtTrackName")}") > arguments.IndexOf(source));
         }
@@ -538,25 +540,78 @@ public sealed class MkvValidationTests
     }
 
     [Fact]
-    public void MetadataCleanupValidationRequiresExistingAndNewTrackNamesToRemain()
+    public async Task MetadataCleanupKeepsTrackNamesForMultipleRetainedAudioTracks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-clean-multi-audio-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var ass = Path.Combine(root, "new.ass");
+            var srt = Path.Combine(root, "new.srt");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            await File.WriteAllTextAsync(ass, "[V4+ Styles]\nStyle: Default,Family,40\n[Events]");
+            await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nx\n");
+
+            const string inspection = """
+                {"tracks":[
+                  {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC","track_name":"Release details"}},
+                  {"id":1,"type":"audio","properties":{"codec_id":"A_OPUS","track_name":"Main audio"}},
+                  {"id":2,"type":"audio","properties":{"codec_id":"A_OPUS","track_name":"Commentary"}}
+                ],"attachments":[],"chapters":[]}
+                """;
+            var runner = new MuxArgumentRunner(output, inspection);
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+                source,
+                ass,
+                srt,
+                output,
+                cleanOutputMetadata: true);
+
+            var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+            Assert.Contains("0:", arguments);
+            Assert.DoesNotContain("1:", arguments);
+            Assert.DoesNotContain("2:", arguments);
+            Assert.Equal(3, arguments.Count(static argument => argument == "--track-name"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void MetadataCleanupValidationRequiresExpectedSourceNamesRemovedAndNewNamesRetained()
     {
         var source = new MkvInspection(
-            [Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video")],
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video", id: 0),
+                new MkvTrackInfo(
+                    "audio", "A_OPUS", true, false, "jpn", "ja", "Main audio", 1,
+                    AudioChannels: 2, AudioSamplingFrequency: 48000)
+            ],
             [],
             0);
         var cleanOutput = new MkvInspection(
             [
-                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video"),
+                Track("video", "V_MPEGH/ISO/HEVC", id: 0),
+                new MkvTrackInfo(
+                    "audio", "A_OPUS", true, false, "jpn", "ja", null, 1,
+                    AudioChannels: 2, AudioSamplingFrequency: 48000),
                 Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
                 Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
             ],
             [],
             0);
-        var renamedOutput = cleanOutput with
+        var namedSourceOutput = cleanOutput with
         {
             Tracks =
             [
-                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Changed video"),
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video", id: 0),
+                new MkvTrackInfo(
+                    "audio", "A_OPUS", true, false, "jpn", "ja", "Main audio", 1,
+                    AudioChannels: 2, AudioSamplingFrequency: 48000),
                 Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
                 Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
             ]
@@ -565,9 +620,24 @@ public sealed class MkvValidationTests
         {
             Tracks =
             [
-                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Source video"),
+                Track("video", "V_MPEGH/ISO/HEVC", id: 0),
+                new MkvTrackInfo(
+                    "audio", "A_OPUS", true, false, "jpn", "ja", null, 1,
+                    AudioChannels: 2, AudioSamplingFrequency: 48000),
                 Track("subtitles", "S_TEXT/ASS", true, false, "kor"),
                 Track("subtitles", "S_TEXT/UTF8", false, false, "kor")
+            ]
+        };
+        var changedAudioMetadataOutput = cleanOutput with
+        {
+            Tracks =
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", id: 0),
+                new MkvTrackInfo(
+                    "audio", "A_OPUS", true, false, "eng", "en", null, 1,
+                    AudioChannels: 6, AudioSamplingFrequency: 48000),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
             ]
         };
 
@@ -575,14 +645,50 @@ public sealed class MkvValidationTests
             source,
             cleanOutput,
             cleanOutputMetadata: true));
-        Assert.Single(MkvMergeClient.ValidateOutput(
+        Assert.Equal(2, MkvMergeClient.ValidateOutput(
             source,
-            renamedOutput,
-            cleanOutputMetadata: true));
+            namedSourceOutput,
+            cleanOutputMetadata: true).Count);
         Assert.Equal(2, MkvMergeClient.ValidateOutput(
             source,
             unnamedSubMuxOutput,
             cleanOutputMetadata: true).Count);
+        Assert.Single(MkvMergeClient.ValidateOutput(
+            source,
+            changedAudioMetadataOutput,
+            cleanOutputMetadata: true));
+    }
+
+    [Fact]
+    public void MetadataCleanupPreservesNamesWhenMultipleAudioTracksRemain()
+    {
+        var source = new MkvInspection(
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", trackName: "Release details"),
+                Track("audio", "A_OPUS", true, false, "jpn", trackName: "Main audio"),
+                Track("audio", "A_OPUS", false, false, "jpn", trackName: "Commentary")
+            ],
+            [],
+            0);
+        var output = new MkvInspection(
+            [
+                Track("video", "V_MPEGH/ISO/HEVC"),
+                Track("audio", "A_OPUS", true, false, "jpn", trackName: "Main audio"),
+                Track("audio", "A_OPUS", false, false, "jpn", trackName: "Commentary"),
+                Track("subtitles", "S_TEXT/ASS", true, false, "kor", trackName: CoreText.Get("Mkv_AssTrackName")),
+                Track("subtitles", "S_TEXT/UTF8", false, false, "kor", trackName: CoreText.Get("Mkv_SrtTrackName"))
+            ],
+            [],
+            0);
+        var renamedAudioOutput = output with
+        {
+            Tracks = output.Tracks
+                .Select((track, index) => index == 2 ? track with { TrackName = "Wrong name" } : track)
+                .ToArray()
+        };
+
+        Assert.Empty(MkvMergeClient.ValidateOutput(source, output, cleanOutputMetadata: true));
+        Assert.Single(MkvMergeClient.ValidateOutput(source, renamedAudioOutput, cleanOutputMetadata: true));
     }
 
     [Fact]

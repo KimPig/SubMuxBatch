@@ -82,6 +82,8 @@ public enum JobState
     ConvertingSmiToSrt,
     ConvertingAssToSrt,
     ConvertingSrtToAss,
+    UpdatingAssStyle,
+    ConvertingAudio,
     Muxing,
     Verifying,
     Succeeded,

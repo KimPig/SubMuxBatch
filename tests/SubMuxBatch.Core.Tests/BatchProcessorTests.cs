@@ -12,6 +12,28 @@ namespace SubMuxBatch.Core.Tests;
 
 public sealed class BatchProcessorTests : IDisposable
 {
+    [Theory]
+    [InlineData(true, false, "ASS")]
+    [InlineData(false, false, "SRT")]
+    [InlineData(false, true, "SMI")]
+    public void DeterminesAssSourceTagFromConversionPlan(bool existingAss, bool fromSmi, string expected)
+    {
+        var media = new MediaSet(
+            new MediaKey(_root, "sample"),
+            Path.Combine(_root, "sample.mkv"),
+            existingAss ? Path.Combine(_root, "sample.ass") : null,
+            existingAss || fromSmi ? null : Path.Combine(_root, "sample.srt"),
+            fromSmi ? Path.Combine(_root, "sample.smi") : null);
+        var plan = new ConversionPlan(
+            true,
+            existingAss ? AssSourceKind.Existing : AssSourceKind.ConvertFromSrt,
+            fromSmi ? SrtSourceKind.ConvertFromSmi : existingAss ? SrtSourceKind.ConvertFromAss : SrtSourceKind.Existing,
+            "test",
+            []);
+
+        Assert.Equal(expected, BatchProcessor.GetAssSourceTagValue(media, plan));
+    }
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "SubMuxBatchPipelineTests", Guid.NewGuid().ToString("N"));
 
     public BatchProcessorTests() => Directory.CreateDirectory(_root);
@@ -57,7 +79,9 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(SubMuxMetadata.VersionTagName, runner.MuxedGlobalTagsText);
         Assert.Contains(SubMuxMetadata.ProcessedTagName, runner.MuxedGlobalTagsText);
         Assert.Contains(SubMuxMetadata.ProcessedValue, runner.MuxedGlobalTagsText);
+        Assert.DoesNotContain(SubMuxMetadata.AssSourceTagName, runner.MuxedGlobalTagsText);
         Assert.DoesNotContain(SubMuxMetadata.LegacyCommentTagName, runner.MuxedGlobalTagsText);
+        Assert.Contains("; SUBMUX_ASS_SOURCE=SMI", runner.MuxedAssText);
         var muxArguments = Assert.Single(runner.MuxCalls);
         var stagedOutput = muxArguments[muxArguments.ToList().IndexOf("-o") + 1];
         var workspaceDirectory = Assert.IsType<string>(Path.GetDirectoryName(stagedOutput));
@@ -627,6 +651,7 @@ public sealed class BatchProcessorTests : IDisposable
 
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.Equal(addSubMuxTag, runner.MuxedGlobalTagsText is not null);
+        Assert.Equal(addSubMuxTag, runner.MuxedAssText?.Contains("; SUBMUX_ASS_SOURCE=SRT", StringComparison.Ordinal) == true);
     }
 
     [Fact]
@@ -672,7 +697,7 @@ public sealed class BatchProcessorTests : IDisposable
             {
                 OutputPrefix = "result_",
                 AssStyleLine = AppSettings.DefaultAssStyleLine.Replace(
-                    "맑은 고딕",
+                    "SubMux Sans",
                     "Test Family",
                     StringComparison.Ordinal)
             },
@@ -688,6 +713,30 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task BundledSubMuxSansIsUsedOnlyWhenNoInstalledMatchExists()
+    {
+        var mkv = Path.Combine(_root, "BundledFont.mkv");
+        var srt = Path.Combine(_root, "BundledFont.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        var media = new MediaSet(new MediaKey(_root, "BundledFont"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner, new StaticFontResolver([])).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { OutputPrefix = "result_" },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Empty(result.Warnings);
+        var arguments = Assert.Single(runner.MuxCalls);
+        var attachmentIndex = arguments.ToList().IndexOf("--attach-file");
+        Assert.True(attachmentIndex >= 0);
+        Assert.EndsWith("SubMuxSans-Medium.otf", arguments[attachmentIndex + 1], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MissingAssFontAddsWarningAndSkipsJobWithoutOutput()
     {
         var mkv = Path.Combine(_root, "FontMissing.mkv");
@@ -700,11 +749,18 @@ public sealed class BatchProcessorTests : IDisposable
         var result = await new BatchProcessor(runner, new StaticFontResolver([])).ProcessAsync(
             media,
             ConversionPlanFactory.Create(media),
-            new AppSettings { OutputPrefix = "result_" },
+            new AppSettings
+            {
+                OutputPrefix = "result_",
+                AssStyleLine = AppSettings.DefaultAssStyleLine.Replace(
+                    "SubMux Sans",
+                    "Definitely Missing Font",
+                    StringComparison.Ordinal)
+            },
             CreateDependencies());
 
         Assert.Equal(JobState.Skipped, result.State);
-        Assert.Contains(result.Warnings, static warning => warning.Contains("맑은 고딕") && warning.Contains("찾지 못했습니다"));
+        Assert.Contains(result.Warnings, static warning => warning.Contains("Definitely Missing Font") && warning.Contains("찾지 못했습니다"));
         Assert.Empty(runner.MuxCalls);
         Assert.Null(result.OutputPath);
         Assert.Contains("건너뜁니다", result.Error);

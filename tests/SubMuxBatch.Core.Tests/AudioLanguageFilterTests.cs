@@ -102,6 +102,97 @@ public sealed class AudioLanguageFilterTests
     }
 
     [Fact]
+    public async Task MetadataCleanupClearsTheSelectedAudioNameWhenFilteringLeavesOneTrack()
+    {
+        using var fixture = new MuxFixture();
+        const string inspection = """
+            {"tracks":[
+              {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC","track_name":"Release details"}},
+              {"id":1,"type":"audio","properties":{"codec_id":"A_AAC","language":"eng","track_name":"English dub"}},
+              {"id":2,"type":"audio","properties":{"codec_id":"A_OPUS","language":"jpn","track_name":"Japanese main"}}
+            ],"attachments":[],"chapters":[]}
+            """;
+        var runner = new MuxArgumentRunner(fixture.Output, inspection);
+
+        await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+            fixture.Source,
+            fixture.Ass,
+            fixture.Srt,
+            fixture.Output,
+            keepOnlyAudioLanguage: AudioTrackLanguage.Japanese,
+            cleanOutputMetadata: true);
+
+        var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+        Assert.Contains("0:", arguments);
+        Assert.Contains("2:", arguments);
+        Assert.DoesNotContain("1:", arguments);
+        Assert.True(arguments.IndexOf("0:") < arguments.IndexOf(fixture.Source));
+        Assert.True(arguments.IndexOf("2:") < arguments.IndexOf(fixture.Source));
+    }
+
+    [Fact]
+    public async Task AudioMuxPlanReplacesSourceAudioAndAddsGeneratedAacMetadata()
+    {
+        using var fixture = new MuxFixture();
+        var generated = Path.Combine(fixture.Root, "audio-01.mka");
+        await File.WriteAllBytesAsync(generated, [1, 2, 3]);
+        const string inspection = """
+            {"tracks":[
+              {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC"}},
+              {"id":1,"type":"audio","properties":{"codec_id":"A_OPUS","default_track":true,"forced_track":false,"language":"jpn","language_ietf":"ja","track_name":"Main","audio_channels":6}}
+            ],"attachments":[],"chapters":[]}
+            """;
+        var sourceTrack = new MkvTrackInfo(
+            "audio", "A_OPUS", true, false, "jpn", "ja", "Main", 1, AudioChannels: 6);
+        var plan = new AudioMuxPlan(
+            new HashSet<int>(),
+            [new GeneratedAudioTrack(generated, sourceTrack, 2, 192, true, false, "Main")],
+            new Dictionary<int, bool>());
+        var runner = new MuxArgumentRunner(fixture.Output, inspection);
+
+        await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+            fixture.Source,
+            fixture.Ass,
+            fixture.Srt,
+            fixture.Output,
+            audioMuxPlan: plan);
+
+        var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+        Assert.Contains("--no-audio", arguments);
+        Assert.Contains("0:ja", arguments);
+        Assert.Contains("0:Main", arguments);
+        Assert.Contains("0:yes", arguments);
+        Assert.True(arguments.IndexOf("--no-audio") < arguments.IndexOf(fixture.Source));
+        Assert.True(arguments.IndexOf(fixture.Source) < arguments.IndexOf(generated));
+    }
+
+    [Fact]
+    public void ValidationAcceptsPlannedGeneratedAacTrack()
+    {
+        var sourceAudio = new MkvTrackInfo(
+            "audio", "A_OPUS", true, false, "jpn", "ja", "Main", 1, AudioChannels: 6, AudioSamplingFrequency: 48_000);
+        var source = new MkvInspection(
+            [Track("video", "V_MPEGH/ISO/HEVC", id: 0), sourceAudio],
+            [],
+            0);
+        var output = new MkvInspection(
+            [
+                Track("video", "V_MPEGH/ISO/HEVC", id: 0),
+                new MkvTrackInfo("audio", "A_AAC", true, false, "jpn", "ja", "Main", 1, AudioChannels: 2, AudioSamplingFrequency: 48_000),
+                Track("subtitles", "S_TEXT/ASS", true, "kor", id: 2),
+                Track("subtitles", "S_TEXT/UTF8", false, "kor", id: 3)
+            ],
+            [],
+            0);
+        var plan = new AudioMuxPlan(
+            new HashSet<int>(),
+            [new GeneratedAudioTrack("audio.mka", sourceAudio, 2, 192, true, false, "Main")],
+            new Dictionary<int, bool>());
+
+        Assert.Empty(MkvMergeClient.ValidateOutput(source, output, audioMuxPlan: plan));
+    }
+
+    [Fact]
     public async Task FilterSkipsInsteadOfCreatingSilentOutputWhenNoLanguageMatches()
     {
         using var fixture = new MuxFixture();

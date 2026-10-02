@@ -1,0 +1,538 @@
+using System.Globalization;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using SubMuxBatch.Core.Configuration;
+using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.Localization;
+
+namespace SubMuxBatch.Core.External;
+
+public sealed record AudioTranscodeRequest(
+    string SourcePath,
+    int SourceAudioIndex,
+    string OutputPath,
+    int? OutputChannels,
+    int BitrateKbps,
+    long? SourceDurationNanoseconds);
+
+public sealed record AudioTranscodeResult(IReadOnlyList<string> Warnings);
+
+public interface IAudioTranscoder
+{
+    Task<AudioTranscodeResult> TranscodeAsync(
+        AudioTranscodeRequest request,
+        Action<int>? onProgress = null,
+        Action<string>? onOutput = null,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record GeneratedAudioTrack(
+    string FilePath,
+    MkvTrackInfo SourceTrack,
+    int? OutputChannels,
+    int BitrateKbps,
+    bool DefaultTrack,
+    bool ForcedTrack,
+    string? TrackName);
+
+public sealed record AudioMuxPlan(
+    IReadOnlySet<int> RetainedSourceTrackIds,
+    IReadOnlyList<GeneratedAudioTrack> GeneratedTracks,
+    IReadOnlyDictionary<int, bool> SourceDefaultTrackOverrides);
+
+public sealed record PlannedAudioTranscode(
+    MkvTrackInfo SourceTrack,
+    int SourceAudioIndex,
+    int? OutputChannels,
+    int BitrateKbps,
+    bool DefaultTrack,
+    bool ForcedTrack,
+    string? TrackName);
+
+public sealed record AudioConversionPlan(
+    IReadOnlyList<MkvTrackInfo> SelectedSourceTracks,
+    IReadOnlySet<int> RetainedSourceTrackIds,
+    IReadOnlyList<PlannedAudioTranscode> Transcodes,
+    IReadOnlyDictionary<int, bool> SourceDefaultTrackOverrides);
+
+public static class AudioConversionPlanner
+{
+    public static AudioConversionPlan Create(MkvInspection source, AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var indexedAudio = source.Tracks
+            .Where(IsAudio)
+            .Select((track, audioIndex) => new IndexedAudioTrack(track, audioIndex))
+            .ToArray();
+        var selected = SelectByLanguage(indexedAudio, settings).ToArray();
+        if (!settings.ConvertAudioToAac)
+        {
+            return new AudioConversionPlan(
+                selected.Select(static item => item.Track).ToArray(),
+                selected.Select(static item => RequiredId(item.Track)).ToHashSet(),
+                [],
+                new Dictionary<int, bool>());
+        }
+
+        var retainedIds = new HashSet<int>();
+        var transcodes = new List<PlannedAudioTranscode>();
+        var defaultOverrides = new Dictionary<int, bool>();
+
+        switch (settings.AudioChannelMode)
+        {
+            case AudioChannelMode.PreserveChannels:
+                foreach (var item in selected)
+                {
+                    if (IsAac(item.Track))
+                    {
+                        retainedIds.Add(RequiredId(item.Track));
+                    }
+                    else
+                    {
+                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels));
+                    }
+                }
+                break;
+
+            case AudioChannelMode.ConvertToStereo:
+                foreach (var item in selected)
+                {
+                    var channels = item.Track.AudioChannels is > 2 ? 2 : item.Track.AudioChannels;
+                    if (IsAac(item.Track) && item.Track.AudioChannels is <= 2)
+                    {
+                        retainedIds.Add(RequiredId(item.Track));
+                    }
+                    else
+                    {
+                        transcodes.Add(CreateTranscode(item, channels));
+                    }
+                }
+                break;
+
+            case AudioChannelMode.KeepMultichannelAndAddStereo:
+                foreach (var item in selected.Where(static item => item.Track.AudioChannels is <= 2 or null))
+                {
+                    if (IsAac(item.Track))
+                    {
+                        retainedIds.Add(RequiredId(item.Track));
+                    }
+                    else
+                    {
+                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels));
+                    }
+                }
+
+                foreach (var group in selected
+                             .Where(static item => item.Track.AudioChannels is > 2)
+                             .GroupBy(static item => GetLanguageKey(item.Track), StringComparer.OrdinalIgnoreCase))
+                {
+                    var multichannelTracks = group.ToArray();
+                    foreach (var item in multichannelTracks)
+                    {
+                        retainedIds.Add(RequiredId(item.Track));
+                    }
+
+                    var existingStereoTracks = selected.Where(item =>
+                            item.Track.AudioChannels == 2
+                            && IsAac(item.Track)
+                            && string.Equals(GetLanguageKey(item.Track), group.Key, StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    var plannedStereoIndices = transcodes
+                        .Select((item, index) => (Item: item, Index: index))
+                        .Where(item => item.Item.OutputChannels == 2
+                                       && string.Equals(
+                                           GetLanguageKey(item.Item.SourceTrack),
+                                           group.Key,
+                                           StringComparison.OrdinalIgnoreCase))
+                        .Select(static item => item.Index)
+                        .ToArray();
+                    var usedExistingIds = new HashSet<int>();
+                    var usedPlannedIndices = new HashSet<int>();
+
+                    foreach (var multichannel in multichannelTracks)
+                    {
+                        var existingStereo = FindCounterpart(
+                            multichannel,
+                            existingStereoTracks.Where(item => !usedExistingIds.Contains(RequiredId(item.Track))).ToArray(),
+                            multichannelTracks.Length);
+                        if (existingStereo is not null)
+                        {
+                            usedExistingIds.Add(RequiredId(existingStereo.Track));
+                            if (multichannel.Track.DefaultTrack)
+                            {
+                                defaultOverrides[RequiredId(multichannel.Track)] = false;
+                                if (!existingStereo.Track.DefaultTrack)
+                                {
+                                    defaultOverrides[RequiredId(existingStereo.Track)] = true;
+                                }
+                            }
+                            continue;
+                        }
+
+                        var availablePlannedIndices = plannedStereoIndices
+                            .Where(index => !usedPlannedIndices.Contains(index))
+                            .ToArray();
+                        var plannedStereoIndex = FindCounterpartIndex(
+                            multichannel,
+                            availablePlannedIndices,
+                            transcodes,
+                            multichannelTracks.Length);
+                        if (plannedStereoIndex >= 0)
+                        {
+                            usedPlannedIndices.Add(plannedStereoIndex);
+                            if (multichannel.Track.DefaultTrack)
+                            {
+                                transcodes[plannedStereoIndex] = transcodes[plannedStereoIndex] with { DefaultTrack = true };
+                                defaultOverrides[RequiredId(multichannel.Track)] = false;
+                            }
+                            continue;
+                        }
+
+                        if (multichannel.Track.DefaultTrack)
+                        {
+                            defaultOverrides[RequiredId(multichannel.Track)] = false;
+                        }
+                        transcodes.Add(CreateTranscode(multichannel, 2, multichannel.Track.DefaultTrack));
+                    }
+                }
+                break;
+
+            default:
+                throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioChannelMode"));
+        }
+
+        return new AudioConversionPlan(
+            selected.Select(static item => item.Track).ToArray(),
+            retainedIds,
+            transcodes,
+            defaultOverrides);
+    }
+
+    public static int GetBitrateKbps(int? channels) => channels switch
+    {
+        <= 1 => 96,
+        2 => 192,
+        3 or 4 or 5 or 6 => 384,
+        >= 7 => 512,
+        _ => 192
+    };
+
+    private static IEnumerable<IndexedAudioTrack> SelectByLanguage(
+        IReadOnlyList<IndexedAudioTrack> audioTracks,
+        AppSettings settings)
+    {
+        if (!settings.FilterAudioTracksByLanguage || audioTracks.Count <= 1)
+        {
+            return audioTracks;
+        }
+
+        var selected = audioTracks.Where(item => MatchesLanguage(item.Track, settings.SelectedAudioLanguage)).ToArray();
+        if (selected.Length == 0)
+        {
+            throw new JobSkippedException(CoreText.Get(
+                "Mkv_AudioLanguageNotFound",
+                GetLanguageDisplayName(settings.SelectedAudioLanguage)));
+        }
+        return selected;
+    }
+
+    private static PlannedAudioTranscode CreateTranscode(
+        IndexedAudioTrack item,
+        int? channels,
+        bool? isDefault = null) => new(
+        item.Track,
+        item.AudioIndex,
+        channels,
+        GetBitrateKbps(channels),
+        isDefault ?? item.Track.DefaultTrack,
+        item.Track.ForcedTrack,
+        item.Track.TrackName);
+
+    private static bool IsAudio(MkvTrackInfo track) =>
+        string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAac(MkvTrackInfo track) =>
+        track.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
+        || track.CodecName?.Contains("AAC", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static int RequiredId(MkvTrackInfo track) =>
+        track.Id ?? throw new InvalidOperationException(CoreText.Get("Mkv_AudioTrackIdMissing"));
+
+    private static string GetLanguageKey(MkvTrackInfo track)
+    {
+        if (!string.IsNullOrWhiteSpace(track.LanguageIetf)
+            && !string.Equals(track.LanguageIetf, "und", StringComparison.OrdinalIgnoreCase))
+        {
+            return track.LanguageIetf.Trim().Split('-', 2)[0].ToLowerInvariant();
+        }
+
+        var legacy = string.IsNullOrWhiteSpace(track.Language)
+            ? "und"
+            : track.Language.Trim().ToLowerInvariant();
+        return legacy switch
+        {
+            "eng" => "en",
+            "jpn" => "ja",
+            "kor" => "ko",
+            _ => legacy
+        };
+    }
+
+    private static IndexedAudioTrack? FindCounterpart(
+        IndexedAudioTrack source,
+        IReadOnlyList<IndexedAudioTrack> candidates,
+        int sourceCount)
+    {
+        var exactName = candidates.FirstOrDefault(candidate => TrackNamesMatch(source.Track, candidate.Track));
+        if (exactName is not null)
+        {
+            return exactName;
+        }
+        return sourceCount == 1 && candidates.Count == 1 ? candidates[0] : null;
+    }
+
+    private static int FindCounterpartIndex(
+        IndexedAudioTrack source,
+        IReadOnlyList<int> candidateIndices,
+        IReadOnlyList<PlannedAudioTranscode> transcodes,
+        int sourceCount)
+    {
+        foreach (var index in candidateIndices)
+        {
+            if (TrackNamesMatch(source.Track, transcodes[index].SourceTrack))
+            {
+                return index;
+            }
+        }
+        return sourceCount == 1 && candidateIndices.Count == 1 ? candidateIndices[0] : -1;
+    }
+
+    private static bool TrackNamesMatch(MkvTrackInfo left, MkvTrackInfo right) =>
+        !string.IsNullOrWhiteSpace(left.TrackName)
+        && !string.IsNullOrWhiteSpace(right.TrackName)
+        && string.Equals(left.TrackName.Trim(), right.TrackName.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool MatchesLanguage(MkvTrackInfo track, AudioTrackLanguage language)
+    {
+        var (legacy, ietf) = language switch
+        {
+            AudioTrackLanguage.English => ("eng", "en"),
+            AudioTrackLanguage.Japanese => ("jpn", "ja"),
+            AudioTrackLanguage.Korean => ("kor", "ko"),
+            _ => throw new ArgumentOutOfRangeException(nameof(language))
+        };
+        var candidate = !string.IsNullOrWhiteSpace(track.LanguageIetf)
+                        && !string.Equals(track.LanguageIetf, "und", StringComparison.OrdinalIgnoreCase)
+            ? track.LanguageIetf
+            : track.Language;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+        return string.Equals(candidate, legacy, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(candidate, ietf, StringComparison.OrdinalIgnoreCase)
+               || candidate.StartsWith($"{ietf}-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetLanguageDisplayName(AudioTrackLanguage language) => language switch
+    {
+        AudioTrackLanguage.English => CoreText.Get("Language_English"),
+        AudioTrackLanguage.Japanese => CoreText.Get("Language_Japanese"),
+        AudioTrackLanguage.Korean => CoreText.Get("Language_Korean"),
+        _ => throw new ArgumentOutOfRangeException(nameof(language))
+    };
+
+    private sealed record IndexedAudioTrack(MkvTrackInfo Track, int AudioIndex);
+}
+
+public sealed class BundledFfmpegAudioTranscoder(
+    IProcessRunner processRunner,
+    BundledFfmpegProvider? provider = null) : IAudioTranscoder
+{
+    private readonly BundledFfmpegProvider _provider = provider ?? new BundledFfmpegProvider();
+
+    public async Task<AudioTranscodeResult> TranscodeAsync(
+        AudioTranscodeRequest request,
+        Action<int>? onProgress = null,
+        Action<string>? onOutput = null,
+        CancellationToken cancellationToken = default)
+    {
+        var executable = await _provider.GetExecutablePathAsync(cancellationToken).ConfigureAwait(false);
+        var arguments = new List<string>
+        {
+            "-hide_banner", "-loglevel", "repeat+level+warning", "-nostdin", "-y", "-xerror", "-copyts",
+            "-i", request.SourcePath,
+            "-map", $"0:a:{request.SourceAudioIndex}",
+            "-vn", "-sn", "-dn",
+            "-map_metadata", "-1", "-map_chapters", "-1",
+            "-c:a", "aac", "-b:a", $"{request.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k"
+        };
+        if (request.OutputChannels.HasValue)
+        {
+            arguments.Add("-ac");
+            arguments.Add(request.OutputChannels.Value.ToString(CultureInfo.InvariantCulture));
+        }
+        arguments.AddRange(["-avoid_negative_ts", "disabled", "-f", "matroska", "-progress", "pipe:1", "-nostats", request.OutputPath]);
+
+        var durationMicroseconds = request.SourceDurationNanoseconds.HasValue
+            ? request.SourceDurationNanoseconds.Value / 1000d
+            : 0d;
+        void HandleOutput(string line)
+        {
+            if (line.StartsWith("out_time_us=", StringComparison.Ordinal))
+            {
+                if (durationMicroseconds > 0
+                    && long.TryParse(
+                        line.AsSpan("out_time_us=".Length),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var current))
+                {
+                    onProgress?.Invoke(Math.Clamp((int)Math.Round(current / durationMicroseconds * 100d), 0, 100));
+                }
+                return;
+            }
+
+            if (!IsProgressProtocolLine(line))
+            {
+                onOutput?.Invoke(line);
+            }
+        }
+
+        var result = await processRunner.RunAsync(
+            new ProcessRequest(executable, arguments, Path.GetDirectoryName(request.OutputPath)),
+            HandleOutput,
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0 || !File.Exists(request.OutputPath) || new FileInfo(request.OutputPath).Length == 0)
+        {
+            var details = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+            throw new InvalidOperationException(CoreText.Get("Ffmpeg_TranscodeFailed", result.ExitCode, details.Trim()));
+        }
+
+        var warnings = FilterWarnings(result.StandardError);
+        return new AudioTranscodeResult(warnings);
+    }
+
+    internal static IReadOnlyList<string> FilterWarnings(string standardError)
+    {
+        var result = new List<string>();
+        var attachmentProbeWarning = false;
+        foreach (var line in standardError.Split(
+                     ['\r', '\n'],
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.Contains("(Attachment: none): unknown codec", StringComparison.OrdinalIgnoreCase))
+            {
+                attachmentProbeWarning = true;
+                continue;
+            }
+            if (attachmentProbeWarning
+                && line.Contains("Consider increasing the value for the 'analyzeduration'", StringComparison.OrdinalIgnoreCase)
+                && line.Contains("'probesize'", StringComparison.OrdinalIgnoreCase))
+            {
+                attachmentProbeWarning = false;
+                continue;
+            }
+
+            attachmentProbeWarning = false;
+            if (!result.Contains(line, StringComparer.Ordinal))
+            {
+                result.Add(line);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsProgressProtocolLine(string line)
+    {
+        var separator = line.IndexOf('=');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        return line[..separator] is "bitrate"
+            or "drop_frames"
+            or "dup_frames"
+            or "fps"
+            or "frame"
+            or "out_time"
+            or "out_time_ms"
+            or "progress"
+            or "speed"
+            or "stream_0_0_q"
+            or "total_size";
+    }
+}
+
+public sealed class BundledFfmpegProvider
+{
+    private const string ResourcePrefix = "SubMuxBatch.Core.Resources.ffmpeg.";
+    private static readonly SemaphoreSlim ExtractionGate = new(1, 1);
+
+    public async Task<string> GetExecutablePathAsync(CancellationToken cancellationToken = default)
+    {
+        var architecture = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "win-x64",
+            Architecture.Arm64 => "win-arm64",
+            _ => throw new PlatformNotSupportedException(CoreText.Get("Ffmpeg_UnsupportedArchitecture"))
+        };
+        var assembly = typeof(BundledFfmpegProvider).Assembly;
+        var resourceName = ResourcePrefix + architecture + ".exe";
+        await using var resource = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(CoreText.Get("Ffmpeg_BundledMissing"));
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        var directory = Path.Combine(
+            AppSettings.SettingsDirectory,
+            "tools",
+            "ffmpeg",
+            SanitizePathSegment(version),
+            architecture);
+        Directory.CreateDirectory(directory);
+        var destination = Path.Combine(directory, "ffmpeg.exe");
+        await ExtractionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (File.Exists(destination) && new FileInfo(destination).Length == resource.Length)
+            {
+                return destination;
+            }
+
+            var temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                await using (var output = new FileStream(
+                                 temporary,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 81920,
+                                 FileOptions.Asynchronous | FileOptions.SequentialScan))
+                {
+                    await resource.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+                    await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+                File.Move(temporary, destination, overwrite: true);
+                return destination;
+            }
+            finally
+            {
+                if (File.Exists(temporary))
+                {
+                    File.Delete(temporary);
+                }
+            }
+        }
+        finally
+        {
+            ExtractionGate.Release();
+        }
+    }
+
+    private static string SanitizePathSegment(string value) => string.Concat(
+        value.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+}

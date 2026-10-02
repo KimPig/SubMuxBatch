@@ -39,4 +39,31 @@ public sealed class SubMuxMetadataTests
     {
         Assert.False(SubMuxMetadata.IsProcessed(null, null, "Unrelated comment"));
     }
+
+    [Theory]
+    [InlineData("ASS")]
+    [InlineData("SRT")]
+    [InlineData("SMI")]
+    [InlineData(SubMuxMetadata.LegacySrtOrSmiSource)]
+    [InlineData(SubMuxMetadata.LegacyAssOrUnknownSource)]
+    public void AddsAndReadsAssSourceMarker(string source)
+    {
+        const string ass = "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\n";
+
+        var marked = SubMuxMetadata.AddAssSourceMarker(ass, source);
+
+        Assert.Contains($"; SUBMUX_ASS_SOURCE={source}", marked, StringComparison.Ordinal);
+        Assert.Equal(source, SubMuxMetadata.ReadAssSourceMarker(marked));
+    }
+
+    [Fact]
+    public void ExistingAssSourceMarkerIsPreserved()
+    {
+        const string ass = "[Script Info]\n; SUBMUX_ASS_SOURCE=ASS\nScriptType: v4.00+\n";
+
+        var marked = SubMuxMetadata.AddAssSourceMarker(ass, "SMI");
+
+        Assert.Equal(ass, marked);
+        Assert.Equal("ASS", SubMuxMetadata.ReadAssSourceMarker(marked));
+    }
 }

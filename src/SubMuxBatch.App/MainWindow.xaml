@@ -35,6 +35,41 @@
             <Setter Property="Padding" Value="8,4" />
             <Setter Property="Margin" Value="0,0,6,0" />
         </Style>
+        <Style x:Key="ProcessingModeRadioStyle" TargetType="RadioButton">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ModeSurface"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ModeSurface" Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ModeSurface" Property="Background" Value="{StaticResource SelectionBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ModeSurface" Property="Opacity" Value="0.5" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="CompactLogTabControlStyle" TargetType="TabControl">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -314,21 +349,54 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" MinHeight="100" />
                     <RowDefinition Height="1" />
-                    <RowDefinition Height="156" />
+                    <RowDefinition Height="168" />
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" BorderBrush="#E1E1E1" BorderThickness="0,0,0,1" Padding="9,6">
-                    <WrapPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <WrapPanel Grid.Column="0">
+                        <Border Margin="0,0,10,0"
+                                VerticalAlignment="Center"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="NormalModeRadioButton"
+                                             Content="{loc:Loc Main_NormalMode}"
+                                             GroupName="ProcessingMode"
+                                             IsChecked="True"
+                                             Style="{StaticResource ProcessingModeRadioStyle}"
+                                             Checked="ProcessingMode_Checked" />
+                                <Border Width="1" Background="{StaticResource BorderBrush}" />
+                                <RadioButton x:Name="MaintenanceModeRadioButton"
+                                             Content="{loc:Loc Main_MaintenanceMode}"
+                                             GroupName="ProcessingMode"
+                                             Style="{StaticResource ProcessingModeRadioStyle}"
+                                             Checked="ProcessingMode_Checked" />
+                            </StackPanel>
+                        </Border>
                         <Button x:Name="AddFilesButton" Content="{loc:Loc Main_AddFiles}" Click="AddFilesButton_Click" />
                         <Button x:Name="AddFolderButton" Content="{loc:Loc Main_AddFolder}" Click="AddFolderButton_Click" />
                         <Button x:Name="RemoveButton" Content="{loc:Loc Main_RemoveSelected}" Click="RemoveButton_Click" />
                         <Button x:Name="ClearButton" Content="{loc:Loc Main_ClearAll}" Click="ClearButton_Click" />
-                        <TextBlock Margin="10,7,4,5"
+                        <TextBlock x:Name="QueueHelpText" Margin="10,7,4,5"
                                    VerticalAlignment="Center"
                                    Foreground="{StaticResource SecondaryTextBrush}"
                                    FontSize="11"
                                    Text="{loc:Loc Main_QueueHelp}" />
-                    </WrapPanel>
+                        </WrapPanel>
+                        <Button x:Name="MaintenanceSettingsButton"
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                VerticalAlignment="Top"
+                                Content="{loc:Loc Main_MaintenanceSettings}"
+                                Visibility="Collapsed"
+                                Click="MaintenanceSettingsButton_Click" />
+                    </Grid>
                 </Border>
 
                 <Grid Grid.Row="1"
@@ -611,7 +679,8 @@
                                     BorderBrush="{StaticResource StrongBorderBrush}"
                                     BorderThickness="1"
                                     IsHitTestVisible="False">
-                                <TextBlock Margin="12,6"
+                                <TextBlock x:Name="EmptyDropPromptText"
+                                           Margin="12,6"
                                            Text="{loc:Loc Main_DropPrompt}"
                                            FontSize="14"
                                            FontWeight="SemiBold"

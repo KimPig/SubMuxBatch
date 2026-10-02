@@ -48,6 +48,37 @@ public sealed class SettingsMigrationTests : IDisposable
     }
 
     [Fact]
+    public void MissingMaintenancePrefixUsesSavedApplicationLanguage()
+    {
+        var korean = AppSettings.Deserialize("""{"Language":"Korean"}""");
+        var english = AppSettings.Deserialize("""{"Language":"English"}""");
+
+        Assert.Equal("유지보수_", korean.MaintenanceOutputPrefix);
+        Assert.Equal("Maintained_", english.MaintenanceOutputPrefix);
+    }
+
+    [Fact]
+    public void SavedMaintenancePrefixIsPreservedAcrossLanguageChanges()
+    {
+        var settings = AppSettings.Deserialize(
+            """{"Language":"English","MaintenanceOutputPrefix":"내접두사_"}""");
+
+        Assert.Equal("내접두사_", settings.MaintenanceOutputPrefix);
+    }
+
+    [Fact]
+    public void SourceReplacementDoesNotRequireAnOutputPrefix()
+    {
+        var settings = new AppSettings
+        {
+            MaintenanceReplaceOriginal = true,
+            MaintenanceOutputPrefix = string.Empty
+        };
+
+        settings.Validate();
+    }
+
+    [Fact]
     public void InvalidLegacySettingsUseDefaultsWithoutCreatingNewSettings()
     {
         var current = Path.Combine(_root, "current", "settings.json");

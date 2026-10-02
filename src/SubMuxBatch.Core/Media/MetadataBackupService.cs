@@ -268,11 +268,46 @@ public sealed class MetadataBackupService(
             return null;
         }
 
+        return await BackupAudioTracksAsync(
+            sourcePath,
+            mkvMergePath,
+            identification,
+            excludedTrackIds,
+            cancellationToken,
+            onBackupCreated,
+            onBackupDirectoryCreated).ConfigureAwait(false);
+    }
+
+    public async Task<string?> BackupAudioTracksAsync(
+        string sourcePath,
+        string mkvMergePath,
+        MkvIdentification identification,
+        IReadOnlyCollection<int> trackIds,
+        CancellationToken cancellationToken = default,
+        Action<string>? onBackupCreated = null,
+        Action<string>? onBackupDirectoryCreated = null)
+    {
+        var source = ValidateSource(sourcePath, mkvMergePath, identification, cancellationToken);
+        if (trackIds.Count == 0)
+        {
+            return null;
+        }
+
+        var availableIds = identification.Inspection.Tracks
+            .Where(static track => IsTrackType(track, "audio"))
+            .Select(static track => track.Id
+                ?? throw new InvalidOperationException(CoreText.Get("MetadataBackup_TrackIdMissing", "audio")))
+            .ToHashSet();
+        if (trackIds.Any(trackId => !availableIds.Contains(trackId)))
+        {
+            throw new InvalidOperationException(CoreText.Get("MetadataBackup_AudioTrackNotFound"));
+        }
+
         return await CreateTrackSidecarAsync(
             source,
             mkvMergePath,
             "excluded-audio.mka",
-            excludedTrackIds,
+            trackIds,
             isAudio: true,
             onBackupCreated,
             onBackupDirectoryCreated,

@@ -21,8 +21,10 @@ public sealed class AssStyleTemplateTests
         Assert.False(settings.BackupOriginalAttachments);
         Assert.False(settings.BackupExcludedAudioTracks);
         Assert.False(settings.CleanOutputMetadata);
+        Assert.False(settings.ConvertAudioToAac);
+        Assert.Equal(AudioChannelMode.PreserveChannels, settings.AudioChannelMode);
         Assert.Equal(
-            "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1",
+            "Style: Default,SubMux Sans,75,&H00FFFFFF,&HFF00FFFF,&H00000000,&H02000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,100,1",
             settings.AssStyleLine);
     }
 
@@ -142,6 +144,8 @@ public sealed class AssStyleTemplateTests
             BackupOriginalAttachments = true,
             BackupExcludedAudioTracks = true,
             CleanOutputMetadata = true,
+            ConvertAudioToAac = true,
+            AudioChannelMode = AudioChannelMode.KeepMultichannelAndAddStereo,
             AssStyleLine = "saved for later"
         };
 
@@ -159,7 +163,21 @@ public sealed class AssStyleTemplateTests
         Assert.True(copy.BackupOriginalAttachments);
         Assert.True(copy.BackupExcludedAudioTracks);
         Assert.True(copy.CleanOutputMetadata);
+        Assert.True(copy.ConvertAudioToAac);
+        Assert.Equal(AudioChannelMode.KeepMultichannelAndAddStereo, copy.AudioChannelMode);
         Assert.Equal("saved for later", copy.AssStyleLine);
+    }
+
+    [Fact]
+    public void ExistingSavedAssStyleIsNeverReplacedByTheNewDefault()
+    {
+        const string savedStyle =
+            "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1";
+
+        var json = System.Text.Json.JsonSerializer.Serialize(new { AssStyleLine = savedStyle });
+        var loaded = AppSettings.Deserialize(json);
+
+        Assert.Equal(savedStyle, loaded.AssStyleLine);
     }
 
     [Fact]

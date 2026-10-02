@@ -211,9 +211,9 @@
             </Setter>
         </Style>
         <Style TargetType="TabItem">
-            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="MinWidth" Value="76" />
             <Setter Property="MinHeight" Value="38" />
-            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="Padding" Value="12,8" />
             <Setter Property="Margin" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#605E5C" />
@@ -279,20 +279,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
                 <TextBlock Text="{loc:Loc Common_Settings}" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock x:Name="BuiltInVersionText"
-                           Grid.Column="1"
-                           Margin="20,5,0,0"
-                           HorizontalAlignment="Right"
-                           VerticalAlignment="Top"
-                           Foreground="{StaticResource SecondaryTextBrush}"
-                           FontSize="11" />
                 <TextBlock Grid.Row="1"
-                           Grid.ColumnSpan="2"
                            Margin="0,4,0,0"
                            Foreground="{StaticResource SecondaryTextBrush}"
                            TextWrapping="Wrap"
@@ -300,61 +288,10 @@
             </Grid>
         </Border>
 
-        <TabControl Grid.Row="1" Margin="18,12,18,0">
-            <TabItem Header="{loc:Loc Settings_TabGeneral}">
+        <TabControl x:Name="SettingsTabControl" Grid.Row="1" Margin="18,12,18,0">
+            <TabItem Header="{loc:Loc Settings_TabWork}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,12,4,0">
                     <StackPanel>
-                        <Border Style="{StaticResource SectionCardStyle}">
-                            <StackPanel>
-                                <TextBlock Text="{loc:Loc Settings_Interface}" FontSize="18" FontWeight="SemiBold" />
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="170" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{loc:Loc Settings_Language}"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,14,0" />
-                                    <ComboBox Grid.Column="1"
-                                              x:Name="LanguageComboBox"
-                                              Style="{StaticResource SettingsComboBoxStyle}"
-                                              SelectedValuePath="Tag">
-                                        <ComboBoxItem Content="{loc:Loc Settings_LanguageSystem}" Tag="System" />
-                                        <ComboBoxItem Content="한국어" Tag="Korean" />
-                                        <ComboBoxItem Content="English" Tag="English" />
-                                    </ComboBox>
-                                </Grid>
-                                <TextBlock Margin="0,8,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           FontSize="11"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_LanguageHelp}" />
-                                <Grid Margin="0,16,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <CheckBox x:Name="CheckForUpdatesAutomaticallyCheckBox"
-                                              VerticalAlignment="Center">
-                                        <TextBlock Text="{loc:Loc Settings_CheckForUpdatesAutomatically}"
-                                                   TextWrapping="Wrap" />
-                                    </CheckBox>
-                                    <Button x:Name="CheckForUpdatesNowButton"
-                                            Grid.Column="1"
-                                            Margin="16,0,0,0"
-                                            Padding="12,5"
-                                            MinHeight="30"
-                                            Content="{loc:Loc Settings_CheckForUpdatesNow}"
-                                            Click="CheckForUpdatesNow_Click" />
-                                </Grid>
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           FontSize="11"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_CheckForUpdatesAutomaticallyHelp}" />
-                            </StackPanel>
-                        </Border>
-
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
                                 <TextBlock Text="{loc:Loc Settings_FileDiscovery}" FontSize="18" FontWeight="SemiBold" />
@@ -407,28 +344,6 @@
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_ConcurrentJobsHelp}" />
-                                <CheckBox x:Name="ShowCompletionNotificationCheckBox"
-                                          Margin="0,16,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_ShowNotification}"
-                                               TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           MaxWidth="520"
-                                           HorizontalAlignment="Left"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_ShowNotificationHelp}" />
-                                <CheckBox x:Name="PlayCompletionSoundCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_PlaySound}"
-                                               TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           MaxWidth="520"
-                                           HorizontalAlignment="Left"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_PlaySoundHelp}" />
                             </StackPanel>
                         </Border>
 
@@ -460,37 +375,41 @@
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_AddSubMuxTagHelp}" />
-                                <CheckBox x:Name="AttachAssStyleFontsCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_AttachFonts}" TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_AttachFontsHelp}" />
-                                <TextBlock Margin="24,5,0,0"
-                                           Foreground="#9A5B13"
-                                           FontSize="11"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_FontLicense}" />
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="{loc:Loc Settings_TabAudio}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_AudioTrackSelection}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
                                 <CheckBox x:Name="FilterAudioTracksByLanguageCheckBox"
                                           Margin="0,14,0,0">
                                     <TextBlock Text="{loc:Loc Settings_FilterAudio}"
                                                TextWrapping="Wrap" />
                                 </CheckBox>
                                 <TextBlock Margin="24,5,0,0"
-                                           MaxWidth="360"
+                                           MaxWidth="520"
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_FilterAudioHelp}" />
                                 <Grid Margin="24,10,0,0"
-                                      MaxWidth="360"
+                                      MaxWidth="420"
                                       HorizontalAlignment="Left"
                                       IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="130" />
-                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="220" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{loc:Loc Settings_AudioLanguage}"
                                                FontWeight="SemiBold"
@@ -507,16 +426,79 @@
                                     </ComboBox>
                                 </Grid>
                                 <TextBlock Margin="24,7,0,0"
-                                           MaxWidth="360"
+                                           MaxWidth="520"
                                            HorizontalAlignment="Left"
                                            Foreground="#9A5B13"
                                            FontSize="11"
-                                           TextWrapping="NoWrap"
+                                           TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_AudioLanguageMissing}"
                                            IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}" />
                             </StackPanel>
                         </Border>
 
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_AudioConversion}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <CheckBox x:Name="ConvertAudioToAacCheckBox"
+                                          Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_ConvertAudioToAac}"
+                                               TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           MaxWidth="520"
+                                           HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_ConvertAudioToAacHelp}" />
+                                <Grid Margin="24,10,0,0"
+                                      MaxWidth="520"
+                                      HorizontalAlignment="Left"
+                                      IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="320" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_AudioChannelMode}"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,14,0" />
+                                    <ComboBox Grid.Column="1"
+                                              x:Name="AudioChannelModeComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                              SelectedValuePath="Tag"
+                                              VerticalAlignment="Center">
+                                        <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsPreserve}" Tag="PreserveChannels" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsStereo}" Tag="ConvertToStereo" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsKeepAndStereo}" Tag="KeepMultichannelAndAddStereo" />
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock Margin="24,7,0,0"
+                                           MaxWidth="520"
+                                           HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AudioChannelsStereoHelp}"
+                                           IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}" />
+                                <TextBlock Margin="24,5,0,0"
+                                           MaxWidth="520"
+                                           HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AudioBitrateHelp}"
+                                           IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="{loc:Loc Settings_TabBackupCleanup}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <StackPanel>
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
                                 <TextBlock Text="{loc:Loc Settings_BackupAndCleanup}"
@@ -552,7 +534,6 @@
                                     </CheckBox>
                                     <CheckBox x:Name="BackupExcludedAudioTracksCheckBox"
                                               VerticalAlignment="Top"
-                                              IsEnabled="{Binding IsChecked, ElementName=FilterAudioTracksByLanguageCheckBox}"
                                               ToolTip="{loc:Loc Settings_BackupExcludedAudioHelp}">
                                         <TextBlock Text="{loc:Loc Settings_BackupExcludedAudioShort}"
                                                    TextWrapping="Wrap" />
@@ -614,6 +595,28 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_AssFontAttachment}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <CheckBox x:Name="AttachAssStyleFontsCheckBox"
+                                          Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_AttachFonts}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_AttachFontsHelp}" />
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="#9A5B13"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_FontLicense}" />
+                            </StackPanel>
+                        </Border>
+
                     <Border Style="{StaticResource SectionCardStyle}"
                             VerticalAlignment="Top">
                         <Grid>
@@ -772,6 +775,112 @@
                             </Border>
                         </Grid>
                     </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem x:Name="MaintenanceTabItem" Header="{loc:Loc Settings_TabMaintenance}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_MaintenanceHeading}" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,5,0,14" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" Text="{loc:Loc Settings_MaintenanceDescription}" />
+                                <CheckBox x:Name="MaintenanceUpdateAssStyleCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateAssStyle}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceUpdateFontsCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateFonts}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceApplyAudioSettingsCheckBox" Content="{loc:Loc Settings_MaintenanceApplyAudio}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceRefreshTagsCheckBox" Content="{loc:Loc Settings_MaintenanceRefreshTags}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceDetectLegacyAssCheckBox" Content="{loc:Loc Settings_MaintenanceDetectLegacy}" Margin="0,4,0,0" />
+                                <TextBlock Margin="24,5,0,10" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" TextWrapping="Wrap" Text="{loc:Loc Settings_MaintenanceDetectLegacyHelp}" />
+                                <Grid Margin="0,4,0,0"
+                                      IsEnabled="{Binding IsChecked, ElementName=MaintenanceDetectLegacyAssCheckBox}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock VerticalAlignment="Center"
+                                                   Text="{loc:Loc Settings_MaintenanceAdvancedStyles}" />
+                                        <Button x:Name="MaintenanceAdvancedStylesToggleButton"
+                                                Grid.Column="1"
+                                                Width="36"
+                                                Height="30"
+                                                Padding="0"
+                                                Margin="14,0,0,0"
+                                                ToolTip="{loc:Loc Settings_ExpandAssStyle}"
+                                                Click="ToggleMaintenanceAdvancedStyles_Click">
+                                            <Path Width="10"
+                                                  Height="6"
+                                                  Data="M 1 1 L 5 5 L 9 1"
+                                                  Stroke="#323130"
+                                                  StrokeThickness="1.5"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Stretch="None"
+                                                  RenderTransformOrigin="0.5,0.5">
+                                                <Path.RenderTransform>
+                                                    <RotateTransform x:Name="MaintenanceAdvancedStylesArrowTransform" />
+                                                </Path.RenderTransform>
+                                            </Path>
+                                        </Button>
+                                    </Grid>
+                                    <Border x:Name="MaintenanceAdvancedStylesPanel"
+                                            Grid.Row="1"
+                                            Margin="0,8,0,0"
+                                            Visibility="Collapsed">
+                                        <StackPanel Margin="24,0,0,0">
+                                            <TextBlock Text="{loc:Loc Settings_MaintenanceLegacyStyles}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                            <TextBox x:Name="MaintenanceLegacyAssStylesTextBox"
+                                                     MinHeight="118"
+                                                     AcceptsReturn="True"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     TextWrapping="NoWrap" />
+                                            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" TextWrapping="Wrap" Text="{loc:Loc Settings_MaintenanceLegacyStylesHelp}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_MaintenanceOutputHeading}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0"
+                                      MaxWidth="520"
+                                      HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_MaintenanceOutputPrefix}"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,14,0" />
+                                    <TextBox Grid.Column="1"
+                                             x:Name="MaintenanceOutputPrefixTextBox"
+                                             Style="{StaticResource FieldTextBoxStyle}"
+                                             MinWidth="180"
+                                             Margin="0" />
+                                </Grid>
+                                <CheckBox x:Name="MaintenanceReplaceOriginalCheckBox"
+                                          Margin="0,16,0,0"
+                                          Checked="MaintenanceReplaceOriginal_Changed"
+                                          Unchecked="MaintenanceReplaceOriginal_Changed">
+                                    <TextBlock Text="{loc:Loc Settings_MaintenanceReplaceOriginal}"
+                                               TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_MaintenanceReplaceOriginalHelp}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </ScrollViewer>
             </TabItem>
 
@@ -802,14 +911,138 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <TabItem Header="{loc:Loc Settings_TabOther}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_Interface}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="170" />
+                                        <ColumnDefinition Width="300" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_Language}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,14,0" />
+                                    <ComboBox Grid.Column="1"
+                                              x:Name="LanguageComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                              SelectedValuePath="Tag">
+                                        <ComboBoxItem Content="{loc:Loc Settings_LanguageSystem}" Tag="System" />
+                                        <ComboBoxItem Content="한국어" Tag="Korean" />
+                                        <ComboBoxItem Content="English" Tag="English" />
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock Margin="0,8,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_LanguageHelp}" />
+                                <CheckBox x:Name="ShowCompletionNotificationCheckBox"
+                                          Margin="0,16,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_ShowNotification}"
+                                               TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           MaxWidth="520"
+                                           HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_ShowNotificationHelp}" />
+                                <CheckBox x:Name="PlayCompletionSoundCheckBox"
+                                          Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_PlaySound}"
+                                               TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,0"
+                                           MaxWidth="520"
+                                           HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_PlaySoundHelp}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_Updates}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="CheckForUpdatesAutomaticallyCheckBox"
+                                              VerticalAlignment="Center">
+                                        <TextBlock Text="{loc:Loc Settings_CheckForUpdatesAutomatically}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <Button x:Name="CheckForUpdatesNowButton"
+                                            Grid.Column="1"
+                                            Margin="16,0,0,0"
+                                            Padding="12,5"
+                                            MinHeight="30"
+                                            Content="{loc:Loc Settings_CheckForUpdatesNow}"
+                                            Click="CheckForUpdatesNow_Click" />
+                                </Grid>
+                                <TextBlock Margin="24,5,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_CheckForUpdatesAutomaticallyHelp}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_About}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="BuiltInVersionText"
+                                           Margin="0,8,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" />
+                                <Grid Margin="0,16,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="SubMux Sans" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="SubMuxSansStatusText"
+                                                   Margin="0,3,16,0"
+                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Content="{loc:Loc Settings_OpenFontInstaller}"
+                                            Click="OpenSubMuxSansFont_Click" />
+                                </Grid>
+                                <WrapPanel Margin="0,16,0,0">
+                                    <Button Content="{loc:Loc Settings_OpenSourceLicenses}"
+                                            Margin="0,0,8,8"
+                                            Click="OpenSourceLicenses_Click" />
+                                    <Button Content="{loc:Loc Settings_OpenFolder}"
+                                            Margin="0,0,0,8"
+                                            Click="OpenSettingsFolder_Click" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
         </TabControl>
 
         <Border Grid.Row="2" Background="White" BorderBrush="#D1D1D1" BorderThickness="0,1,0,0" Padding="18,14">
             <Grid>
-                <Button Content="{loc:Loc Settings_OpenFolder}"
-                        HorizontalAlignment="Left"
-                        Margin="0"
-                        Click="OpenSettingsFolder_Click" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="{loc:Loc Common_Cancel}" IsCancel="True" />
                     <Button Content="{loc:Loc Common_Save}" Style="{StaticResource PrimaryButtonStyle}" IsDefault="True" Click="SaveButton_Click" Margin="0" />
