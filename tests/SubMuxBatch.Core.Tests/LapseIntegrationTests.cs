@@ -404,6 +404,56 @@ public sealed class LapseIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task SynchronizerFiltersSuccessfulFfmpegProbeNoiseAndKeepsOtherDiagnostics()
+    {
+        Directory.CreateDirectory(_root);
+        var input = Path.Combine(_root, "input.srt");
+        var output = Path.Combine(_root, "output.srt");
+        File.WriteAllText(input, "1\n00:00:01,000 --> 00:00:02,000\nText\n");
+        const string json = "{\"mode\":\"auto/shifted\",\"reference\":\"embedded\",\"offset_ms\":25,\"ratio\":1,\"confidence\":9,\"verdict\":\"solid\",\"parts\":1,\"written\":true,\"splits\":[]}";
+        const string stderr = """
+                              [matroska,webm @ 0001] Could not find codec parameters for stream 3 (Subtitle: hdmv_pgs_subtitle): unspecified size
+                              Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+                              [warning] damaged audio packet at timestamp 12.4
+                              """;
+        var runner = new LapseRunner(output, json, standardError: stderr);
+        var service = new BundledLapseSynchronizer(runner, CreateProvider());
+        var forwardedOutput = new List<string>();
+
+        var result = await service.SynchronizeAsync(new LapseSyncRequest(
+            "video.mkv", input, output, LapseSyncMode.Auto, 6,
+            new LapseReferenceSelection("subtitle #0", 0, 0, false)),
+            forwardedOutput.Add);
+
+        Assert.True(result.Applied);
+        Assert.Equal(["[warning] damaged audio packet at timestamp 12.4"], forwardedOutput);
+    }
+
+    [Fact]
+    public async Task SynchronizerPreservesFullDiagnosticsWhenNoReportIsProduced()
+    {
+        Directory.CreateDirectory(_root);
+        var input = Path.Combine(_root, "input.srt");
+        var output = Path.Combine(_root, "output.srt");
+        File.WriteAllText(input, "1\n00:00:01,000 --> 00:00:02,000\nText\n");
+        const string stderr = """
+                              [matroska,webm @ 0001] Could not find codec parameters for stream 3 (Subtitle: hdmv_pgs_subtitle): unspecified size
+                              Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000) options
+                              ERROR could not open the file
+                              """;
+        var runner = new LapseRunner(output, string.Empty, createOutput: false, standardError: stderr, exitCode: 1);
+        var service = new BundledLapseSynchronizer(runner, CreateProvider());
+
+        var result = await service.SynchronizeAsync(new LapseSyncRequest(
+            "video.mkv", input, output, LapseSyncMode.Auto, 6,
+            new LapseReferenceSelection("audio #0", null, 0, true)));
+
+        Assert.Equal(LapseVerdict.Failed, result.Verdict);
+        Assert.Contains("Could not find codec parameters", result.Error);
+        Assert.Contains("ERROR could not open the file", result.Error);
+    }
+
+    [Fact]
     public async Task SynchronizerPassesExactlyOneEmbeddedSubtitleAndAudioFallbackTrack()
     {
         Directory.CreateDirectory(_root);
@@ -722,7 +772,12 @@ public sealed class LapseIntegrationTests : IDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
     }
 
-    private sealed class LapseRunner(string outputPath, string json, bool createOutput = true) : IProcessRunner
+    private sealed class LapseRunner(
+        string outputPath,
+        string json,
+        bool createOutput = true,
+        string standardError = "",
+        int exitCode = 0) : IProcessRunner
     {
         public ProcessRequest? Request { get; private set; }
 
@@ -738,7 +793,7 @@ public sealed class LapseIntegrationTests : IDisposable
             {
                 File.WriteAllText(outputPath, "1\n00:00:02,000 --> 00:00:03,000\nText\n");
             }
-            return Task.FromResult(new ProcessResult(0, json, string.Empty));
+            return Task.FromResult(new ProcessResult(exitCode, json, standardError));
         }
     }
 }

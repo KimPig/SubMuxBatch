@@ -108,14 +108,9 @@ public sealed class BundledLapseSynchronizer(
         ProcessResult processResult;
         try
         {
-            void ForwardDiagnosticOutput(string line)
-            {
-                if (!IsLapseReportLine(line)) onOutput?.Invoke(line);
-            }
-
             processResult = await processRunner.RunAsync(
                 new ProcessRequest(executable, arguments, Path.GetDirectoryName(request.OutputPath)),
-                ForwardDiagnosticOutput,
+                onOutput: null,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -147,6 +142,20 @@ public sealed class BundledLapseSynchronizer(
         if (verdict == LapseVerdict.Solid && (!report.Written || !outputExists))
         {
             verdict = LapseVerdict.Failed;
+        }
+
+        if (verdict != LapseVerdict.Failed)
+        {
+            var standardOutputDiagnostics = processResult.StandardOutput
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(line => !IsLapseReportLine(line));
+            var diagnostics = ExternalToolDiagnostics.FilterSuccessfulProbeNoise(
+                string.Join(Environment.NewLine, standardOutputDiagnostics),
+                processResult.StandardError);
+            foreach (var diagnostic in diagnostics)
+            {
+                onOutput?.Invoke(diagnostic);
+            }
         }
 
         return new LapseSyncResult(

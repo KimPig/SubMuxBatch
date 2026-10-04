@@ -395,10 +395,8 @@ public sealed class BundledFfmpegAudioTranscoder(
                 return;
             }
 
-            if (!IsProgressProtocolLine(line))
-            {
-                onOutput?.Invoke(line);
-            }
+            // Other lines are buffered by the process runner. They are filtered and
+            // forwarded only after a successful transcode.
         }
 
         var result = await processRunner.RunAsync(
@@ -412,60 +410,16 @@ public sealed class BundledFfmpegAudioTranscoder(
         }
 
         var warnings = FilterWarnings(result.StandardError);
+        foreach (var warning in warnings)
+        {
+            onOutput?.Invoke(warning);
+        }
         return new AudioTranscodeResult(warnings);
     }
 
-    internal static IReadOnlyList<string> FilterWarnings(string standardError)
-    {
-        var result = new List<string>();
-        var attachmentProbeWarning = false;
-        foreach (var line in standardError.Split(
-                     ['\r', '\n'],
-                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (line.Contains("(Attachment: none): unknown codec", StringComparison.OrdinalIgnoreCase))
-            {
-                attachmentProbeWarning = true;
-                continue;
-            }
-            if (attachmentProbeWarning
-                && line.Contains("Consider increasing the value for the 'analyzeduration'", StringComparison.OrdinalIgnoreCase)
-                && line.Contains("'probesize'", StringComparison.OrdinalIgnoreCase))
-            {
-                attachmentProbeWarning = false;
-                continue;
-            }
+    internal static IReadOnlyList<string> FilterWarnings(string standardError) =>
+        ExternalToolDiagnostics.FilterSuccessfulProbeNoise(standardError);
 
-            attachmentProbeWarning = false;
-            if (!result.Contains(line, StringComparer.Ordinal))
-            {
-                result.Add(line);
-            }
-        }
-
-        return result;
-    }
-
-    private static bool IsProgressProtocolLine(string line)
-    {
-        var separator = line.IndexOf('=');
-        if (separator <= 0)
-        {
-            return false;
-        }
-
-        return line[..separator] is "bitrate"
-            or "drop_frames"
-            or "dup_frames"
-            or "fps"
-            or "frame"
-            or "out_time"
-            or "out_time_ms"
-            or "progress"
-            or "speed"
-            or "stream_0_0_q"
-            or "total_size";
-    }
 }
 
 public sealed class BundledFfmpegProvider
