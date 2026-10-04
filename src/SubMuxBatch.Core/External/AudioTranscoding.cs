@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using SubMuxBatch.Core.Configuration;
@@ -475,6 +474,12 @@ public sealed class BundledFfmpegProvider
     private const string ResourcePrefix = "SubMuxBatch.Core.Resources.ffmpeg.";
     private static readonly SemaphoreSlim ExtractionGate = new(1, 1);
 
+    public static string InstallDirectory => Path.Combine(
+        AppSettings.SettingsDirectory,
+        "tools",
+        "ffmpeg",
+        Version);
+
     public async Task<string> GetExecutablePathAsync(CancellationToken cancellationToken = default)
     {
         var architecture = RuntimeInformation.ProcessArchitecture switch
@@ -491,12 +496,8 @@ public sealed class BundledFfmpegProvider
         {
             expectedHash = await SHA256.HashDataAsync(resource, cancellationToken).ConfigureAwait(false);
         }
-        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
         var directory = Path.Combine(
-            AppSettings.SettingsDirectory,
-            "tools",
-            "ffmpeg",
-            SanitizePathSegment(version),
+            InstallDirectory,
             architecture);
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(directory, "ffmpeg.exe");
@@ -563,7 +564,4 @@ public sealed class BundledFfmpegProvider
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
-
-    private static string SanitizePathSegment(string value) => string.Concat(
-        value.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
 }

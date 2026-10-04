@@ -319,7 +319,7 @@ public sealed class MediaSetDiscoveryTests : IDisposable
     {
         Touch("Movie.mkv");
         Touch("Movie.srt");
-        var backup = Path.Combine(_root, ".submux-backup", "external-subtitles");
+        var backup = Path.Combine(_root, ".submux-backup", "sample-items");
         Directory.CreateDirectory(backup);
         File.WriteAllText(Path.Combine(backup, "Backup.mkv"), "x");
         File.WriteAllText(Path.Combine(backup, "Backup.srt"), "x");

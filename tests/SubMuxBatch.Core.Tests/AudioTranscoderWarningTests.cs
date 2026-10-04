@@ -1,9 +1,22 @@
+using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.External;
 
 namespace SubMuxBatch.Core.Tests;
 
 public sealed class AudioTranscoderWarningTests
 {
+    [Fact]
+    public void BundledFfmpegInstallDirectoryUsesTheFfmpegVersion()
+    {
+        Assert.Equal(
+            Path.Combine(AppSettings.SettingsDirectory, "tools", "ffmpeg", BundledFfmpegProvider.Version),
+            BundledFfmpegProvider.InstallDirectory);
+        Assert.EndsWith(
+            Path.Combine("ffmpeg", "8.1"),
+            BundledFfmpegProvider.InstallDirectory,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void FiltersAttachmentProbeWarningsAndTheirAdvice()
     {
