@@ -44,6 +44,10 @@ public sealed record LapseSyncResult(
 {
     public bool Applied => Verdict == LapseVerdict.Solid && OutputPath is not null;
     public long? MaximumAdjustmentMilliseconds { get; init; }
+
+    public bool ShouldWarnAboutAutoStrategy(LapseSyncMode requestedMode) =>
+        requestedMode == LapseSyncMode.Auto
+        && !string.Equals(Mode, "auto/shifted", StringComparison.OrdinalIgnoreCase);
 }
 
 public interface ILapseSynchronizer

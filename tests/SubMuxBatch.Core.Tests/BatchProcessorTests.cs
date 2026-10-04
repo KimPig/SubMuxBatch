@@ -238,6 +238,36 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.DoesNotContain(progressMessages, message => message.Contains("LAPSE 요약:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task NonShiftAutoStrategyIsAppliedAndCompletesWithWarning()
+    {
+        var mkv = Path.Combine(_root, "Restart.mkv");
+        var srt = Path.Combine(_root, "Restart.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n");
+        var media = new MediaSet(new MediaKey(_root, "Restart"), mkv, null, srt, null);
+
+        var result = await new BatchProcessor(
+            new FakeProcessRunner(),
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: new RestartLapseSynchronizer()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = true,
+                LapseMode = LapseSyncMode.Auto,
+                WarnOnLargeLapseCorrection = false
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, warning =>
+            warning.Contains("auto/restart", StringComparison.Ordinal)
+            && warning.Contains("결과를 확인", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("srt", "SRT")]
     [InlineData("smi", "SMI")]
@@ -1149,6 +1179,29 @@ public sealed class BatchProcessorTests : IDisposable
                 [],
                 null,
                 null));
+    }
+
+    private sealed class RestartLapseSynchronizer : ILapseSynchronizer
+    {
+        public async Task<LapseSyncResult> SynchronizeAsync(
+            LapseSyncRequest request,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            File.Copy(request.SubtitlePath, request.OutputPath, overwrite: true);
+            await Task.CompletedTask;
+            return new LapseSyncResult(
+                LapseVerdict.Solid,
+                "auto/restart",
+                "embedded",
+                20,
+                1,
+                0,
+                2,
+                [10],
+                request.OutputPath,
+                null);
+        }
     }
 
     private sealed record SubtitleConversionCall(

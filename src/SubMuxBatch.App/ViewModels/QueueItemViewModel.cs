@@ -264,9 +264,14 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 {
                     mediaParts.Add($"{stream.FrameRate.Value:0.###} fps");
                 }
-                if (stream.Bitrate is > 0)
+                var bitrate = MediaBitrateResolver.ResolveTrackBitrate(
+                    stream.Bitrate,
+                    _mediaInspection,
+                    "video",
+                    0);
+                if (bitrate is > 0)
                 {
-                    mediaParts.Add(FormatBitrate(stream.Bitrate.Value));
+                    mediaParts.Add(FormatBitrate(bitrate.Value));
                 }
 
                 return string.Join(" · ", mediaParts);
@@ -322,9 +327,14 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                     {
                         parts.Add($"{stream.SamplingRate.Value / 1000d:0.#} kHz");
                     }
-                    if (stream.Bitrate is > 0)
+                    var bitrate = MediaBitrateResolver.ResolveTrackBitrate(
+                        stream.Bitrate,
+                        _mediaInspection,
+                        "audio",
+                        index);
+                    if (bitrate is > 0)
                     {
-                        parts.Add(FormatBitrate(stream.Bitrate.Value));
+                        parts.Add(FormatBitrate(bitrate.Value));
                     }
                     var prefix = streams.Count > 1 ? $"{index + 1}. " : string.Empty;
                     return prefix + string.Join(" · ", parts);
@@ -429,9 +439,12 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             {
                 parts.Add(FormatFileSize(fileSize.Value));
             }
-            if (_displayInspection?.OverallBitrate is > 0)
+            var overallBitrate = MediaBitrateResolver.ResolveOverallBitrate(
+                _displayInspection,
+                _mediaInspection);
+            if (overallBitrate is > 0)
             {
-                parts.Add(FormatBitrate(_displayInspection.OverallBitrate.Value));
+                parts.Add(FormatBitrate(overallBitrate.Value));
             }
 
             return string.Join(" · ", parts);
@@ -464,9 +477,14 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                         : $" {stream.FrameRateMode}";
                     parts.Add($"{stream.FrameRate.Value:0.###} fps{mode}");
                 }
-                if (stream.Bitrate is > 0)
+                var bitrate = MediaBitrateResolver.ResolveTrackBitrate(
+                    stream.Bitrate,
+                    _mediaInspection,
+                    "video",
+                    index);
+                if (bitrate is > 0)
                 {
-                    parts.Add(FormatBitrate(stream.Bitrate.Value));
+                    parts.Add(FormatBitrate(bitrate.Value));
                 }
                 if (stream.FrameCount is > 0)
                 {
@@ -519,9 +537,14 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 {
                     parts.Add($"{stream.SamplingRate.Value / 1000d:0.#} kHz");
                 }
-                if (stream.Bitrate is > 0)
+                var bitrate = MediaBitrateResolver.ResolveTrackBitrate(
+                    stream.Bitrate,
+                    _mediaInspection,
+                    "audio",
+                    index);
+                if (bitrate is > 0)
                 {
-                    parts.Add(FormatBitrate(stream.Bitrate.Value));
+                    parts.Add(FormatBitrate(bitrate.Value));
                 }
                 if (stream.BitDepth is > 0)
                 {

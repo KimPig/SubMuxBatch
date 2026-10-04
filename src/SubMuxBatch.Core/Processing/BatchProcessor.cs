@@ -134,6 +134,15 @@ public sealed class BatchProcessor(
         {
             Report(JobState.Verifying, percent, DescribeLapseApplied(target, result));
             lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+            if (result.ShouldWarnAboutAutoStrategy(settings.LapseMode))
+            {
+                var strategyWarning = CoreText.Get(
+                    "Lapse_AutoStrategyWarning",
+                    target,
+                    result.Mode);
+                warnings.Add(strategyWarning);
+                Report(JobState.Verifying, percent, strategyWarning);
+            }
             if (!settings.WarnOnLargeLapseCorrection
                 || result.MaximumAdjustmentMilliseconds is not { } maximumAdjustment
                 || maximumAdjustment < settings.LapseLargeCorrectionWarningSeconds * 1000)

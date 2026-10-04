@@ -128,7 +128,8 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
         Add(rows, "MediaDetails_FieldContainerVersion", mediaInfo?.ContainerVersion);
         Add(rows, "MediaDetails_FieldDuration", FormatDuration(mediaInfo?.DurationNanoseconds ?? mkvInfo?.DurationNanoseconds));
         Add(rows, "MediaDetails_FieldFileSize", FormatFileSize(mediaInfo?.FileSizeBytes ?? mkvInfo?.FileSizeBytes));
-        Add(rows, "MediaDetails_FieldOverallBitrate", FormatBitrate(mediaInfo?.OverallBitrate));
+        Add(rows, "MediaDetails_FieldOverallBitrate", FormatBitrate(
+            MediaBitrateResolver.ResolveOverallBitrate(mediaInfo, mkvInfo)));
         Add(rows, "MediaDetails_FieldBitrateMode", mediaInfo?.OverallBitrateMode);
         Add(rows, "MediaDetails_FieldWritingApplication", mediaInfo?.WritingApplication);
         Add(rows, "MediaDetails_FieldWritingLibrary", mediaInfo?.WritingLibrary);
@@ -167,7 +168,8 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
             Add(rows, "MediaDetails_FieldFrameRateMode", stream?.FrameRateMode);
             Add(rows, "MediaDetails_FieldFrameCount", FormatCount(stream?.FrameCount));
             Add(rows, "MediaDetails_FieldDuration", FormatDuration(stream?.DurationNanoseconds));
-            Add(rows, "MediaDetails_FieldBitrate", FormatBitrate(stream?.Bitrate ?? mkv?.Bitrate));
+            Add(rows, "MediaDetails_FieldBitrate", FormatBitrate(
+                MediaBitrateResolver.ResolveTrackBitrate(stream?.Bitrate, mkvInfo, "video", index)));
             Add(rows, "MediaDetails_FieldBitrateMode", stream?.BitrateMode);
             Add(rows, "MediaDetails_FieldMaximumBitrate", FormatBitrate(stream?.MaximumBitrate));
             Add(rows, "MediaDetails_FieldBitDepth", FormatBitDepth(stream?.BitDepth));
@@ -215,7 +217,8 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
             Add(rows, "MediaDetails_FieldChannelLayout", stream?.ChannelLayout);
             Add(rows, "MediaDetails_FieldSamplingRate", FormatSamplingRate(stream?.SamplingRate ?? mkv?.AudioSamplingFrequency));
             Add(rows, "MediaDetails_FieldDuration", FormatDuration(stream?.DurationNanoseconds));
-            Add(rows, "MediaDetails_FieldBitrate", FormatBitrate(stream?.Bitrate ?? mkv?.Bitrate));
+            Add(rows, "MediaDetails_FieldBitrate", FormatBitrate(
+                MediaBitrateResolver.ResolveTrackBitrate(stream?.Bitrate, mkvInfo, "audio", index)));
             Add(rows, "MediaDetails_FieldBitrateMode", stream?.BitrateMode);
             Add(rows, "MediaDetails_FieldMaximumBitrate", FormatBitrate(stream?.MaximumBitrate));
             Add(rows, "MediaDetails_FieldBitDepth", FormatBitDepth(stream?.BitDepth));
