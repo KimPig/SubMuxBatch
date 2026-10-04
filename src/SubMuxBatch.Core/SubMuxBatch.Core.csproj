@@ -24,6 +24,18 @@
     <EmbeddedResource Include="$(BundledMkvLocaleKoPath)"
                       LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.locale.ko.LC_MESSAGES.mkvtoolnix.mo"
                       Condition="'$(BundledMkvLocaleKoPath)' != '' and Exists('$(BundledMkvLocaleKoPath)')" />
+    <EmbeddedResource Include="$(BundledLapseExePath)"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.lapse.exe"
+                      Condition="'$(BundledLapseExePath)' != '' and Exists('$(BundledLapseExePath)')" />
+    <EmbeddedResource Include="$(BundledLapseOnnxRuntimePath)"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.onnxruntime.dll"
+                      Condition="'$(BundledLapseOnnxRuntimePath)' != '' and Exists('$(BundledLapseOnnxRuntimePath)')" />
+    <EmbeddedResource Include="$(BundledLapseModelPath)"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.silero_vad.onnx"
+                      Condition="'$(BundledLapseModelPath)' != '' and Exists('$(BundledLapseModelPath)')" />
+    <EmbeddedResource Include="$(BundledLapseLicensePath)"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.LICENSE.txt"
+                      Condition="'$(BundledLapseLicensePath)' != '' and Exists('$(BundledLapseLicensePath)')" />
     <EmbeddedResource Include="..\..\licenses\MKVToolNix-GPL-2.0.txt"
                       LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"
                       Condition="Exists('..\..\licenses\MKVToolNix-GPL-2.0.txt')" />

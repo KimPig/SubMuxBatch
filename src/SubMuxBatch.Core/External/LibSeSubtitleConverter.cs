@@ -37,14 +37,7 @@ public interface ISubtitleConverter
 /// </summary>
 public sealed partial class LibSeSubtitleConverter : ISubtitleConverter
 {
-    private static readonly UTF8Encoding StrictUtf8 = new(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
     private static readonly UTF8Encoding OutputUtf8 = new(encoderShouldEmitUTF8Identifier: false);
-    private static readonly SemaphoreSlim ConversionGate = new(1, 1);
-
-    static LibSeSubtitleConverter() =>
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
     public async Task<SubtitleConversionResult> ConvertAsync(
         string inputPath,
@@ -74,10 +67,10 @@ public sealed partial class LibSeSubtitleConverter : ISubtitleConverter
         Subtitle subtitle;
         SubtitleFormat sourceFormat;
         string outputText;
-        await ConversionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await LibSeRuntime.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            subtitle = await ParseAsync(resolvedInput, cancellationToken).ConfigureAwait(false)
+            subtitle = await LibSeRuntime.ParseAsync(resolvedInput, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException(CoreText.Get("Subtitle_UnknownFormat", Path.GetFileName(resolvedInput)));
             sourceFormat = subtitle.OriginalFormat
                 ?? throw new InvalidOperationException(CoreText.Get("Subtitle_UnknownFormat", Path.GetFileName(resolvedInput)));
@@ -111,7 +104,7 @@ public sealed partial class LibSeSubtitleConverter : ISubtitleConverter
         }
         finally
         {
-            ConversionGate.Release();
+            LibSeRuntime.Gate.Release();
         }
 
         Directory.CreateDirectory(outputDirectory);
@@ -135,23 +128,6 @@ public sealed partial class LibSeSubtitleConverter : ISubtitleConverter
             sourceFormat.FriendlyName ?? string.Empty,
             subtitle.OriginalEncoding?.WebName,
             subtitle.Paragraphs.Count);
-    }
-
-    private static async Task<Subtitle?> ParseAsync(string inputPath, CancellationToken cancellationToken)
-    {
-        if (!Path.GetExtension(inputPath).Equals(".smi", StringComparison.OrdinalIgnoreCase))
-        {
-            return Subtitle.Parse(inputPath);
-        }
-
-        var bytes = await File.ReadAllBytesAsync(inputPath, cancellationToken).ConfigureAwait(false);
-        if (HasUnicodeBom(bytes) || IsValidUtf8(bytes))
-        {
-            return Subtitle.Parse(inputPath);
-        }
-
-        // Preserve the application's established CP949 fallback policy.
-        return Subtitle.Parse(inputPath, Encoding.GetEncoding(949));
     }
 
     private static async Task<string> CreateAssHeaderAsync(
@@ -242,26 +218,6 @@ public sealed partial class LibSeSubtitleConverter : ISubtitleConverter
             || !outputText.Contains("Dialogue:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(CoreText.Get("Subtitle_InvalidAssSections"));
-        }
-    }
-
-    private static bool HasUnicodeBom(ReadOnlySpan<byte> bytes) =>
-        bytes.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF })
-        || bytes.StartsWith(new byte[] { 0xFF, 0xFE })
-        || bytes.StartsWith(new byte[] { 0xFE, 0xFF })
-        || bytes.StartsWith(new byte[] { 0xFF, 0xFE, 0x00, 0x00 })
-        || bytes.StartsWith(new byte[] { 0x00, 0x00, 0xFE, 0xFF });
-
-    private static bool IsValidUtf8(byte[] bytes)
-    {
-        try
-        {
-            _ = StrictUtf8.GetString(bytes);
-            return true;
-        }
-        catch (DecoderFallbackException)
-        {
-            return false;
         }
     }
 

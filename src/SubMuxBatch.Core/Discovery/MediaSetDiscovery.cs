@@ -13,6 +13,7 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
         var inputSnapshot = inputs
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
+            .Where(static path => !IsInBackupDirectory(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -299,6 +300,14 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
                         continue;
                     }
 
+                    if (string.Equals(
+                            Path.GetFileName(child),
+                            ".submux-backup",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     var attributes = File.GetAttributes(child);
                     if ((attributes & FileAttributes.ReparsePoint) == 0)
                     {
@@ -315,6 +324,20 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
                 }
             }
         }
+    }
+
+    private static bool IsInBackupDirectory(string path)
+    {
+        var current = File.Exists(path) ? Path.GetDirectoryName(path) : path;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (string.Equals(Path.GetFileName(current), ".submux-backup", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            current = Path.GetDirectoryName(current);
+        }
+        return false;
     }
 
     private sealed record SuffixDirectorySnapshot(

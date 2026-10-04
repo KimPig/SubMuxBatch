@@ -282,6 +282,7 @@ public static partial class SubtitleCompatibilityNormalizer
 
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
         var text = DecodeSubtitle(bytes);
+        ValidateSrtFontColours(text);
         var normalized = FlattenRuby(text, rubyBaseFontSize * RubyFontSizeRatio);
         normalized = NormalizeSupportedHtmlTags(normalized);
         await File.WriteAllTextAsync(
@@ -289,6 +290,67 @@ public static partial class SubtitleCompatibilityNormalizer
             normalized,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task ValidateSrtFormattingForAssAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+        ValidateSrtFontColours(DecodeSubtitle(bytes));
+    }
+
+    private static void ValidateSrtFontColours(string text)
+    {
+        var invalid = new List<InvalidFontColour>();
+        var fallbackCueNumber = 0;
+        foreach (var block in SrtBlockSeparatorRegex().Split(NormalizeLineEndings(text)))
+        {
+            var lines = block.Split('\n');
+            var timestampIndex = Array.FindIndex(lines, line => SrtTimestampLineRegex().IsMatch(line));
+            if (timestampIndex < 0)
+            {
+                continue;
+            }
+
+            fallbackCueNumber++;
+            var cueNumber = timestampIndex > 0
+                            && int.TryParse(
+                                lines[timestampIndex - 1].Trim(),
+                                NumberStyles.None,
+                                CultureInfo.InvariantCulture,
+                                out var parsedCueNumber)
+                ? parsedCueNumber
+                : fallbackCueNumber;
+            var timestamp = SrtTimestampLineRegex().Match(lines[timestampIndex]);
+            var start = timestamp.Groups["start"].Value.Replace(',', '.');
+            var cueText = string.Join('\n', lines[(timestampIndex + 1)..]);
+            foreach (Match fontTag in FontTagRegex().Matches(cueText))
+            {
+                var colour = ParseNormalizedFontAttributes(fontTag.Value)
+                    .FirstOrDefault(attribute => string.Equals(
+                        attribute.Name,
+                        "color",
+                        StringComparison.OrdinalIgnoreCase));
+                if (colour is not null && !FontHexColourRegex().IsMatch(colour.Value.Trim()))
+                {
+                    invalid.Add(new InvalidFontColour(colour.Value.Trim(), cueNumber, start));
+                }
+            }
+        }
+
+        if (invalid.Count == 0)
+        {
+            return;
+        }
+
+        var first = invalid[0];
+        throw new InvalidDataException(CoreText.Get(
+            "Subtitle_UnsupportedFontColour",
+            first.Value,
+            invalid.Count,
+            first.CueNumber,
+            first.Start));
     }
 
     public static async Task<int> PrepareAssForSrtAsync(
@@ -916,6 +978,8 @@ public static partial class SubtitleCompatibilityNormalizer
     private static partial Regex AssCommentPrefixRegex();
 
     private sealed record FontAttribute(string Name, string Value);
+
+    private sealed record InvalidFontColour(string Value, int CueNumber, string Start);
 
     [GeneratedRegex(@"^[ \t]*Dialogue[ \t]*:", RegexOptions.IgnoreCase)]
     private static partial Regex AssDialoguePrefixRegex();

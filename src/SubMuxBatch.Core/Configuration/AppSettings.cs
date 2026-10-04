@@ -31,10 +31,29 @@ public enum AppLanguage
     English
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<LapseSyncMode>))]
+public enum LapseSyncMode
+{
+    Auto,
+    NoSplit,
+    Ols,
+    Split
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<LapseReferenceMode>))]
+public enum LapseReferenceMode
+{
+    Auto,
+    EmbeddedSubtitleOnly,
+    AudioOnly
+}
+
 public sealed class AppSettings
 {
     public const int MinConcurrentJobCount = 1;
     public const int MaxConcurrentJobCount = 8;
+    public const int MinLapseConfidenceThreshold = 0;
+    public const int MaxLapseConfidenceThreshold = 100;
     public const double DefaultFileColumnWeight = 2.1;
     public const double DefaultCompositionColumnWeight = 0.75;
     public const double DefaultMediaFormatColumnWeight = 0.8;
@@ -102,6 +121,14 @@ public sealed class AppSettings
     public string MaintenanceLegacyAssStyles { get; set; } = DefaultMaintenanceLegacyAssStyles;
     public string MaintenanceOutputPrefix { get; set; } = GetDefaultMaintenanceOutputPrefix(AppLanguage.System);
     public bool MaintenanceReplaceOriginal { get; set; }
+    public bool EnableLapseSync { get; set; }
+    public LapseSyncMode LapseMode { get; set; } = LapseSyncMode.Auto;
+    public LapseReferenceMode LapseReference { get; set; } = LapseReferenceMode.Auto;
+    public int LapseSplitPenalty { get; set; } = 6;
+    public int LapseConfidenceThreshold { get; set; } = 8;
+    public bool MaintenanceUpdateLapseSync { get; set; } = true;
+    public bool MaintenanceForceLapseResync { get; set; }
+    public string? SelectedPresetId { get; set; }
 
     public static string SettingsDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -274,7 +301,15 @@ public sealed class AppSettings
         MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAss,
         MaintenanceLegacyAssStyles = MaintenanceLegacyAssStyles,
         MaintenanceOutputPrefix = MaintenanceOutputPrefix,
-        MaintenanceReplaceOriginal = MaintenanceReplaceOriginal
+        MaintenanceReplaceOriginal = MaintenanceReplaceOriginal,
+        EnableLapseSync = EnableLapseSync,
+        LapseMode = LapseMode,
+        LapseReference = LapseReference,
+        LapseSplitPenalty = LapseSplitPenalty,
+        LapseConfidenceThreshold = LapseConfidenceThreshold,
+        MaintenanceUpdateLapseSync = MaintenanceUpdateLapseSync,
+        MaintenanceForceLapseResync = MaintenanceForceLapseResync,
+        SelectedPresetId = SelectedPresetId
     };
 
     public void Validate()
@@ -300,6 +335,21 @@ public sealed class AppSettings
         if (ConvertAudioToAac && !Enum.IsDefined(AudioChannelMode))
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioChannelMode"));
+        }
+
+        if (!Enum.IsDefined(LapseMode) || !Enum.IsDefined(LapseReference))
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapseMode"));
+        }
+
+        if (LapseSplitPenalty is < 1 or > 100)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapsePenalty"));
+        }
+
+        if (LapseConfidenceThreshold is < MinLapseConfidenceThreshold or > MaxLapseConfidenceThreshold)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapseConfidence"));
         }
 
         if (ConcurrentJobCount is < MinConcurrentJobCount or > MaxConcurrentJobCount)

@@ -44,26 +44,106 @@ public sealed class SubMuxMetadataTests
     [InlineData("ASS")]
     [InlineData("SRT")]
     [InlineData("SMI")]
+    [InlineData("ASS+SRT")]
+    [InlineData("ASS+SMI")]
     [InlineData(SubMuxMetadata.LegacySrtOrSmiSource)]
     [InlineData(SubMuxMetadata.LegacyAssOrUnknownSource)]
-    public void AddsAndReadsAssSourceMarker(string source)
+    public void AddsAndReadsSubtitleSourceMarker(string source)
     {
         const string ass = "[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\n";
 
-        var marked = SubMuxMetadata.AddAssSourceMarker(ass, source);
+        var marked = SubMuxMetadata.AddOrReplaceSubtitleSourceMarker(ass, source);
 
-        Assert.Contains($"; SUBMUX_ASS_SOURCE={source}", marked, StringComparison.Ordinal);
-        Assert.Equal(source, SubMuxMetadata.ReadAssSourceMarker(marked));
+        Assert.Contains($"; SUBMUX_SUBTITLE_SOURCE={source}", marked, StringComparison.Ordinal);
+        Assert.Equal(source, SubMuxMetadata.ReadSubtitleSourceMarker(marked));
     }
 
     [Fact]
-    public void ExistingAssSourceMarkerIsPreserved()
+    public void SubtitleSourceMarkerIsReadOnlyFromScriptInfo()
     {
-        const string ass = "[Script Info]\n; SUBMUX_ASS_SOURCE=ASS\nScriptType: v4.00+\n";
+        const string ass = """
+                           [Script Info]
+                           ScriptType: v4.00+
+                           [Events]
+                           Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+                           Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,; SUBMUX_SUBTITLE_SOURCE=SRT
+                           ; SUBMUX_SUBTITLE_SOURCE=SMI
+                           """;
 
-        var marked = SubMuxMetadata.AddAssSourceMarker(ass, "SMI");
-
-        Assert.Equal(ass, marked);
-        Assert.Equal("ASS", SubMuxMetadata.ReadAssSourceMarker(marked));
+        Assert.Null(SubMuxMetadata.ReadSubtitleSourceMarker(ass));
+        Assert.False(SubMuxMetadata.HasSubtitleSourceMarker(ass));
     }
+
+    [Fact]
+    public void ConflictingSubtitleSourceMarkersAreRejected()
+    {
+        const string ass = """
+                           [Script Info]
+                           ; SUBMUX_SUBTITLE_SOURCE=SRT
+                           ; SUBMUX_SUBTITLE_SOURCE=ASS
+                           ScriptType: v4.00+
+                           [Events]
+                           """;
+
+        Assert.Null(SubMuxMetadata.ReadSubtitleSourceMarker(ass));
+        Assert.True(SubMuxMetadata.HasSubtitleSourceMarker(ass));
+    }
+
+    [Fact]
+    public void LapseMarkerRoundTripsProfileInsideScriptInfo()
+    {
+        const string ass = "[Script Info]\nScriptType: v4.00+\n[Events]\n";
+
+        var marked = SubMuxMetadata.AddOrReplaceAssLapseMarker(
+            ass,
+            "auto/shifted",
+            "solid",
+            "abc",
+            applicationVersion: "2026.10.04",
+            lapseVersion: "2.2.4",
+            profile: "AUTO|AUDIOONLY|6");
+
+        Assert.True(SubMuxMetadata.HasAssLapseMarker(marked));
+        Assert.Equal("AUTO|AUDIOONLY|6", SubMuxMetadata.ReadAssLapseProfile(marked));
+    }
+
+    [Fact]
+    public void LapseMarkerTextOutsideScriptInfoIsIgnored()
+    {
+        const string ass = """
+                           [Script Info]
+                           ScriptType: v4.00+
+                           [Events]
+                           Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,; SUBMUX_LAPSE_SYNC=2026.10.04
+                           """;
+
+        Assert.False(SubMuxMetadata.HasAssLapseMarker(ass));
+    }
+
+    [Fact]
+    public void CopiesLapseMarkersWithoutCopyingDialogueTextThatLooksLikeAMarker()
+    {
+        const string source = """
+                              [Script Info]
+                              ; SUBMUX_LAPSE_SYNC=2026.10.04
+                              ; SUBMUX_LAPSE_PROFILE=AUTO|AUDIOONLY|6
+                              ; SUBMUX_LAPSE_REFERENCE=AUDIO
+                              ; SUBMUX_LAPSE_OFFSET_MS=-250
+                              ; SUBMUX_LAPSE_CONFIDENCE=0.75
+                              ScriptType: v4.00+
+                              [Events]
+                              Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,; SUBMUX_LAPSE_RESULT=fake
+                              """;
+        const string target = "[Script Info]\nScriptType: v4.00+\n[Events]\n";
+
+        var copied = SubMuxMetadata.CopyAssLapseMarkers(source, target);
+
+        Assert.Contains("; SUBMUX_LAPSE_SYNC=2026.10.04", copied);
+        Assert.Contains("; SUBMUX_LAPSE_PROFILE=AUTO|AUDIOONLY|6", copied);
+        Assert.Contains("; SUBMUX_LAPSE_REFERENCE=AUDIO", copied);
+        Assert.Contains("; SUBMUX_LAPSE_OFFSET_MS=-250", copied);
+        Assert.Contains("; SUBMUX_LAPSE_CONFIDENCE=0.75", copied);
+        Assert.DoesNotContain("SUBMUX_LAPSE_RESULT=fake", copied);
+    }
+
 }

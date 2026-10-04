@@ -1,6 +1,7 @@
 bin/
 obj/
 artifacts/
+.scratch/
 .vs/
 *.user
 *.suo

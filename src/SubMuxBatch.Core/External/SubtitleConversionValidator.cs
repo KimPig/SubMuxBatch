@@ -350,18 +350,33 @@ public static partial class SubtitleConversionValidator
     private static List<SrtCue> ParseSrt(string text)
     {
         var cues = new List<SrtCue>();
-        var normalized = NormalizeLineEndings(text).Trim();
-        if (normalized.Length == 0) return cues;
-        foreach (var block in BlankLineRegex().Split(normalized))
+        var lines = NormalizeLineEndings(text).Split('\n');
+        for (var timeIndex = 0; timeIndex < lines.Length; timeIndex++)
         {
-            var lines = block.Split('\n');
-            var timeIndex = Array.FindIndex(lines, static line => SrtTimestampRegex().IsMatch(line));
-            if (timeIndex < 0) continue;
+            if (!SrtTimestampRegex().IsMatch(lines[timeIndex])) continue;
             var time = SrtTimestampRegex().Match(lines[timeIndex]);
+            var nextTimeIndex = timeIndex + 1;
+            while (nextTimeIndex < lines.Length && !SrtTimestampRegex().IsMatch(lines[nextTimeIndex]))
+            {
+                nextTimeIndex++;
+            }
+            var textEndExclusive = nextTimeIndex;
+            if (nextTimeIndex < lines.Length
+                && nextTimeIndex > timeIndex + 1
+                && int.TryParse(lines[nextTimeIndex - 1].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                textEndExclusive--;
+            }
+            while (textEndExclusive > timeIndex + 1
+                   && string.IsNullOrWhiteSpace(lines[textEndExclusive - 1]))
+            {
+                textEndExclusive--;
+            }
             cues.Add(new SrtCue(
                 ParseSrtTime(time, "sh", "sm", "ss", "sms"),
                 ParseSrtTime(time, "eh", "em", "es", "ems"),
-                string.Join('\n', lines.Skip(timeIndex + 1))));
+                string.Join('\n', lines[(timeIndex + 1)..textEndExclusive])));
+            timeIndex = nextTimeIndex - 1;
         }
 
         return cues;
@@ -405,7 +420,7 @@ public static partial class SubtitleConversionValidator
     private static string NormalizeVisibleText(string text, bool isAss)
     {
         var visible = isAss
-            ? AssOverrideBlockRegex().Replace(text, string.Empty)
+            ? RemoveAssOverridesAndDrawings(text)
                 .Replace("\\N", "\n", StringComparison.OrdinalIgnoreCase)
                 .Replace("\\h", " ", StringComparison.OrdinalIgnoreCase)
             : AssOverrideBlockRegex().Replace(HtmlBreakRegex().Replace(text, "\n"), string.Empty);
@@ -417,7 +432,37 @@ public static partial class SubtitleConversionValidator
         visible = WebUtility.HtmlDecode(visible)
             .Replace('\u00A0', ' ')
             .Normalize(NormalizationForm.FormC);
-        return string.Join('\n', NormalizeLineEndings(visible).Split('\n').Select(static line => line.TrimEnd())).Trim();
+        return string.Join('\n', NormalizeLineEndings(visible).Split('\n').Select(static line => line.Trim())).Trim();
+    }
+
+    private static string RemoveAssOverridesAndDrawings(string text)
+    {
+        var output = new StringBuilder(text.Length);
+        var drawingScale = 0;
+        var position = 0;
+        foreach (Match block in AssOverrideBlockRegex().Matches(text))
+        {
+            if (drawingScale == 0)
+            {
+                output.Append(text, position, block.Index - position);
+            }
+            foreach (Match drawingTag in AssDrawingModeRegex().Matches(block.Value))
+            {
+                drawingScale = int.TryParse(
+                    drawingTag.Groups["scale"].Value,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var parsed)
+                    ? Math.Max(0, parsed)
+                    : drawingScale;
+            }
+            position = block.Index + block.Length;
+        }
+        if (drawingScale == 0)
+        {
+            output.Append(text, position, text.Length - position);
+        }
+        return output.ToString();
     }
 
     private static long ParseSrtTime(Match match, string hours, string minutes, string seconds, string milliseconds) =>
@@ -456,9 +501,6 @@ public static partial class SubtitleConversionValidator
     private sealed record InlineStyleState(string? FontName, string? Colour, double? FontSize);
     private sealed record StyledCharacter(int Value, InlineStyleState Style);
 
-    [GeneratedRegex(@"\n[\t ]*\n+")]
-    private static partial Regex BlankLineRegex();
-
     [GeneratedRegex(@"(?<sh>\d{1,3}):(?<sm>\d{2}):(?<ss>\d{2})[,.](?<sms>\d{3})\s*-->\s*(?<eh>\d{1,3}):(?<em>\d{2}):(?<es>\d{2})[,.](?<ems>\d{3})")]
     private static partial Regex SrtTimestampRegex();
 
@@ -485,6 +527,9 @@ public static partial class SubtitleConversionValidator
 
     [GeneratedRegex(@"\{[^{}]*\}")]
     private static partial Regex AssOverrideBlockRegex();
+
+    [GeneratedRegex(@"\\p(?<scale>-?\d+)(?=\\|\}|\s)", RegexOptions.IgnoreCase)]
+    private static partial Regex AssDrawingModeRegex();
 
     [GeneratedRegex(@"<br\s*/?>", RegexOptions.IgnoreCase)]
     private static partial Regex HtmlBreakRegex();

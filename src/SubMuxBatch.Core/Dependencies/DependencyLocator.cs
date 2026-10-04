@@ -18,80 +18,20 @@ public sealed record DependencyReport(ToolDependency MkvMerge)
 
 public sealed class DependencyLocator
 {
-    private readonly string _applicationDirectory;
     private readonly string _bundledMkvMergePath;
 
     public DependencyLocator(string? applicationDirectory = null, string? bundledMkvMergePath = null)
     {
-        _applicationDirectory = applicationDirectory ?? AppContext.BaseDirectory;
         _bundledMkvMergePath = bundledMkvMergePath ?? BundledMkvToolNixProvider.MkvMergePath;
     }
 
     public DependencyReport Locate(string? configuredMkvMerge, bool preferConfigured = false)
     {
-        var automaticCandidates = new[]
+        var resolved = TryNormalize(_bundledMkvMergePath);
+
+        if (resolved is null || !File.Exists(resolved))
         {
-            _bundledMkvMergePath,
-            Path.Combine(_applicationDirectory, "tools", "mkvtoolnix", "mkvmerge.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MKVToolNix", "mkvmerge.exe")
-        };
-        var mkvMerge = LocateTool(
-            "MKVToolNix",
-            "mkvmerge.exe",
-            configuredMkvMerge,
-            automaticCandidates,
-            preferConfigured);
-
-        return new DependencyReport(mkvMerge);
-    }
-
-    private static ToolDependency LocateTool(
-        string displayName,
-        string executableName,
-        string? configuredPath,
-        IReadOnlyList<string> candidates,
-        bool preferConfigured)
-    {
-        var paths = new List<string>();
-        var normalizedAutomaticCandidates = candidates
-            .Select(TryNormalize)
-            .Where(static path => path is not null)
-            .Cast<string>()
-            .ToArray();
-        var normalizedConfiguredPath = string.IsNullOrWhiteSpace(configuredPath)
-            ? null
-            : TryNormalize(configuredPath);
-        var configuredPathIsAutomatic = !preferConfigured
-                                        && normalizedConfiguredPath is not null
-                                        && normalizedAutomaticCandidates.Contains(
-                                            normalizedConfiguredPath,
-                                            StringComparer.OrdinalIgnoreCase);
-        if (normalizedConfiguredPath is not null && !configuredPathIsAutomatic)
-        {
-            paths.Add(normalizedConfiguredPath);
-        }
-
-        paths.AddRange(candidates);
-        if (normalizedConfiguredPath is not null && configuredPathIsAutomatic)
-        {
-            paths.Add(normalizedConfiguredPath);
-        }
-
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (!string.IsNullOrWhiteSpace(pathValue))
-        {
-            paths.AddRange(pathValue
-                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(directory => Path.Combine(directory, executableName)));
-        }
-
-        var resolved = paths
-            .Select(TryNormalize)
-            .FirstOrDefault(static path => path is not null && File.Exists(path));
-
-        if (resolved is null)
-        {
-            return new ToolDependency(displayName, executableName, null, null);
+            return new DependencyReport(new ToolDependency("MKVToolNix", "mkvmerge.exe", null, null));
         }
 
         string? version = null;
@@ -105,7 +45,7 @@ public sealed class DependencyLocator
             // A version is informative only; an executable can still be used without it.
         }
 
-        return new ToolDependency(displayName, executableName, resolved, version);
+        return new DependencyReport(new ToolDependency("MKVToolNix", "mkvmerge.exe", resolved, version));
     }
 
     private static string? TryNormalize(string path)

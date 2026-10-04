@@ -218,6 +218,41 @@ public sealed class MkvMergeWarningTests
         }
     }
 
+    [Fact]
+    public async Task MaintenanceMuxAlsoFailsAndDeletesOutputForFatalSourceWarnings()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-batch-maintenance-damage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            const string warning = "source.mkv: Error in the Matroska file structure at position 503098. Resyncing to the next level 1 element.";
+            var runner = new MaintenanceWarningRunner(output, warning);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new MkvMergeClient("fake-mkvmerge.exe", runner).MaintainAsync(
+                    source,
+                    output,
+                    [],
+                    [],
+                    false,
+                    null,
+                    null,
+                    null,
+                    false,
+                    false));
+
+            Assert.Contains("Matroska", exception.Message);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class WarningRunner(
         string outputPath,
         int exitCode,
@@ -245,6 +280,28 @@ public sealed class MkvMergeWarningTests
             {
                 yield return line;
             }
+        }
+    }
+
+    private sealed class MaintenanceWarningRunner(string outputPath, string warning) : IProcessRunner
+    {
+        public async Task<ProcessResult> RunAsync(
+            ProcessRequest request,
+            Action<string>? onOutput = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (request.Arguments.Contains("-J"))
+            {
+                const string inspection = """
+                    {"tracks":[{"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC"}}],"attachments":[],"chapters":[]}
+                    """;
+                return new ProcessResult(0, inspection, string.Empty);
+            }
+
+            await File.WriteAllBytesAsync(outputPath, [1], cancellationToken);
+            var standardOutput = $"#GUI#progress 100%\n#GUI#warning {warning}\n";
+            onOutput?.Invoke($"#GUI#warning {warning}");
+            return new ProcessResult(1, standardOutput, string.Empty);
         }
     }
 }

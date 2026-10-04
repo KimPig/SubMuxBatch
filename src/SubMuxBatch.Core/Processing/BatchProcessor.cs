@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Globalization;
 using System.Text;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Dependencies;
@@ -14,7 +15,8 @@ public sealed class BatchProcessor(
     IProcessRunner processRunner,
     IInstalledFontResolver? installedFontResolver = null,
     ISubtitleConverter? subtitleConverter = null,
-    IAudioTranscoder? audioTranscoder = null)
+    IAudioTranscoder? audioTranscoder = null,
+    ILapseSynchronizer? lapseSynchronizer = null)
 {
     private readonly IInstalledFontResolver _installedFontResolver =
         installedFontResolver ?? InstalledFontResolver.System;
@@ -22,6 +24,8 @@ public sealed class BatchProcessor(
         subtitleConverter ?? new LibSeSubtitleConverter();
     private readonly IAudioTranscoder _audioTranscoder =
         audioTranscoder ?? new BundledFfmpegAudioTranscoder(processRunner);
+    private readonly ILapseSynchronizer _lapseSynchronizer =
+        lapseSynchronizer ?? new BundledLapseSynchronizer(processRunner);
 
     public async Task<JobResult> ProcessAsync(
         MediaSet media,
@@ -42,6 +46,7 @@ public sealed class BatchProcessor(
         }
 
         var warnings = plan.Warnings.ToList();
+        var lapseAppliedSummaries = new List<string>();
         var currentState = JobState.Ready;
         var currentPercent = 0;
         BackupArtifactTransaction? backupTransaction = null;
@@ -115,6 +120,29 @@ public sealed class BatchProcessor(
             progress?.Report(new JobProgress(state, currentPercent, message));
         }
 
+        void ReportLapseStart(string target, int percent) =>
+            Report(
+                JobState.Verifying,
+                percent,
+                CoreText.Get(
+                    "Batch_LapseStart",
+                    target,
+                    settings.LapseMode.ToString().ToLowerInvariant(),
+                    settings.LapseConfidenceThreshold));
+
+        void ReportLapseApplied(string target, LapseSyncResult result, int percent)
+        {
+            Report(JobState.Verifying, percent, DescribeLapseApplied(target, result));
+            lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+        }
+
+        void ReportLapseNotApplied(string target, LapseSyncResult result, int percent)
+        {
+            Report(JobState.Verifying, percent, DescribeLapseWarning(target, result));
+            var summary = CoreText.Get("Batch_LapseSummaryKept");
+            if (!warnings.Contains(summary, StringComparer.Ordinal)) warnings.Add(summary);
+        }
+
         async Task TryBackupAsync(
             string backupName,
             string progressMessage,
@@ -159,11 +187,11 @@ public sealed class BatchProcessor(
         {
             settings.Validate();
             ValidateInputs(media, plan);
-            var assSourceTag = GetAssSourceTagValue(media, plan);
+            var subtitleSourceTag = GetSubtitleSourceTagValue(plan);
             Report(
                 JobState.Verifying,
                 2,
-                CoreText.Get("Batch_SubtitleDecision", plan.Description, assSourceTag));
+                CoreText.Get("Batch_SubtitleDecision", plan.Description, subtitleSourceTag));
 
             var preferredOutputPath = Path.Combine(
                 media.Key.DirectoryPath,
@@ -171,6 +199,16 @@ public sealed class BatchProcessor(
 
             await using var workspace = JobWorkspace.Create(media.Key.DirectoryPath);
             var mkvMerge = new MkvMergeClient(dependencies.MkvMerge.Path, processRunner);
+            Report(JobState.Verifying, 4, CoreText.Get("Batch_InspectSource"));
+            var sourceIdentification = await mkvMerge
+                .IdentifyAsync(media.VideoPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var sourceInspection = sourceIdentification.Inspection;
+            var sourceManagedSubtitleTrackIds = LapseReferenceSelector.FindSubMuxManagedSubtitleTrackIds(sourceInspection);
+            var externalSubtitleReplacements = new List<ExternalSubtitleReplacement>();
+            LapseSyncResult? assLapseResult = null;
+            string? assLapseSourceHash = null;
+            string? synchronizedExistingAssPath = null;
             string? globalTagsPath = null;
             if (settings.AddSubMuxTag)
             {
@@ -195,6 +233,43 @@ public sealed class BatchProcessor(
                     normalizedExistingAss,
                     cancellationToken).ConfigureAwait(false);
                 AddNegativeTimestampWarnings("ASS", sourceAssAdjustments);
+
+                if (settings.EnableLapseSync)
+                {
+                    var sourceText = await File.ReadAllTextAsync(normalizedExistingAss, cancellationToken).ConfigureAwait(false);
+                    if (!SubMuxMetadata.HasAssLapseMarker(sourceText))
+                    {
+                        var synchronizedAss = Path.Combine(workspace.Path, "lapse-synchronized.ass");
+                        assLapseSourceHash = LapseSubtitleMetadata.ComputeSha256(media.AssPath);
+                        ReportLapseStart("ASS", 7);
+                        assLapseResult = await RunLapseAsync(
+                            media.VideoPath,
+                            normalizedExistingAss,
+                            synchronizedAss,
+                            sourceInspection,
+                            settings,
+                            sourceManagedSubtitleTrackIds,
+                            7,
+                            progress,
+                            LogToolOutput,
+                            cancellationToken).ConfigureAwait(false);
+                        if (assLapseResult.Applied)
+                        {
+                            LapseSubtitleMetadata.ValidateTimingOnlyChange(normalizedExistingAss, synchronizedAss);
+                            normalizedExistingAss = synchronizedAss;
+                            synchronizedExistingAssPath = media.AssPath;
+                            ReportLapseApplied("ASS", assLapseResult, 7);
+                        }
+                        else
+                        {
+                            ReportLapseNotApplied("ASS", assLapseResult, 7);
+                        }
+                    }
+                    else
+                    {
+                        Report(JobState.Verifying, 7, CoreText.Get("Batch_LapseAlreadyApplied"));
+                    }
+                }
             }
 
             string finalSrt;
@@ -256,6 +331,21 @@ public sealed class BatchProcessor(
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            var finalSrtTextForMarker = await File.ReadAllTextAsync(finalSrt, cancellationToken).ConfigureAwait(false);
+            var existingSrtLapseMarker = LapseSubtitleMetadata.ReadSrtMarker(finalSrtTextForMarker);
+            var srtAlreadyLapseMarked = LapseSubtitleMetadata.HasSrtMarker(finalSrtTextForMarker);
+            if (srtAlreadyLapseMarked)
+            {
+                var markerFreeSrt = Path.Combine(workspace.Path, "marker-free.srt");
+                await File.WriteAllTextAsync(
+                    markerFreeSrt,
+                    LapseSubtitleMetadata.RemoveSrtMarkers(await File.ReadAllTextAsync(finalSrt, cancellationToken).ConfigureAwait(false)),
+                    new UTF8Encoding(false),
+                    cancellationToken).ConfigureAwait(false);
+                finalSrt = markerFreeSrt;
+                Report(JobState.Verifying, 9, CoreText.Get("Batch_LapseAlreadyApplied"));
+            }
+
             var normalizedSrt = Path.Combine(workspace.Path, "normalized.srt");
             var timestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSrtTimestampsAsync(
                 finalSrt,
@@ -267,6 +357,73 @@ public sealed class BatchProcessor(
             if (new FileInfo(finalSrt).Length == 0)
             {
                 throw new JobSkippedException(CoreText.Get("Batch_SkipNoValidSubtitleCues"));
+            }
+
+            if (plan.AssSource == AssSourceKind.ConvertFromSrt)
+            {
+                try
+                {
+                    await SubtitleCompatibilityNormalizer.ValidateSrtFormattingForAssAsync(
+                        finalSrt,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (InvalidDataException exception)
+                {
+                    throw new JobSkippedException(exception.Message);
+                }
+            }
+
+            if (settings.EnableLapseSync
+                && plan.SrtSource != SrtSourceKind.ConvertFromAss
+                && !srtAlreadyLapseMarked)
+            {
+                if (plan.SrtSource == SrtSourceKind.ConvertFromSmi
+                    && File.Exists(Path.ChangeExtension(media.SmiPath!, ".srt")))
+                {
+                    var warning = CoreText.Get("Batch_LapseSmiTargetExists", Path.ChangeExtension(media.SmiPath!, ".srt"));
+                    warnings.Add(warning);
+                    Report(JobState.Verifying, 12, warning);
+                }
+                else
+                {
+                    var synchronizedSrt = Path.Combine(workspace.Path, "lapse-synchronized.srt");
+                    var originalExternal = plan.SrtSource == SrtSourceKind.ConvertFromSmi ? media.SmiPath! : media.SrtPath!;
+                    var srtLapseSourceHash = LapseSubtitleMetadata.ComputeSha256(originalExternal);
+                    ReportLapseStart("SRT", 12);
+                    var srtLapseResult = await RunLapseAsync(
+                        media.VideoPath,
+                        finalSrt,
+                        synchronizedSrt,
+                        sourceInspection,
+                        settings,
+                        sourceManagedSubtitleTrackIds,
+                        12,
+                        progress,
+                        LogToolOutput,
+                        cancellationToken).ConfigureAwait(false);
+                    if (srtLapseResult.Applied)
+                    {
+                        LapseSubtitleMetadata.ValidateTimingOnlyChange(finalSrt, synchronizedSrt);
+                        finalSrt = synchronizedSrt;
+                        externalSubtitleReplacements.Add(new ExternalSubtitleReplacement(
+                            originalExternal,
+                            synchronizedSrt,
+                            srtLapseResult,
+                            sourceInspection.DurationNanoseconds,
+                            addSrtMarker: true,
+                            settingsProfile: LapseSubtitleMetadata.CreateSettingsProfile(settings)));
+                        if (plan.AssSource == AssSourceKind.ConvertFromSrt)
+                        {
+                            assLapseResult = srtLapseResult;
+                            assLapseSourceHash = srtLapseSourceHash;
+                        }
+                        ReportLapseApplied("SRT", srtLapseResult, 12);
+                    }
+                    else
+                    {
+                        ReportLapseNotApplied("SRT", srtLapseResult, 12);
+                    }
+                }
             }
 
             string finalAss;
@@ -375,13 +532,60 @@ public sealed class BatchProcessor(
 
             if (settings.AddSubMuxTag)
             {
-                var markedAss = SubMuxMetadata.AddAssSourceMarker(
+                var markedAss = SubMuxMetadata.AddOrReplaceSubtitleSourceMarker(
                     await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false),
-                    assSourceTag);
+                    subtitleSourceTag);
                 await File.WriteAllTextAsync(
                     finalAss,
                     markedAss,
                     new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (assLapseResult?.Applied == true)
+            {
+                var markedAss = SubMuxMetadata.AddOrReplaceAssLapseMarker(
+                    await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false),
+                    assLapseResult.Mode,
+                    "solid",
+                    assLapseSourceHash ?? LapseSubtitleMetadata.ComputeSha256(
+                        plan.AssSource == AssSourceKind.Existing ? media.AssPath! : finalSrt),
+                    profile: LapseSubtitleMetadata.CreateSettingsProfile(settings),
+                    reference: assLapseResult.Reference,
+                    offsetMilliseconds: assLapseResult.OffsetMilliseconds,
+                    ratio: assLapseResult.Ratio,
+                    confidence: assLapseResult.Confidence);
+                await File.WriteAllTextAsync(
+                    finalAss,
+                    markedAss,
+                    new UTF8Encoding(false),
+                    cancellationToken).ConfigureAwait(false);
+                if (plan.AssSource == AssSourceKind.Existing && synchronizedExistingAssPath is not null)
+                {
+                    externalSubtitleReplacements.Add(new ExternalSubtitleReplacement(
+                        synchronizedExistingAssPath,
+                        finalAss,
+                        assLapseResult,
+                        sourceInspection.DurationNanoseconds,
+                        addSrtMarker: false,
+                        settingsProfile: LapseSubtitleMetadata.CreateSettingsProfile(settings)));
+                }
+            }
+            else if (srtAlreadyLapseMarked && plan.AssSource == AssSourceKind.ConvertFromSrt)
+            {
+                var markedAss = SubMuxMetadata.AddOrReplaceAssLapseMarker(
+                    await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false),
+                    "existing",
+                    "solid",
+                    LapseSubtitleMetadata.ComputeSha256(media.SrtPath!),
+                    applicationVersion: existingSrtLapseMarker?.ApplicationVersion,
+                    lapseVersion: existingSrtLapseMarker?.LapseVersion,
+                    profile: existingSrtLapseMarker?.SettingsProfile,
+                    reference: existingSrtLapseMarker?.Reference);
+                await File.WriteAllTextAsync(
+                    finalAss,
+                    markedAss,
+                    new UTF8Encoding(false),
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -395,7 +599,6 @@ public sealed class BatchProcessor(
                     settings,
                     workspace.Path,
                     warnings,
-                    LogToolOutput,
                     cancellationToken).ConfigureAwait(false);
                 Report(
                     JobState.Verifying,
@@ -403,11 +606,6 @@ public sealed class BatchProcessor(
                     ProcessingDecisionFormatter.DescribeFontAttachments(fontAttachments));
             }
 
-            Report(JobState.Verifying, 34, CoreText.Get("Batch_InspectSource"));
-            var sourceIdentification = await mkvMerge
-                .IdentifyAsync(media.VideoPath, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            var sourceInspection = sourceIdentification.Inspection;
             var audioDecisionPlan = settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage
                 ? AudioConversionPlanner.Create(sourceInspection, settings)
                 : null;
@@ -439,7 +637,7 @@ public sealed class BatchProcessor(
                 Report(
                     JobState.Verifying,
                     35,
-                    CoreText.Get("Batch_AddTagsDecision", SubMuxMetadata.GetApplicationVersion(), assSourceTag));
+                    CoreText.Get("Batch_AddTagsDecision", SubMuxMetadata.GetApplicationVersion(), subtitleSourceTag));
             }
             var needsAudioPlan = settings.ConvertAudioToAac
                                  || (settings.BackupExcludedAudioTracks && settings.FilterAudioTracksByLanguage);
@@ -642,30 +840,30 @@ public sealed class BatchProcessor(
 
             Report(JobState.Verifying, 98, CoreText.Get("Batch_VerifyCommittedOutput"));
             ValidateCommittedOutputFile(outputPath, partialLength);
-            var committedInspection = await mkvMerge.InspectAsync(
-                    outputPath,
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            var committedValidationErrors = MkvMergeClient.ValidateOutput(
-                sourceInspection,
-                committedInspection,
-                removeExistingSubtitles: settings.RemoveExistingSubtitles,
-                removeExistingFontAttachments: settings.RemoveExistingFontAttachments,
-                removeChapters: settings.RemoveChapters,
-                keepOnlyAudioLanguage: !settings.ConvertAudioToAac && settings.FilterAudioTracksByLanguage
-                    ? settings.SelectedAudioLanguage
-                    : null,
-                addedFontAttachments: fontAttachments,
-                cleanOutputMetadata: settings.CleanOutputMetadata,
-                audioMuxPlan: audioMuxPlan);
-            if (committedValidationErrors.Count > 0)
+            Report(JobState.Verifying, 99, ProcessingDecisionFormatter.DescribeVerifiedOutput(outputInspection));
+
+            foreach (var externalSubtitleReplacement in externalSubtitleReplacements)
             {
-                throw new InvalidOperationException(
-                    CoreText.Get("Batch_OutputValidationFailed")
-                    + Environment.NewLine
-                    + string.Join(Environment.NewLine, committedValidationErrors));
+                try
+                {
+                    var replacedPath = await externalSubtitleReplacement.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    Report(JobState.Verifying, 99, CoreText.Get("Batch_LapseExternalCommitted", replacedPath));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    var warning = CoreText.Get("Batch_LapseExternalCommitFailed", exception.Message);
+                    warnings.Add(warning);
+                    Report(JobState.Verifying, 99, warning);
+                }
             }
-            Report(JobState.Verifying, 99, ProcessingDecisionFormatter.DescribeVerifiedOutput(committedInspection));
+
+            if (lapseAppliedSummaries.Count > 0)
+            {
+                Report(
+                    JobState.Verifying,
+                    99,
+                    CoreText.Get("Batch_LapseSummaryApplied", string.Join(" · ", lapseAppliedSummaries)));
+            }
 
             Report(JobState.Verifying, 99, CoreText.Get("Batch_CleanupWorkspace"));
             await workspace.DisposeAsync().ConfigureAwait(false);
@@ -695,14 +893,92 @@ public sealed class BatchProcessor(
         }
     }
 
-    internal static string GetAssSourceTagValue(MediaSet media, ConversionPlan plan)
+    private async Task<LapseSyncResult> RunLapseAsync(
+        string mediaPath,
+        string subtitlePath,
+        string outputPath,
+        MkvInspection sourceInspection,
+        AppSettings settings,
+        IReadOnlySet<int>? excludedSubtitleTrackIds,
+        int progressPercent,
+        IProgress<JobProgress>? progress,
+        Action<string>? onOutput,
+        CancellationToken cancellationToken)
     {
-        if (plan.AssSource == AssSourceKind.Existing)
+        LapseReferenceSelection reference;
+        try
         {
-            return "ASS";
+            reference = LapseReferenceSelector.Select(sourceInspection, settings, excludedSubtitleTrackIds);
+            progress?.Report(new JobProgress(
+                JobState.Verifying,
+                progressPercent,
+                CoreText.Get("Batch_LapseReferenceSelected", reference.Description)));
+        }
+        catch (Exception exception)
+        {
+            return new LapseSyncResult(LapseVerdict.Failed, settings.LapseMode.ToString(), "—", null, null, null, 0, [], null, exception.Message);
+        }
+        var result = await _lapseSynchronizer.SynchronizeAsync(
+            new LapseSyncRequest(
+                mediaPath, subtitlePath, outputPath, settings.LapseMode,
+                settings.LapseSplitPenalty, reference, settings.LapseConfidenceThreshold),
+            onOutput,
+            cancellationToken).ConfigureAwait(false);
+        if (reference.SubtitleOrdinal is not null
+            && string.Equals(result.Reference, "vad", StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report(new JobProgress(
+                JobState.Verifying,
+                progressPercent,
+                CoreText.Get("Batch_LapseReferenceFallback", reference.Description)));
         }
 
-        return plan.SrtSource == SrtSourceKind.ConvertFromSmi ? "SMI" : "SRT";
+        return result;
+    }
+
+    private static string DescribeLapseApplied(string target, LapseSyncResult result) =>
+        CoreText.Get(
+            "Batch_LapseApplied",
+            target,
+            result.Mode,
+            result.Reference,
+            FormatLapseConfidence(result.Confidence),
+            result.OffsetMilliseconds ?? 0);
+
+    private static string DescribeLapseWarning(string target, LapseSyncResult result) => result.Verdict switch
+    {
+        LapseVerdict.Unsure => CoreText.Get(
+            "Batch_LapseUnsure",
+            target,
+            result.Mode,
+            result.Reference,
+            FormatLapseConfidence(result.Confidence),
+            result.OffsetMilliseconds ?? 0),
+        LapseVerdict.Nothing => CoreText.Get(
+            "Batch_LapseNothing",
+            target,
+            result.Mode,
+            result.Reference,
+            FormatLapseConfidence(result.Confidence)),
+        _ => CoreText.Get("Batch_LapseFailed", target, result.Error ?? "Unknown error")
+    };
+
+    private static string FormatLapseConfidence(double? value) =>
+        value?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—";
+
+    internal static string GetSubtitleSourceTagValue(ConversionPlan plan)
+    {
+        if (plan.AssSource != AssSourceKind.Existing)
+        {
+            return plan.SrtSource == SrtSourceKind.ConvertFromSmi ? "SMI" : "SRT";
+        }
+
+        return plan.SrtSource switch
+        {
+            SrtSourceKind.Existing => "ASS+SRT",
+            SrtSourceKind.ConvertFromSmi => "ASS+SMI",
+            _ => "ASS"
+        };
     }
 
     private static void ValidateInputs(MediaSet media, ConversionPlan plan)
@@ -762,7 +1038,6 @@ public sealed class BatchProcessor(
         AppSettings settings,
         string workspacePath,
         ICollection<string> warnings,
-        Action<string> log,
         CancellationToken cancellationToken)
     {
         var assText = await ReadSubtitleTextAsync(assPath, cancellationToken).ConfigureAwait(false);
@@ -824,7 +1099,6 @@ public sealed class BatchProcessor(
                         500,
                         false,
                         "SubMux Sans");
-                    log(CoreText.Get("Batch_BundledFontSelected", requirement.FamilyName));
                 }
                 else
                 {
@@ -834,14 +1108,6 @@ public sealed class BatchProcessor(
                 }
             }
 
-            var matchLabel = CoreText.Get($"FontMatch_{match.MatchKind}");
-            log(CoreText.Get(
-                "Batch_FontSelected",
-                requirement.FamilyName,
-                requirement.Weight,
-                requirement.Italic ? CoreText.Get("Font_Italic") : CoreText.Get("Font_Upright"),
-                match.File.FilePath,
-                matchLabel));
             if (match.MatchKind == InstalledFontMatchKind.RegistryAlias)
             {
                 warnings.Add(CoreText.Get(

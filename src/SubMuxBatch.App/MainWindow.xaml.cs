@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -29,6 +30,24 @@ using SubMuxBatch.Core.Updates;
 
 namespace SubMuxBatch.App;
 
+internal enum PresetMenuAction
+{
+    None,
+    SaveCurrent,
+    SaveAsNew,
+    CreateDefaults,
+    Rename,
+    Delete,
+    OpenFolder
+}
+
+internal sealed record PresetMenuEntry(
+    string Label,
+    string? PresetId = null,
+    PresetMenuAction Action = PresetMenuAction.None,
+    bool IsSeparator = false,
+    bool IsEnabled = true);
+
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private const string QueueItemsDragFormat = "SubMuxBatch.QueueItems";
@@ -36,10 +55,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const double MinimumDragDistance = 6;
     private const double MinimumQueueColumnWidth = 48;
     private readonly DependencyLocator _dependencyLocator = new();
-    private readonly BundledMkvToolNixProvider _bundledMkvToolNixProvider = new();
+    private readonly BundledToolManager _bundledToolManager = new();
     private readonly GitHubReleaseClient _releaseClient = new();
     private AppSettings _settings = new();
+    private ProcessingPresetStore? _presetStore;
+    private bool _updatingPresetSelection;
+    private bool _presetHasUnsavedChanges;
     private DependencyReport? _dependencies;
+    private BundledToolStatus? _bundledToolStatus;
     private CancellationTokenSource? _processingCancellation;
     private CancellationTokenSource? _scanCancellation;
     private SessionLogger? _logger;
@@ -65,6 +88,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _queueScrollBarPointerDown;
     private bool _queueColumnWidthsDirty;
     private bool _maintenanceMode;
+    private bool _openToolsSettingsRequested;
     private bool _openMaintenanceSettingsRequested;
     private ScrollViewer? _queueScrollViewer;
     private bool _queueEndSpacerVisible;
@@ -124,6 +148,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ObservableCollection<QueueItemViewModel> Jobs { get; } = [];
     public ObservableCollection<object> QueueRows { get; } = [];
     public bool QueueHeaderCommandsEnabled => !IsInteractionLocked;
+    public Brush PresetNameBrush => _presetHasUnsavedChanges
+        ? new SolidColorBrush(Color.FromRgb(196, 43, 28))
+        : (Brush)FindResource("AccentBrush");
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void Jobs_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -219,12 +246,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         WindowPlacementHelper.FitToCurrentWorkingArea(this);
         _settings = AppSettings.Load();
+        _presetStore = ProcessingPresetStore.LoadOrCreate(
+            _settings,
+            initialPresetName: AppText.Get("Preset_Default"));
+        var selectedPreset = _presetStore.Selected(_settings);
+        selectedPreset.Settings.ApplyTo(_settings);
+        _settings.SelectedPresetId = selectedPreset.Id;
+        _settings.Save();
+        RefreshPresetSelector();
         RefreshQueueColumnPresentation();
         _logger = new SessionLogger();
         AppendLog(AppText.Get("Log_AppStarted"));
+        foreach (var warning in _presetStore.LoadWarnings)
+        {
+            AppendLog(AppText.Get("Log_PresetLoadWarning", warning));
+        }
         try
         {
-            await _bundledMkvToolNixProvider.EnsureAvailableAsync();
+            _bundledToolStatus = await _bundledToolManager.EnsureAvailableAsync();
+            if (!_bundledToolStatus.IsHealthy)
+            {
+                AppendLog(AppText.Get("Log_BundledToolsFailed", _bundledToolStatus.Error ?? "Unknown error"));
+            }
         }
         catch (Exception exception)
         {
@@ -362,10 +405,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             EmptyDropPromptText.Text = AppText.Get(
                 _maintenanceMode ? "Main_MaintenanceDropPrompt" : "Main_DropPrompt");
-        }
-        if (StartButton is not null)
-        {
-            StartButton.Content = AppText.Get(_maintenanceMode ? "Main_StartMaintenance" : "Main_StartAllReady");
         }
         if (MaintenanceSettingsButton is not null)
         {
@@ -1639,17 +1678,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var openMaintenanceTab = _openMaintenanceSettingsRequested;
+        var openToolsTab = _openToolsSettingsRequested;
         _openMaintenanceSettingsRequested = false;
-        var dialog = new SettingsWindow(_settings.Copy(), _dependencies, openMaintenanceTab)
+        _openToolsSettingsRequested = false;
+        var dialog = new SettingsWindow(_settings.Copy(), _bundledToolStatus, openMaintenanceTab, openToolsTab)
         {
             Owner = this,
             UpdateCheckRequested = owner => CheckForUpdatesAsync(owner, showResult: true)
         };
-        if (dialog.ShowDialog() == true)
+        var settingsAccepted = dialog.ShowDialog() == true;
+        _bundledToolStatus = await _bundledToolManager.EnsureAvailableAsync();
+        if (settingsAccepted)
         {
             var matchingChanged = _settings.AllowSubtitleSuffixMatch != dialog.Settings.AllowSubtitleSuffixMatch;
             var languageChanged = App.RequiresLanguageRestart(dialog.Settings.Language);
             _settings = dialog.Settings;
+            RefreshPresetSelector();
             RefreshQueueColumnPresentation();
             foreach (var job in Jobs)
             {
@@ -1685,6 +1729,294 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 }
             }
         }
+        else
+        {
+            RefreshDependencies();
+        }
+    }
+
+    private void RefreshPresetSelector()
+    {
+        if (PresetComboBox is null || _presetStore is null) return;
+        var selected = _presetStore.Selected(_settings);
+        var current = ProcessingPresetSettings.Capture(_settings);
+        var modified = !string.Equals(
+            JsonSerializer.Serialize(selected.Settings),
+            JsonSerializer.Serialize(current),
+            StringComparison.Ordinal);
+        _presetHasUnsavedChanges = modified;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PresetNameBrush)));
+        var entries = _presetStore.Items
+            .Select(item => new PresetMenuEntry(
+                item.Name,
+                item.Id))
+            .ToList();
+        entries.Add(new PresetMenuEntry(string.Empty, IsSeparator: true));
+        entries.Add(new PresetMenuEntry(AppText.Get("Preset_SaveCurrent"), Action: PresetMenuAction.SaveCurrent));
+        entries.Add(new PresetMenuEntry(AppText.Get("Preset_SaveAsNew"), Action: PresetMenuAction.SaveAsNew));
+        entries.Add(new PresetMenuEntry(AppText.Get("Preset_CreateDefaults"), Action: PresetMenuAction.CreateDefaults));
+        entries.Add(new PresetMenuEntry(AppText.Get("Preset_Rename"), Action: PresetMenuAction.Rename));
+        entries.Add(new PresetMenuEntry(
+            AppText.Get("Preset_Delete"),
+            Action: PresetMenuAction.Delete,
+            IsEnabled: _presetStore.Items.Count > 1));
+        entries.Add(new PresetMenuEntry(string.Empty, IsSeparator: true));
+        entries.Add(new PresetMenuEntry(AppText.Get("Preset_OpenFolder"), Action: PresetMenuAction.OpenFolder));
+
+        _updatingPresetSelection = true;
+        try
+        {
+            PresetComboBox.ItemsSource = entries;
+            PresetComboBox.SelectedItem = entries.First(item => string.Equals(item.PresetId, selected.Id, StringComparison.Ordinal));
+            PresetComboBox.ToolTip = modified
+                ? AppText.Get("Main_PresetModifiedTooltip", selected.Name)
+                : selected.Name;
+        }
+        finally
+        {
+            _updatingPresetSelection = false;
+        }
+    }
+
+    private async Task ApplyPresetAsync(ProcessingPreset preset)
+    {
+        var matchingChanged = _settings.AllowSubtitleSuffixMatch != preset.Settings.AllowSubtitleSuffixMatch;
+        preset.Settings.ApplyTo(_settings);
+        _settings.SelectedPresetId = preset.Id;
+        _settings.Save();
+        foreach (var job in Jobs)
+        {
+            job.RefreshPresentation(_settings);
+            job.RefreshMaintenancePlan(_settings);
+        }
+        if (matchingChanged && Jobs.Count > 0)
+        {
+            var inputs = Jobs.SelectMany(static job => job.Media.CandidateVideoPaths.Concat(new[]
+            {
+                job.Media.AssPath, job.Media.SrtPath, job.Media.SmiPath
+            }.OfType<string>())).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            await AddPathsAsync(inputs, replaceQueue: true);
+        }
+        UpdateControls();
+        AppendLog(AppText.Get("Log_PresetApplied", preset.Name));
+    }
+
+    private async void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingPresetSelection || IsInteractionLocked || _presetStore is null
+            || PresetComboBox.SelectedItem is not PresetMenuEntry entry) return;
+
+        if (entry.PresetId is { } id)
+        {
+            var preset = _presetStore.Items.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+            if (preset is not null)
+            {
+                if (!ConfirmUnsavedPresetChanges())
+                {
+                    RefreshPresetSelector();
+                    return;
+                }
+                await ApplyPresetAsync(preset);
+                RefreshPresetSelector();
+            }
+            return;
+        }
+
+        RefreshPresetSelector();
+        switch (entry.Action)
+        {
+            case PresetMenuAction.SaveCurrent:
+                PresetSaveCurrent_Click(sender, e);
+                break;
+            case PresetMenuAction.SaveAsNew:
+                PresetSaveAsNew_Click(sender, e);
+                break;
+            case PresetMenuAction.CreateDefaults:
+                await PresetCreateDefaultsAsync();
+                break;
+            case PresetMenuAction.Rename:
+                PresetRename_Click(sender, e);
+                break;
+            case PresetMenuAction.Delete:
+                PresetDelete_Click(sender, e);
+                break;
+            case PresetMenuAction.OpenFolder:
+                PresetOpenFolder_Click(sender, e);
+                break;
+        }
+    }
+
+    private string? PromptPresetName(string title, string initialName)
+    {
+        var dialog = new PresetNameWindow(title, initialName) { Owner = this };
+        return dialog.ShowDialog() == true ? dialog.PresetName : null;
+    }
+
+    private ProcessingPreset? SelectedPreset => _presetStore?.Selected(_settings);
+
+    private bool ConfirmUnsavedPresetChanges()
+    {
+        if (!_presetHasUnsavedChanges || _presetStore is null || SelectedPreset is not { } preset)
+        {
+            return true;
+        }
+
+        var result = AppDialog.Show(
+            this,
+            AppText.Get("Preset_UnsavedChangesPrompt", preset.Name),
+            AppText.Get("Preset_UnsavedChangesTitle"),
+            AppDialogKind.Question,
+            AppDialogButtons.YesNoCancel,
+            AppText.Get("Preset_SaveChanges"),
+            AppText.Get("Preset_DiscardChanges"),
+            AppText.Get("Common_Cancel"));
+        if (result == AppDialogResult.Cancel)
+        {
+            return false;
+        }
+        if (result == AppDialogResult.No)
+        {
+            return true;
+        }
+
+        return TryPresetAction(() =>
+        {
+            _presetStore.Update(preset.Id, _settings);
+            RefreshPresetSelector();
+            AppendLog(AppText.Get("Log_PresetSaved", preset.Name));
+        });
+    }
+
+    private void PresetSaveCurrent_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsInteractionLocked || _presetStore is null || SelectedPreset is not { } preset)
+        {
+            return;
+        }
+
+        TryPresetAction(() =>
+        {
+            _presetStore.Update(preset.Id, _settings);
+            RefreshPresetSelector();
+            AppendLog(AppText.Get("Log_PresetSaved", preset.Name));
+        });
+    }
+
+    private async void PresetSaveAsNew_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsInteractionLocked || _presetStore is null)
+        {
+            return;
+        }
+
+        var name = PromptPresetName(AppText.Get("Preset_SaveAsNew"), AppText.Get("Preset_NewDefaultName"));
+        if (name is null) return;
+        ProcessingPreset? created = null;
+        if (!TryPresetAction(() => created = _presetStore.Add(name, _settings)) || created is null) return;
+        await ApplyPresetAsync(created);
+        RefreshPresetSelector();
+    }
+
+    private async Task PresetCreateDefaultsAsync()
+    {
+        if (IsInteractionLocked || _presetStore is null)
+        {
+            return;
+        }
+        if (!ConfirmUnsavedPresetChanges())
+        {
+            return;
+        }
+
+        ProcessingPreset? created = null;
+        if (!TryPresetAction(() => created = _presetStore.AddDefaults(AppText.Get("Preset_Default")))
+            || created is null)
+        {
+            return;
+        }
+
+        await ApplyPresetAsync(created);
+        RefreshPresetSelector();
+    }
+
+    private void PresetRename_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsInteractionLocked || _presetStore is null || SelectedPreset is not { } preset)
+        {
+            return;
+        }
+
+        var name = PromptPresetName(AppText.Get("Preset_Rename"), preset.Name);
+        if (name is null || string.Equals(name, preset.Name, StringComparison.CurrentCulture)) return;
+        TryPresetAction(() =>
+        {
+            _presetStore.Rename(preset.Id, name);
+            RefreshPresetSelector();
+        });
+    }
+
+    private async void PresetDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsInteractionLocked || _presetStore is null || SelectedPreset is not { } preset)
+        {
+            return;
+        }
+
+        if (AppDialog.Show(
+                this,
+                AppText.Get("Preset_DeleteConfirm", preset.Name),
+                AppText.Get("Preset_Delete"),
+                AppDialogKind.Question,
+                AppDialogButtons.YesNo,
+                AppText.Get("Preset_Delete"),
+                AppText.Get("Common_Cancel")) != AppDialogResult.Yes)
+        {
+            return;
+        }
+
+        if (!TryPresetAction(() => _presetStore.Delete(preset.Id))) return;
+        var replacement = _presetStore.Items[0];
+        RefreshPresetSelector();
+        await ApplyPresetAsync(replacement);
+        RefreshPresetSelector();
+    }
+
+    private bool TryPresetAction(Action action)
+    {
+        try
+        {
+            action();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AppDialog.Show(this, exception.Message, AppText.Get("Preset_Title"), AppDialogKind.Warning);
+            return false;
+        }
+    }
+
+    private void PresetOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var directory = ProcessingPresetStore.DefaultDirectory;
+            Directory.CreateDirectory(directory);
+            Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AppDialog.Show(
+                this,
+                AppText.Get("Preset_OpenFolderError", exception.Message),
+                AppText.Get("Preset_Title"),
+                AppDialogKind.Error);
+        }
+    }
+
+    private void ToolWarningButton_Click(object sender, RoutedEventArgs e)
+    {
+        _openToolsSettingsRequested = true;
+        SettingsButton_Click(sender, e);
     }
 
     private void RestartApplication()
@@ -2173,26 +2505,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshDependencies()
     {
-        _dependencies = _dependencyLocator.Locate(
-            _settings.MkvMergePath,
-            _settings.UseCustomMkvMergePath);
+        _dependencies = _bundledToolStatus?.IsHealthy == false
+            ? new DependencyReport(new ToolDependency(
+                "MKVToolNix",
+                "mkvmerge.exe",
+                null,
+                BundledMkvToolNixProvider.Version))
+            : _dependencyLocator.Locate(null);
         SetDependencyStatus(_dependencies.MkvMerge);
     }
 
     private void SetDependencyStatus(ToolDependency dependency)
     {
-        if (dependency.IsAvailable)
-        {
-            MkvToolStatusDot.Fill = new SolidColorBrush(Color.FromRgb(34, 197, 94));
-            MkvToolVersionText.Text = $"MKVToolNix {FormatVersion(dependency.Version)}";
-            MkvToolBadge.ToolTip = dependency.Path;
-        }
-        else
-        {
-            MkvToolStatusDot.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68));
-            MkvToolVersionText.Text = $"MKVToolNix {BundledMkvToolNixProvider.Version}";
-            MkvToolBadge.ToolTip = AppText.Get("Tool_MkvToolNixFailed");
-        }
+        var healthy = dependency.IsAvailable && _bundledToolStatus?.IsHealthy != false;
+        ToolWarningButton.Visibility = healthy ? Visibility.Collapsed : Visibility.Visible;
+        ToolWarningButton.ToolTip = _bundledToolStatus?.Error ?? AppText.Get("Tool_MkvToolNixFailed");
     }
 
     private static string FormatVersion(string? version)
@@ -2403,9 +2730,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AddFilesButton.IsEnabled = !locked;
         AddFolderButton.IsEnabled = !locked;
         SettingsButton.IsEnabled = !locked;
+        ToolWarningButton.IsEnabled = !locked;
         NormalModeRadioButton.IsEnabled = !locked;
         MaintenanceModeRadioButton.IsEnabled = !locked;
         MaintenanceSettingsButton.IsEnabled = !locked;
+        PresetComboBox.IsEnabled = !locked;
         RemoveButton.IsEnabled = !locked && JobsList.SelectedItems.Count > 0;
         ClearButton.IsEnabled = !locked && Jobs.Count > 0;
         CancelButton.IsEnabled = _isBusy && _processingCancellation?.IsCancellationRequested == false;
@@ -2587,6 +2916,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 }
             }
 
+            e.Cancel = true;
+            return;
+        }
+
+        if (!ConfirmUnsavedPresetChanges())
+        {
             e.Cancel = true;
             return;
         }

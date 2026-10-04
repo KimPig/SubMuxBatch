@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.Domain;
 using SubMuxBatch.Core.Localization;
@@ -470,6 +471,7 @@ public sealed class BundledFfmpegAudioTranscoder(
 
 public sealed class BundledFfmpegProvider
 {
+    public const string Version = "8.1";
     private const string ResourcePrefix = "SubMuxBatch.Core.Resources.ffmpeg.";
     private static readonly SemaphoreSlim ExtractionGate = new(1, 1);
 
@@ -483,8 +485,12 @@ public sealed class BundledFfmpegProvider
         };
         var assembly = typeof(BundledFfmpegProvider).Assembly;
         var resourceName = ResourcePrefix + architecture + ".exe";
-        await using var resource = assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException(CoreText.Get("Ffmpeg_BundledMissing"));
+        byte[] expectedHash;
+        await using (var resource = assembly.GetManifestResourceStream(resourceName)
+                                  ?? throw new InvalidOperationException(CoreText.Get("Ffmpeg_BundledMissing")))
+        {
+            expectedHash = await SHA256.HashDataAsync(resource, cancellationToken).ConfigureAwait(false);
+        }
         var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
         var directory = Path.Combine(
             AppSettings.SettingsDirectory,
@@ -497,7 +503,8 @@ public sealed class BundledFfmpegProvider
         await ExtractionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (File.Exists(destination) && new FileInfo(destination).Length == resource.Length)
+            if (File.Exists(destination)
+                && await MatchesHashAsync(destination, expectedHash, cancellationToken).ConfigureAwait(false))
             {
                 return destination;
             }
@@ -505,6 +512,8 @@ public sealed class BundledFfmpegProvider
             var temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
             try
             {
+                await using var resource = assembly.GetManifestResourceStream(resourceName)
+                                           ?? throw new InvalidOperationException(CoreText.Get("Ffmpeg_BundledMissing"));
                 await using (var output = new FileStream(
                                  temporary,
                                  FileMode.CreateNew,
@@ -515,6 +524,10 @@ public sealed class BundledFfmpegProvider
                 {
                     await resource.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
                     await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+                if (!await MatchesHashAsync(temporary, expectedHash, cancellationToken).ConfigureAwait(false))
+                {
+                    throw new InvalidDataException("The extracted FFmpeg executable failed SHA-256 verification.");
                 }
                 File.Move(temporary, destination, overwrite: true);
                 return destination;
@@ -531,6 +544,24 @@ public sealed class BundledFfmpegProvider
         {
             ExtractionGate.Release();
         }
+    }
+
+    public Task<string> EnsureAvailableAsync(CancellationToken cancellationToken = default) =>
+        GetExecutablePathAsync(cancellationToken);
+
+    private static async Task<bool> MatchesHashAsync(
+        string path, byte[] expectedHash, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var actualHash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+            return actualHash.AsSpan().SequenceEqual(expectedHash);
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     private static string SanitizePathSegment(string value) => string.Concat(

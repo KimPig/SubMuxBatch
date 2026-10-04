@@ -774,6 +774,92 @@ public sealed class MkvValidationTests
         }
     }
 
+    [Fact]
+    public async Task MaintenanceCleanupRetainsOnlyExplicitlyProtectedSubtitleTracks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-maintenance-protected-subs-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            const string inspection = """
+                {"tracks":[
+                  {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC"}},
+                  {"id":2,"type":"subtitles","properties":{"codec_id":"S_TEXT/ASS","track_name":"스타일 자막 (ASS)"}},
+                  {"id":3,"type":"subtitles","properties":{"codec_id":"S_TEXT/UTF8","track_name":"일반 자막 (SRT)"}},
+                  {"id":4,"type":"subtitles","properties":{"codec_id":"S_TEXT/UTF8","track_name":"Other subtitle"}}
+                ],"attachments":[],"chapters":[]}
+                """;
+            var runner = new MuxArgumentRunner(output, inspection);
+
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MaintainAsync(
+                source,
+                output,
+                subtitleReplacements: [],
+                fontAttachments: [],
+                removeExistingFontAttachments: false,
+                globalTagsPath: null,
+                audioMuxPlan: null,
+                retainedSubtitleTrackIds: new HashSet<int> { 2, 3 },
+                removeChapters: false,
+                cleanOutputMetadata: false);
+
+            var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+            var selector = arguments.IndexOf("--subtitle-tracks");
+            Assert.True(selector >= 0);
+            Assert.Equal("2,3", arguments[selector + 1]);
+            Assert.DoesNotContain("--no-subtitles", arguments);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MaintenanceWithoutProtectedSetPreservesEverySubtitleTrack()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"submux-maintenance-preserve-subs-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var source = Path.Combine(root, "source.mkv");
+            var output = Path.Combine(root, "output.mkv");
+            await File.WriteAllBytesAsync(source, [1]);
+            const string inspection = """
+                {"tracks":[
+                  {"id":0,"type":"video","properties":{"codec_id":"V_MPEGH/ISO/HEVC"}},
+                  {"id":2,"type":"subtitles","properties":{"codec_id":"S_TEXT/ASS"}},
+                  {"id":3,"type":"subtitles","properties":{"codec_id":"S_TEXT/UTF8"}},
+                  {"id":4,"type":"subtitles","properties":{"codec_id":"S_TEXT/UTF8"}}
+                ],"attachments":[],"chapters":[]}
+                """;
+            var runner = new MuxArgumentRunner(output, inspection);
+
+            await new MkvMergeClient("fake-mkvmerge.exe", runner).MaintainAsync(
+                source,
+                output,
+                subtitleReplacements: [],
+                fontAttachments: [],
+                removeExistingFontAttachments: false,
+                globalTagsPath: null,
+                audioMuxPlan: null,
+                retainedSubtitleTrackIds: null,
+                removeChapters: false,
+                cleanOutputMetadata: false);
+
+            var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+            Assert.DoesNotContain("--subtitle-tracks", arguments);
+            Assert.DoesNotContain("--no-subtitles", arguments);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static MkvTrackInfo Track(
         string type,
         string codec,

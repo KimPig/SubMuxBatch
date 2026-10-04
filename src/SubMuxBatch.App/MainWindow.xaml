@@ -27,13 +27,132 @@
         <shell:TaskbarItemInfo x:Name="TaskbarProgressInfo" />
     </Window.TaskbarItemInfo>
     <Window.Resources>
-        <Style x:Key="ToolBadgeStyle" TargetType="Border">
+        <ResourceDictionary>
+        <Style x:Key="PresetComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemSurface"
+                                Padding="{TemplateBinding Padding}"
+                                Background="Transparent">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemSurface" Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemSurface" Property="Background" Value="{StaticResource SelectionPressedBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSeparator}" Value="True">
+                    <Setter Property="IsHitTestVisible" Value="False" />
+                    <Setter Property="Padding" Value="0" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PresetComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="34" />
             <Setter Property="Background" Value="White" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource StrongBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="Padding" Value="8,4" />
-            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource PresetComboBoxItemStyle}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="InputSurface"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="2" />
+                            <ToggleButton x:Name="DropDownToggle"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          ClickMode="Press"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" />
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Grid Margin="10,0,9,0" IsHitTestVisible="False">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock VerticalAlignment="Center"
+                                           Foreground="{Binding PresetNameBrush, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                           FontWeight="SemiBold"
+                                           Text="{Binding SelectedItem.Label, RelativeSource={RelativeSource TemplatedParent}}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <Path Grid.Column="1"
+                                      Width="8"
+                                      Height="4"
+                                      Margin="12,0,1,0"
+                                      Data="M 0 0 L 4 4 L 8 0"
+                                      Stroke="{StaticResource SecondaryTextBrush}"
+                                      StrokeThickness="1.2" />
+                            </Grid>
+                            <Popup x:Name="PART_Popup"
+                                   Placement="Bottom"
+                                   PlacementTarget="{Binding ElementName=DropDownToggle}"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border MinWidth="{Binding ActualWidth, ElementName=DropDownToggle}"
+                                        Margin="0,1,0,0"
+                                        Padding="1"
+                                        Background="White"
+                                        BorderBrush="{StaticResource StrongBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="2">
+                                    <ScrollViewer MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  CanContentScroll="True">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InputSurface" Property="BorderBrush" Value="{StaticResource PrimaryTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="InputSurface" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter TargetName="InputSurface" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="InputSurface" Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                                <Setter TargetName="InputSurface" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="ProcessingModeRadioStyle" TargetType="RadioButton">
             <Setter Property="MinHeight" Value="34" />
@@ -283,6 +402,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid Margin="12">
@@ -318,48 +438,58 @@
                 </Border>
             </StackPanel>
 
-            <WrapPanel Grid.Column="1"
-                       Margin="18,0,8,0"
-                       VerticalAlignment="Center">
-                <Border x:Name="MkvToolBadge"
-                        Style="{StaticResource ToolBadgeStyle}">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse x:Name="MkvToolStatusDot"
-                                 Width="7"
-                                 Height="7"
-                                 Margin="0,0,7,0"
-                                 Fill="#22C55E"
-                                 VerticalAlignment="Center" />
-                        <TextBlock x:Name="MkvToolVersionText"
-                                   FontSize="11"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   VerticalAlignment="Center"
-                                   Text="MKVToolNix 102.0" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource ToolBadgeStyle}">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="7"
-                                 Height="7"
-                                 Margin="0,0,7,0"
-                                 Fill="#22C55E"
-                                 VerticalAlignment="Center" />
-                        <TextBlock FontSize="11"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   VerticalAlignment="Center"
-                                   Text="libse 5.1.0" />
-                    </StackPanel>
-                </Border>
-            </WrapPanel>
-
-            <Button x:Name="SettingsButton"
-                    Grid.Column="2"
-                    Content="{loc:Loc Common_Settings}"
-                    Click="SettingsButton_Click"
+            <Button x:Name="ToolWarningButton"
+                    Grid.Column="1"
+                    Margin="18,0,12,0"
+                    Padding="10,5"
+                    HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    Margin="0" />
+                    Foreground="#B42318"
+                    BorderBrush="#D92D20"
+                    Content="{loc:Loc Main_BundledToolsWarning}"
+                    Visibility="Collapsed"
+                    Click="ToolWarningButton_Click" />
+
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
+                <TextBlock Margin="0,0,7,0"
+                           VerticalAlignment="Center"
+                           Text="{loc:Loc Main_Preset}" />
+                <ComboBox x:Name="PresetComboBox"
+                        Width="180"
+                        Margin="0,0,14,0"
+                        IsTextSearchEnabled="False"
+                        Style="{StaticResource PresetComboBoxStyle}"
+                        SelectionChanged="PresetComboBox_SelectionChanged">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid MinWidth="150">
+                                <TextBlock x:Name="EntryContent"
+                                           Text="{Binding Label}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <Border x:Name="SeparatorLine"
+                                        Height="1"
+                                        Margin="5,4"
+                                        VerticalAlignment="Center"
+                                        Background="{StaticResource BorderBrush}"
+                                        Visibility="Collapsed" />
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsSeparator}" Value="True">
+                                    <Setter TargetName="EntryContent" Property="Visibility" Value="Collapsed" />
+                                    <Setter TargetName="SeparatorLine" Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button x:Name="SettingsButton"
+                        Margin="0"
+                        VerticalAlignment="Center"
+                        Content="{loc:Loc Common_Settings}"
+                        Click="SettingsButton_Click" />
+            </StackPanel>
         </Grid>
 
         <Border Grid.Row="1"
@@ -390,7 +520,7 @@
                             <WrapPanel Grid.Column="0">
                                 <Border Margin="0,0,10,0"
                                         VerticalAlignment="Center"
-                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderBrush="{StaticResource StrongBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="3">
                                     <StackPanel Orientation="Horizontal">
@@ -1012,7 +1142,7 @@
                 <Button Content="{loc:Loc Common_ViewLog}" Click="OpenLogWindowButton_Click" />
                 <Button x:Name="CancelButton" Content="{loc:Loc Common_Cancel}" Click="CancelButton_Click" IsEnabled="False" />
                 <Button x:Name="StartButton"
-                        Content="{loc:Loc Main_StartAllReady}"
+                        Content="{loc:Loc Main_Start}"
                         Style="{StaticResource PrimaryButtonStyle}"
                         Click="StartButton_Click"
                         Margin="0"

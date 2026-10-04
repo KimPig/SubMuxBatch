@@ -13,9 +13,9 @@ $testPath = Join-Path $projectRoot 'tests\SubMuxBatch.Core.Tests\SubMuxBatch.Cor
 $outputPath = Join-Path $projectRoot "artifacts\publish\$Runtime"
 $version = Get-Date -Format 'yyyy.MM.dd'
 $assemblyVersion = Get-Date -Format 'yyyy.M.d.0'
-$ffmpegAssetName = switch ($Runtime) {
-    'win-x64' { 'ffmpeg-n8.1-latest-win64-lgpl-8.1.zip' }
-    'win-arm64' { 'ffmpeg-n8.1-latest-winarm64-lgpl-8.1.zip' }
+$ffmpegAssetPattern = switch ($Runtime) {
+    'win-x64' { '^ffmpeg-n8\.1(?:(?:\.\d+)?-\d+-g[0-9a-f]+|-latest)-win64-lgpl-8\.1\.zip$' }
+    'win-arm64' { '^ffmpeg-n8\.1(?:(?:\.\d+)?-\d+-g[0-9a-f]+|-latest)-winarm64-lgpl-8\.1\.zip$' }
 }
 $ffmpegCache = Join-Path $projectRoot "artifacts\dependencies\ffmpeg\$Runtime"
 $ffmpegExecutable = Join-Path $ffmpegCache 'ffmpeg.exe'
@@ -30,6 +30,15 @@ $mkvToolNixCache = Join-Path $projectRoot "artifacts\dependencies\mkvtoolnix\$mk
 $mkvMergeExecutable = Join-Path $mkvToolNixCache 'mkvmerge.exe'
 $mkvExtractExecutable = Join-Path $mkvToolNixCache 'mkvextract.exe'
 $mkvLocaleKo = Join-Path $mkvToolNixCache 'locale\ko\LC_MESSAGES\mkvtoolnix.mo'
+$lapseVersion = '2.2.4'
+$lapseArchiveUrl = 'https://github.com/Schwponaco-org/lapse/releases/download/v2.2.4/lapse-windows-x64.zip'
+$lapseArchiveHash = '63D7E924E4DA50A1A067B756EBB7C1517996632F7742F45D28D8CE77A742A2A6'
+$lapseCache = Join-Path $projectRoot "artifacts\dependencies\lapse\$lapseVersion"
+$lapseRoot = Join-Path $lapseCache 'bundle'
+$lapseExecutable = Join-Path $lapseRoot 'lapse.exe'
+$lapseOnnxRuntime = Join-Path $lapseRoot 'onnxruntime.dll'
+$lapseModel = Join-Path $lapseRoot 'silero_vad.onnx'
+$lapseLicense = Join-Path $lapseRoot 'LICENSE'
 
 function Test-FileHash([string] $Path, [string] $ExpectedHash) {
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -60,14 +69,14 @@ function Get-BundledFfmpeg {
     $release = Invoke-RestMethod `
         -Headers $headers `
         -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
-    $asset = @($release.assets | Where-Object { $_.name -eq $ffmpegAssetName })
+    $asset = @($release.assets | Where-Object { $_.name -match $ffmpegAssetPattern })
     if ($asset.Count -ne 1) {
-        throw "Could not resolve the expected FFmpeg asset: $ffmpegAssetName"
+        throw "Could not resolve exactly one FFmpeg 8.1 LGPL asset for $Runtime."
     }
 
     $expectedDigest = [string]$asset[0].digest
     if (-not $expectedDigest.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "The FFmpeg release did not provide a SHA-256 digest: $ffmpegAssetName"
+        throw "The FFmpeg release did not provide a SHA-256 digest: $($asset[0].name)"
     }
     $expectedHash = $expectedDigest.Substring(7).ToUpperInvariant()
     $cachedHash = if (Test-Path -LiteralPath $ffmpegDigestPath) {
@@ -188,8 +197,46 @@ function Get-BundledMkvToolNix {
     }
 }
 
+function Get-BundledLapse {
+    [System.IO.Directory]::CreateDirectory($lapseCache) | Out-Null
+    $archivePath = Join-Path $lapseCache 'lapse-windows-x64.zip'
+    if (-not (Test-FileHash $archivePath $lapseArchiveHash)) {
+        Invoke-WebRequest `
+            -Headers @{ 'User-Agent' = 'SubMuxBatch-Publish' } `
+            -Uri $lapseArchiveUrl `
+            -OutFile $archivePath
+    }
+    if (-not (Test-FileHash $archivePath $lapseArchiveHash)) {
+        throw 'LAPSE archive hash mismatch.'
+    }
+
+    Remove-VerifiedCacheDirectory $lapseRoot $lapseCache
+    $extractPath = Join-Path $lapseCache 'extract'
+    Remove-VerifiedCacheDirectory $extractPath $lapseCache
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+    $sourceRoot = Join-Path $extractPath 'lapse-windows-x64'
+    $required = @('lapse.exe', 'onnxruntime.dll', 'silero_vad.onnx', 'LICENSE')
+    foreach ($name in $required) {
+        $source = Join-Path $sourceRoot $name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "The LAPSE archive is missing $name."
+        }
+    }
+    [System.IO.Directory]::CreateDirectory($lapseRoot) | Out-Null
+    foreach ($name in $required) {
+        Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination (Join-Path $lapseRoot $name) -Force
+    }
+    Remove-VerifiedCacheDirectory $extractPath $lapseCache
+
+    $versionOutput = & $lapseExecutable --version 2>&1
+    if ($LASTEXITCODE -ne 0 -or ($versionOutput -join "`n") -notmatch '2\.2\.4') {
+        throw 'The bundled LAPSE executable did not pass the version smoke test.'
+    }
+}
+
 Get-BundledFfmpeg
 Get-BundledMkvToolNix
+Get-BundledLapse
 
 if (-not $SkipTests) {
     dotnet test $testPath -c Release --nologo
@@ -229,6 +276,10 @@ dotnet publish $projectPath `
     -p:BundledMkvMergePath=$mkvMergeExecutable `
     -p:BundledMkvExtractPath=$mkvExtractExecutable `
     -p:BundledMkvLocaleKoPath=$mkvLocaleKo `
+    -p:BundledLapseExePath=$lapseExecutable `
+    -p:BundledLapseOnnxRuntimePath=$lapseOnnxRuntime `
+    -p:BundledLapseModelPath=$lapseModel `
+    -p:BundledLapseLicensePath=$lapseLicense `
     -o $outputPath
 
 if ($LASTEXITCODE -ne 0) {
@@ -252,4 +303,4 @@ if ($CreateArchive) {
     Write-Host "Release archive: $releaseArchivePath"
 }
 Write-Host "Published: $outputPath"
-Write-Host 'MediaInfoLib, libse, FFmpeg, MKVToolNix 102.0, and SubMux Sans are bundled.'
+Write-Host 'MediaInfoLib, libse, FFmpeg, MKVToolNix 102.0, LAPSE 2.2.4, and SubMux Sans are bundled.'

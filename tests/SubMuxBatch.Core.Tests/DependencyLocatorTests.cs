@@ -9,19 +9,19 @@ public sealed class DependencyLocatorTests : IDisposable
         $"SubMuxBatch-DependencyLocatorTests-{Guid.NewGuid():N}");
 
     [Fact]
-    public void MissingConfiguredPathsFallBackToBundledTools()
+    public void MissingBundledToolDoesNotFallBackToInstalledOrConfiguredTools()
     {
         var mkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
         var locator = new DependencyLocator(_root, Path.Combine(_root, "missing-bundled", "mkvmerge.exe"));
 
         var report = locator.Locate(Path.Combine(_root, "deleted", "mkvmerge.exe"));
 
-        Assert.Equal(mkvMerge, report.MkvMerge.Path, ignoreCase: true);
-        Assert.True(report.IsReady);
+        Assert.Null(report.MkvMerge.Path);
+        Assert.False(report.IsReady);
     }
 
     [Fact]
-    public void ExistingConfiguredPathsArePreferredOverAutomaticCandidates()
+    public void ExistingConfiguredPathIsIgnoredWhenBundledToolIsMissing()
     {
         var configuredMkvMerge = CreateTool("configured", "mkvmerge.exe");
         CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
@@ -29,7 +29,7 @@ public sealed class DependencyLocatorTests : IDisposable
 
         var report = locator.Locate(configuredMkvMerge);
 
-        Assert.Equal(configuredMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+        Assert.Null(report.MkvMerge.Path);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class DependencyLocatorTests : IDisposable
     }
 
     [Fact]
-    public void ExplicitCustomPathIsPreferredOverBundledTool()
+    public void BundledToolIsPreferredOverExplicitCustomPath()
     {
         var bundledMkvMerge = CreateTool("bundled", "102.0", "mkvmerge.exe");
         var configuredMkvMerge = CreateTool("custom", "mkvmerge.exe");
@@ -53,11 +53,11 @@ public sealed class DependencyLocatorTests : IDisposable
 
         var report = locator.Locate(configuredMkvMerge);
 
-        Assert.Equal(configuredMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+        Assert.Equal(bundledMkvMerge, report.MkvMerge.Path, ignoreCase: true);
     }
 
     [Fact]
-    public void ExplicitOverrideCanSelectAnOtherwiseAutomaticPath()
+    public void ExplicitOverrideCannotReplaceBundledTool()
     {
         var bundledMkvMerge = CreateTool("bundled", "102.0", "mkvmerge.exe");
         var automaticMkvMerge = CreateTool("tools", "mkvtoolnix", "mkvmerge.exe");
@@ -65,7 +65,7 @@ public sealed class DependencyLocatorTests : IDisposable
 
         var report = locator.Locate(automaticMkvMerge, preferConfigured: true);
 
-        Assert.Equal(automaticMkvMerge, report.MkvMerge.Path, ignoreCase: true);
+        Assert.Equal(bundledMkvMerge, report.MkvMerge.Path, ignoreCase: true);
     }
 
     public void Dispose()

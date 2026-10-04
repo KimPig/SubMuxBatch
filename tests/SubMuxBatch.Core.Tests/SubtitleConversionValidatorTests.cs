@@ -198,8 +198,31 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
             SubtitleConversionValidator.ValidateSrtToAss(srt, ass));
     }
 
+    [Fact]
+    public async Task RejectsUnsupportedFontColourWithOriginalValueCountAndLocation()
+    {
+        var source = Path.Combine(_root, "invalid-colour.srt");
+        var prepared = Path.Combine(_root, "invalid-colour-prepared.srt");
+        await File.WriteAllTextAsync(
+            source,
+            "554\n00:23:15,180 --> 00:23:16,900\n<font color=9FFDDEF>첫째</font>\n\n"
+            + "555\n00:23:18,380 --> 00:23:21,260\n<font color=9FFDDEF>둘째</font>\n\n"
+            + "556\n00:23:23,036 --> 00:23:24,893\n<font color=9FFDDEF>셋째</font>\n",
+            new UTF8Encoding(false));
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared));
+
+        Assert.Contains("9FFDDEF", error.Message);
+        Assert.Contains("3", error.Message);
+        Assert.Contains("554", error.Message);
+        Assert.Contains("00:23:15.180", error.Message);
+        Assert.False(File.Exists(prepared));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
+
 }

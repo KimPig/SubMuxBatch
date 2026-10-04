@@ -2,13 +2,13 @@
 
 SubMux Batch is a Windows desktop application that finds supported video and subtitle files with matching names, then remuxes them into a new MKV with ASS as the default subtitle track and SRT as the secondary track.
 
-You can add individual files, select folders, or drag files and folders from File Explorer into the window. Source files are never modified or deleted. Video is always copied without re-encoding; audio is also copied unless the optional AAC conversion setting is enabled.
+You can add individual files, select folders, or drag files and folders from File Explorer into the window. Source videos are never modified or deleted in normal mode. External subtitle files are also left untouched unless optional LAPSE synchronization produces a validated `solid` result; in that case the original subtitle is backed up before replacement. Video is always copied without re-encoding; audio is also copied unless the optional AAC conversion setting is enabled.
 
 ## Download
 
 Prebuilt, self-contained Windows x64 packages are available on the [Releases](https://github.com/KimPig/SubMuxBatch/releases) page.
 
-MKVToolNix 102.0, Subtitle Edit's `libse` 5.1.0, MediaInfoLib, and FFmpeg 8.1 are bundled. None requires a separate installation or path setting.
+MKVToolNix 102.0, Subtitle Edit's `libse` 5.1.0, MediaInfoLib, FFmpeg 8.1, and LAPSE 2.2.4 are bundled. None requires a separate installation or path setting.
 
 The interface supports Korean and English. With **System default**, Korean Windows uses Korean and every other system language uses English. You can override this in Settings; after saving a language change, choose whether to restart immediately or apply it the next time the application starts.
 
@@ -37,7 +37,7 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 - The default matching key is the full parent directory plus the exact filename without its extension. Matching is case-insensitive under Windows rules.
 - When **Allow dot suffixes in subtitle filenames** is enabled, names such as `Movie.ko.srt`, `Movie.kor.ass`, and `Movie.release.smi` can match `Movie.mp4`. An exact filename match wins, followed by `.ko`/`.kor`, then shorter suffixes.
 - All supported input containers use the same filename matching rules. The default output name is `SubMux_Movie.mkv`. You can change the prefix in Settings.
-- **Add a SubMux processing tag to the output MKV** is enabled by default. It writes `SUBMUX_BATCH_VERSION` and `SUBMUX_BATCH_PROCESSED: Processed by SubMux Batch` as global tags. The primary ASS stores `; SUBMUX_ASS_SOURCE=ASS|SRT|SMI` in `[Script Info]`, keeping subtitle provenance with the track when it is extracted or remuxed. Files produced by older versions that used `COMMENT` are still recognized.
+- **Add a SubMux processing tag to the output MKV** is enabled by default. It writes `SUBMUX_BATCH_VERSION` and `SUBMUX_BATCH_PROCESSED: Processed by SubMux Batch` as global tags. The primary ASS stores `; SUBMUX_SUBTITLE_SOURCE=ASS|SRT|SMI|ASS+SRT|ASS+SMI` in `[Script Info]`, distinguishing a generated secondary subtitle from independently supplied ASS/SRT or ASS/SMI inputs. Files produced by older versions that used `COMMENT` are still recognized.
 - Source backup is split into four independent settings. **Back up source video metadata** stores `metadata.json` with the complete `mkvmerge` identification result, every non-empty MediaInfo field, source identity data, and the original Matroska tags and chapters XML when applicable. **Back up embedded subtitles** stores all embedded subtitle tracks in `subtitles.mks`. **Back up attachments** extracts fonts and other attachments as files. **Back up excluded audio tracks** stores source audio omitted by language filtering or AAC replacement in `excluded-audio.mka`.
 - Backups are stored under `.submux-backup/<original source file name including extension>/`. The folder is left visible in Windows Explorer and is not assigned the Hidden attribute. MP4, AVI, TS, and other supported inputs keep their original extension in this folder name. Subtitle and audio sidecars are created by remuxing without re-encoding, and existing backup files are never overwritten. `mkvextract` is detected beside the configured `mkvmerge` executable and does not require a separate path setting. A backup error is logged as a warning and does not prevent a successfully muxed output from completing; the source file must not be deleted when such a warning occurs.
 - **Clean existing metadata from the output MKV** removes the source title, global and track tags, and video track names. When only one audio track remains, its free-form track name is removed as redundant; names are preserved when multiple audio tracks remain so roles such as commentary or dubbed audio stay distinguishable. Playback-critical codec data, languages, channel layouts, and forced flags remain, while technical track statistics are regenerated for the output. Default-track selection continues to follow the existing remux and audio-filter behavior. Chapters and attachments continue to follow their separate settings. When SubMux tagging is enabled, cleanup happens first and the dedicated SubMux version and processed marker are added back; ASS-source provenance remains inside the primary ASS.
@@ -49,22 +49,15 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 - When **Attach ASS style font files** is enabled, SubMux Batch analyzes the font face actually referenced by visible `Dialogue` text, including inline font, weight, italic, reset, transform, and drawing-mode tags. It selects the closest installed TTF/OTF/TTC/OTC face by OpenType names and Windows font registration instead of attaching every style or family variant. If a required font cannot be found, the job is skipped without creating an output file and a warning is logged. This can be enabled together with font removal: old source fonts are removed first and the fonts required by the current ASS are then attached.
 - Video, audio, attachments, and chapters are preserved by default unless their corresponding removal or filtering option is enabled. When **Keep only audio tracks in the selected language** is enabled for a multi-audio file, all English, Japanese, or Korean tracks in the selected language are retained and other audio tracks are removed. A single audio track is always preserved. If the selected language is absent, that job is skipped without creating a silent output file.
 - **Convert audio to AAC** is disabled by default. It uses the bundled FFmpeg only for selected audio tracks; video and subtitles remain untouched. The channel modes preserve the original layout, convert tracks to at most stereo, or keep multichannel originals while adding an AAC stereo compatibility track. Already compatible AAC tracks are copied instead of being needlessly re-encoded. Bitrates are 96 kbps for mono, 192 kbps for stereo, 384 kbps for 3–6 channels, and 512 kbps for 7 or more channels. In the keep-and-add mode, the stereo compatibility track becomes default when it is generated from a default multichannel track.
+- **LAPSE automatic synchronization** is disabled by default. Auto, global-shift-only, gradual-drift, and segment modes are available. SubMux Batch applies only a `solid` result; `unsure`, `nothing`, execution, and validation failures keep the original timing and finish with a warning. When embedded-subtitle reference is enabled, the default eligible full subtitle track is preferred without coupling it to the selected audio language; SubMux-managed, forced, hearing-impaired, commentary, signs, songs, and karaoke tracks are excluded. If no suitable subtitle exists or LAPSE cannot use it, synchronization falls back to the selected/default audio track. External subtitles are replaced only after the output MKV passes final validation.
+- A synchronized external subtitle is first backed up under `.submux-backup/external-subtitles/`; matching JSON audit records are stored under its `.index` subfolder. SRT/SMI processing leaves a non-rendering LAPSE marker only in the external SRT and removes it from the SRT track muxed into the MKV. The external marker retains the settings profile and whether an embedded subtitle or audio was actually used. The styled ASS stores the LAPSE version, requested profile, actual mode/reference, verdict, offset, ratio, confidence, and source hash in `[Script Info]`. The backup JSON stores the same audit details. No LAPSE history is written to MKV global tags.
+- Processing presets include subtitle, ASS, font, audio, backup, cleanup, maintenance, and LAPSE settings. Language, updates, notifications, concurrency, window state, and bundled-tool versions remain global. Presets are stored as individual JSON files under `%LOCALAPPDATA%\SubMuxBatch\presets`; the first launch creates the localized default preset (`기본.json` or `Default.json`) from the user's existing processing settings.
 - The finished MKV structure is inspected before the temporary output is committed to its final filename.
 - New subtitle tracks use the Korean language tag (`kor`). ASS is the default track, SRT is non-default, and neither track is forced.
 
-## Bundled tools and path overrides
+## Bundled tools
 
-Release builds include the `mkvmerge.exe` and `mkvextract.exe` command-line tools from [MKVToolNix 102.0](https://mkvtoolnix.download/). On first launch they are verified and extracted to `%LocalAppData%\SubMuxBatch\tools\mkvtoolnix\102.0`. A missing or modified extracted file is restored from the application automatically.
-
-SubMux Batch searches for `mkvmerge.exe` in this order:
-
-1. The path selected in Settings
-2. The bundled MKVToolNix 102.0 copy
-3. `tools\mkvtoolnix\mkvmerge.exe` below the application directory
-4. Standard installation directories
-5. The Windows `PATH`
-
-Selecting a custom executable keeps that override ahead of the bundled copy. `mkvextract` is resolved beside the selected `mkvmerge` executable. MKVToolNix is redistributed under GPL-2.0-only; its license is available in the application and the exact corresponding 102.0 source archive is stored under `third-party-sources` in this repository.
+Release builds include the command-line components from [MKVToolNix 102.0](https://mkvtoolnix.download/), FFmpeg 8.1, and [LAPSE 2.2.4](https://github.com/Schwponaco-org/lapse). They are SHA-256 verified and extracted to versioned folders under `%LocalAppData%\SubMuxBatch\tools`. SubMux Batch always uses these pinned copies so that processing does not change with separately installed tool versions. **Settings → Other → Reinstall bundled tools** verifies and restores missing or modified files.
 
 Media information shown in the queue and detail panel is read primarily with the bundled MediaInfoLib. This includes the actual container format, duration, overall and per-track bit rates, video frame rate and frame count, resolution, and audio properties. `mkvmerge` identification remains authoritative for remuxing track IDs, attachments, chapters, and output validation. The bundled library notice is included below.
 
@@ -128,9 +121,11 @@ The number of concurrent jobs can be set from 1 to 8. One job at a time is recom
 
 ### Maintenance mode
 
-Use **Maintenance mode** for MKV files produced by an older SubMux version. It can independently apply the current generated-ASS style, attach the current style font, apply the current audio language/AAC policy, and refresh SubMux version and subtitle-source tags. MKVs not identified as SubMux outputs are skipped.
+Use **Maintenance mode** for an MKV already produced by SubMux. Maintenance reconciles the existing result with the currently selected Basic-mode preset: generated ASS conversion/style, font attachment/removal, audio language/AAC policy, subtitle cleanup, chapter and metadata cleanup, SubMux tags, and LAPSE settings all come from that preset. Maintenance-category checkboxes are enabled by default and only decide which parts of the current preset are reapplied; they do not hold a second set of processing values. Backup, discovery, and ordinary output-prefix settings are not repeated because the input is already a processed MKV. MKVs not identified as SubMux outputs are skipped.
 
-New files store `SUBMUX_ASS_SOURCE` inside the primary ASS for exact source identification. For older files without this marker, the configured legacy `Style:` fingerprints are compared exactly: the ASS must contain one `Default` style only, and its complete trimmed line must match one configured line. A match is marked `LEGACY_SRT_OR_SMI`; a non-match is marked `LEGACY_ASS_OR_UNKNOWN` and its style and fonts are preserved. Case, field spacing, and numeric spelling such as `4`, `4.0`, and `4.000` are intentionally not normalized.
+New files store `SUBMUX_SUBTITLE_SOURCE` inside the primary ASS for exact source identification. The values `ASS+SRT` and `ASS+SMI` preserve the fact that the secondary subtitle came from an independent external file instead of being generated from the ASS. For older files without the current marker, the configured legacy `Style:` fingerprints are compared exactly: the ASS must contain one `Default` style only, and its complete trimmed line must match one configured line. A match is marked `LEGACY_SRT_OR_SMI`; a non-match is marked `LEGACY_ASS_OR_UNKNOWN` and its style and fonts are preserved. Case, field spacing, and numeric spelling such as `4`, `4.0`, and `4.000` are intentionally not normalized.
+
+ASS metadata is accepted only from `[Script Info]`. Invalid or conflicting subtitle-source markers are treated as unknown instead of falling through to a generated-subtitle rewrite. LAPSE writes a settings profile alongside its result marker; maintenance skips an identical profile, reapplies LAPSE automatically when the current mode/reference/penalty changed, and requires the force option for older markers that do not contain a profile. When a paired ASS and SRT are synchronized, both tracks are replaced in the same verified mux so their timing cannot silently diverge.
 
 Maintenance normally writes a prefixed MKV beside the source, adding `(1)`, `(2)`, and so on instead of overwriting an existing file. The default prefix is `유지보수_` for Korean and `Maintained_` for English, and it can be customized. An optional **Replace the source MKV after completion** setting replaces the source only after the temporary output passes validation; failures and cancellation leave or restore the original. Video is copied, audio is encoded only when the selected AAC policy requires it, and the result is inspected again after it is committed. Job logs summarize subtitle-source detection, ASS/font changes, per-track audio decisions, refreshed tags, and the verified output track counts.
 
@@ -168,7 +163,7 @@ Create a self-contained Windows build:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The publish script downloads the matching FFmpeg 8.1 LGPL build and the pinned official MKVToolNix 102.0 portable package, verifies their SHA-256 digests, and embeds the required tools with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE.
+The default output is written to `artifacts\publish\win-x64`. The publish script downloads the matching FFmpeg 8.1 LGPL build, pinned official MKVToolNix 102.0 portable package, and official LAPSE 2.2.4 Windows package, verifies their SHA-256 digests, and embeds the required tools with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE.
 
 ## Project structure
 
@@ -179,7 +174,7 @@ The default output is written to `artifacts\publish\win-x64`. The publish script
 
 ## Third-party notices
 
-Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion. MKVToolNix 102.0 command-line tools are bundled under GPL-2.0-only and executed as separate processes; the exact corresponding source archive is available in [`third-party-sources`](third-party-sources/README.md).
+Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion. MKVToolNix 102.0 and LAPSE 2.2.4 are bundled and executed as separate GPL command-line programs; their project/source links and license texts are shown in the application.
 
 This product uses [MediaInfo](https://mediaarea.net/MediaInfo) library, Copyright (c) 2002-2025 [MediaArea.net SARL](https://mediaarea.net/).
 

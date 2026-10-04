@@ -85,6 +85,12 @@ public partial class OpenSourceLicensesWindow : Window
                 "SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"),
             "https://mkvtoolnix.download/"),
         new(
+            "LAPSE 2.2.4 — GPL-3.0-only",
+            ReadResource(
+                typeof(AppSettings).Assembly,
+                "SubMuxBatch.Core.Resources.lapse.LICENSE.txt"),
+            "https://github.com/Schwponaco-org/lapse"),
+        new(
             "SubMux Sans — SIL Open Font License 1.1",
             ReadResource(
                 typeof(AppSettings).Assembly,

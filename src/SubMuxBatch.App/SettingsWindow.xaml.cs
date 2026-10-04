@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Windows;
-using Microsoft.Win32;
+using System.Windows.Navigation;
 using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
 using SubMuxBatch.Core.Configuration;
@@ -33,32 +33,34 @@ public partial class SettingsWindow : Window
     private int _playResY;
     private string _assStyleLine = AppSettings.DefaultAssStyleLine;
     private AssStyleDefinition _styleDefinition = AssStyleDefinition.Parse(AppSettings.DefaultAssStyleLine);
-    private readonly DependencyLocator _dependencyLocator = new();
-    private string? _mkvMergePath;
-    private bool _useCustomMkvMergePath;
-    private ToolDependency? _detectedMkvToolNix;
     private bool _fontStatusRefreshInProgress;
 
     public SettingsWindow(
         AppSettings settings,
-        DependencyReport? detectedDependencies = null,
-        bool openMaintenanceTab = false)
+        BundledToolStatus? bundledToolStatus = null,
+        bool openMaintenanceTab = false,
+        bool openToolsTab = false)
     {
         InitializeComponent();
         if (openMaintenanceTab)
         {
             SettingsTabControl.SelectedItem = MaintenanceTabItem;
         }
+        else if (openToolsTab)
+        {
+            SettingsTabControl.SelectedItem = OtherTabItem;
+        }
         Settings = settings;
         AlignmentComboBox.ItemsSource = _alignmentOptions;
-        detectedDependencies ??= new DependencyLocator().Locate(
-            settings.MkvMergePath,
-            settings.UseCustomMkvMergePath);
         var version = typeof(SettingsWindow).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? "unknown";
         BuiltInVersionText.Text = AppText.Get("Settings_VersionSummary", version);
-        LoadSettingsIntoControls(settings, detectedDependencies.MkvMerge);
+        LoadSettingsIntoControls(settings);
+        BundledToolsStatusText.Text = bundledToolStatus?.IsHealthy == false
+            ? AppText.Get("Settings_BundledToolsFailed", bundledToolStatus.Error ?? "Unknown error")
+            : AppText.Get("Settings_BundledToolsReady");
+        SetBundledToolsStatusAppearance(bundledToolStatus?.IsHealthy != false);
 
         Loaded += async (_, _) =>
         {
@@ -71,7 +73,7 @@ public partial class SettingsWindow : Window
     public AppSettings Settings { get; private set; }
     public Func<Window, Task>? UpdateCheckRequested { get; set; }
 
-    private void LoadSettingsIntoControls(AppSettings settings, ToolDependency? detectedMkvToolNix = null)
+    private void LoadSettingsIntoControls(AppSettings settings)
     {
         LanguageComboBox.SelectedValue = settings.Language.ToString();
         if (LanguageComboBox.SelectedIndex < 0)
@@ -79,12 +81,6 @@ public partial class SettingsWindow : Window
             LanguageComboBox.SelectedValue = AppLanguage.System.ToString();
         }
         CheckForUpdatesAutomaticallyCheckBox.IsChecked = settings.CheckForUpdatesAutomatically;
-        _mkvMergePath = settings.MkvMergePath;
-        _useCustomMkvMergePath = settings.UseCustomMkvMergePath;
-        _detectedMkvToolNix = detectedMkvToolNix ?? _dependencyLocator.Locate(
-            _mkvMergePath,
-            _useCustomMkvMergePath).MkvMerge;
-        UpdateMkvToolNixControls();
         OutputPrefixTextBox.Text = settings.OutputPrefix;
         IncludeSubdirectoriesCheckBox.IsChecked = settings.IncludeSubdirectories;
         AllowSubtitleSuffixMatchCheckBox.IsChecked = settings.AllowSubtitleSuffixMatch;
@@ -126,6 +122,15 @@ public partial class SettingsWindow : Window
         MaintenanceLegacyAssStylesTextBox.Text = settings.MaintenanceLegacyAssStyles;
         MaintenanceOutputPrefixTextBox.Text = settings.MaintenanceOutputPrefix;
         MaintenanceReplaceOriginalCheckBox.IsChecked = settings.MaintenanceReplaceOriginal;
+        EnableLapseSyncCheckBox.IsChecked = settings.EnableLapseSync;
+        LapseModeComboBox.SelectedValue = settings.LapseMode.ToString();
+        UseEmbeddedSubtitleReferenceCheckBox.IsChecked =
+            settings.LapseReference != LapseReferenceMode.AudioOnly;
+        LapseSplitPenaltyTextBox.Text = settings.LapseSplitPenalty.ToString(CultureInfo.InvariantCulture);
+        LapseConfidenceTextBox.Text = settings.LapseConfidenceThreshold.ToString(CultureInfo.InvariantCulture);
+        MaintenanceUpdateLapseSyncCheckBox.IsChecked = settings.MaintenanceUpdateLapseSync;
+        MaintenanceForceLapseResyncCheckBox.IsChecked = settings.MaintenanceForceLapseResync;
+        UpdateLapseSplitPenaltyControls();
         UpdateMaintenanceOutputControls();
         _playResX = settings.PlayResX;
         _playResY = settings.PlayResY;
@@ -155,77 +160,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void ChangeMkvToolNix_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog
-        {
-            Filter = $"mkvmerge.exe|mkvmerge.exe|{AppText.Get("Common_Executable")}|*.exe",
-            CheckFileExists = true,
-            Multiselect = false
-        };
-
-        if (dialog.ShowDialog(this) == true)
-        {
-            _mkvMergePath = dialog.FileName;
-            _useCustomMkvMergePath = true;
-            _detectedMkvToolNix = _dependencyLocator.Locate(
-                _mkvMergePath,
-                preferConfigured: true).MkvMerge;
-            UpdateMkvToolNixControls();
-        }
-    }
-
-    private void UseBundledMkvToolNix_Click(object sender, RoutedEventArgs e)
-    {
-        _mkvMergePath = null;
-        _useCustomMkvMergePath = false;
-        _detectedMkvToolNix = _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge;
-        UpdateMkvToolNixControls();
-    }
-
-    private void UpdateMkvToolNixControls()
-    {
-        if (MkvToolNixSelectionText is null
-            || MkvToolNixPathText is null
-            || UseBundledMkvToolNixButton is null)
-        {
-            return;
-        }
-
-        var dependency = _detectedMkvToolNix;
-        var version = FormatToolVersion(dependency?.Version);
-        var configuredPathIsActive = _useCustomMkvMergePath
-                                     && !string.IsNullOrWhiteSpace(_mkvMergePath)
-                                     && string.Equals(
-                                         NormalizePath(_mkvMergePath),
-                                         NormalizePath(dependency?.Path),
-                                         StringComparison.OrdinalIgnoreCase);
-        if (configuredPathIsActive)
-        {
-            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixCustom", version);
-        }
-        else if (_useCustomMkvMergePath && dependency?.IsAvailable == true)
-        {
-            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixCustomFallback", version);
-        }
-        else if (dependency?.IsAvailable == true && BundledMkvToolNixProvider.IsBundledPath(dependency.Path))
-        {
-            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixBundled", version);
-        }
-        else if (dependency?.IsAvailable == true)
-        {
-            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixDetected", version);
-        }
-        else
-        {
-            MkvToolNixSelectionText.Text = AppText.Get("Settings_MkvToolNixUnavailable");
-        }
-
-        MkvToolNixPathText.Text = dependency?.Path ?? string.Empty;
-        MkvToolNixPathText.ToolTip = dependency?.Path;
-        UseBundledMkvToolNixButton.IsEnabled = _useCustomMkvMergePath;
-    }
-
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -239,8 +173,8 @@ public partial class SettingsWindow : Window
             }
             updated.Language = language;
             updated.CheckForUpdatesAutomatically = CheckForUpdatesAutomaticallyCheckBox.IsChecked == true;
-            updated.MkvMergePath = _useCustomMkvMergePath ? _mkvMergePath : null;
-            updated.UseCustomMkvMergePath = _useCustomMkvMergePath && updated.MkvMergePath is not null;
+            updated.MkvMergePath = null;
+            updated.UseCustomMkvMergePath = false;
             updated.OutputPrefix = OutputPrefixTextBox.Text.Trim();
             updated.IncludeSubdirectories = IncludeSubdirectoriesCheckBox.IsChecked == true;
             updated.AllowSubtitleSuffixMatch = AllowSubtitleSuffixMatchCheckBox.IsChecked == true;
@@ -294,6 +228,24 @@ public partial class SettingsWindow : Window
             updated.MaintenanceLegacyAssStyles = MaintenanceLegacyAssStylesTextBox.Text.Trim();
             updated.MaintenanceOutputPrefix = MaintenanceOutputPrefixTextBox.Text.Trim();
             updated.MaintenanceReplaceOriginal = MaintenanceReplaceOriginalCheckBox.IsChecked == true;
+            updated.EnableLapseSync = EnableLapseSyncCheckBox.IsChecked == true;
+            updated.LapseMode = Enum.TryParse<LapseSyncMode>(LapseModeComboBox.SelectedValue as string, out var lapseMode)
+                ? lapseMode : LapseSyncMode.Auto;
+            updated.LapseReference = UseEmbeddedSubtitleReferenceCheckBox.IsChecked == true
+                ? LapseReferenceMode.Auto
+                : LapseReferenceMode.AudioOnly;
+            if (!int.TryParse(LapseSplitPenaltyTextBox.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var splitPenalty))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_LapsePenaltyError"));
+            }
+            updated.LapseSplitPenalty = splitPenalty;
+            if (!int.TryParse(LapseConfidenceTextBox.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out var confidenceThreshold))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_LapseConfidenceError"));
+            }
+            updated.LapseConfidenceThreshold = confidenceThreshold;
+            updated.MaintenanceUpdateLapseSync = MaintenanceUpdateLapseSyncCheckBox.IsChecked == true;
+            updated.MaintenanceForceLapseResync = MaintenanceForceLapseResyncCheckBox.IsChecked == true;
             updated.Validate();
             updated.Save();
             Settings = updated;
@@ -325,6 +277,26 @@ public partial class SettingsWindow : Window
 
     private void MaintenanceReplaceOriginal_Changed(object sender, RoutedEventArgs e) =>
         UpdateMaintenanceOutputControls();
+
+    private void LapseModeComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
+        UpdateLapseSplitPenaltyControls();
+
+    private void UpdateLapseSplitPenaltyControls()
+    {
+        if (LapseModeComboBox is null || LapseSplitPenaltyTextBox is null
+            || LapseSplitPenaltyLabel is null || LapseSplitPenaltyHelpText is null)
+        {
+            return;
+        }
+
+        var enabled = string.Equals(
+            LapseModeComboBox.SelectedValue as string,
+            LapseSyncMode.Split.ToString(),
+            StringComparison.Ordinal);
+        LapseSplitPenaltyTextBox.IsEnabled = enabled;
+        LapseSplitPenaltyLabel.IsEnabled = enabled;
+        LapseSplitPenaltyHelpText.IsEnabled = enabled;
+    }
 
     private void UpdateMaintenanceOutputControls()
     {
@@ -480,10 +452,71 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        Settings = new AppSettings();
-        LoadSettingsIntoControls(
-            Settings,
-            _dependencyLocator.Locate(configuredMkvMerge: null).MkvMerge);
+        var selectedPresetId = Settings.SelectedPresetId;
+        Settings = new AppSettings { SelectedPresetId = selectedPresetId };
+        LoadSettingsIntoControls(Settings);
+    }
+
+    private async void RepairBundledTools_Click(object sender, RoutedEventArgs e)
+    {
+        RepairBundledToolsButton.IsEnabled = false;
+        BundledToolsStatusText.Text = AppText.Get("Settings_BundledToolsRepairing");
+        try
+        {
+            var status = await new BundledToolManager().EnsureAvailableAsync();
+            BundledToolsStatusText.Text = status.IsHealthy
+                ? AppText.Get("Settings_BundledToolsReady")
+                : AppText.Get("Settings_BundledToolsFailed", status.Error ?? "Unknown error");
+            SetBundledToolsStatusAppearance(status.IsHealthy);
+        }
+        finally
+        {
+            RepairBundledToolsButton.IsEnabled = true;
+        }
+    }
+
+    private void OpenBundledToolsFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = Path.Combine(AppSettings.SettingsDirectory, "tools");
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                AppText.Get("Settings_OpenBundledToolsFolderError", exception.Message),
+                AppText.Get("Settings_BundledTools"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void ToolWebsite_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+            e.Handled = true;
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                AppText.Get("Settings_OpenToolWebsiteError", exception.Message),
+                AppText.Get("Settings_BundledTools"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void SetBundledToolsStatusAppearance(bool healthy)
+    {
+        BundledToolsStatusText.Foreground = healthy
+            ? (System.Windows.Media.Brush)FindResource("SecondaryTextBrush")
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(180, 35, 24));
     }
 
     private void CommitAssStyleFields()
@@ -589,27 +622,6 @@ public partial class SettingsWindow : Window
             ? definition!
             : AssStyleDefinition.Parse(AppSettings.DefaultAssStyleLine);
 
-    private static string FormatToolVersion(string? version) =>
-        string.IsNullOrWhiteSpace(version)
-            ? AppText.Get("Tool_UnknownVersion")
-            : version.Split([' ', '+'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
-
-    private static string? NormalizePath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            return Path.GetFullPath(path);
-        }
-        catch
-        {
-            return path;
-        }
-    }
 
     private sealed record AlignmentOption(int Value, string Label)
     {

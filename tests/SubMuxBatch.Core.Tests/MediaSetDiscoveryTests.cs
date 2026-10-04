@@ -312,6 +312,22 @@ public sealed class MediaSetDiscoveryTests : IDisposable
         Assert.Contains(result, media => media.VideoPath == Path.GetFullPath(video));
         Assert.Contains(result, media => media.VideoPath == Path.GetFullPath(Path.Combine(_root, "SubMux_Skipped.mkv")));
     }
+
+    [Fact]
+    public async Task RecursiveDiscoveryIgnoresSubMuxBackupDirectory()
+    {
+        Touch("Movie.mkv");
+        Touch("Movie.srt");
+        var backup = Path.Combine(_root, ".submux-backup", "external-subtitles");
+        Directory.CreateDirectory(backup);
+        File.WriteAllText(Path.Combine(backup, "Backup.mkv"), "x");
+        File.WriteAllText(Path.Combine(backup, "Backup.srt"), "x");
+
+        var result = await new MediaSetDiscovery().DiscoverAsync([_root], true);
+
+        var media = Assert.Single(result);
+        Assert.Equal("Movie", media.Key.Stem);
+    }
     private string Touch(string name)
     {
         var path = Path.Combine(_root, name);

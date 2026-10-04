@@ -634,6 +634,16 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             actions.Add(AppText.Get("Maintenance_PlanInspectAssSource"));
             hasOperation = true;
         }
+        if (settings.MaintenanceUpdateFonts)
+        {
+            actions.Add(AppText.Get("Maintenance_PlanApplyFonts"));
+            hasOperation = true;
+        }
+        if (settings.MaintenanceUpdateLapseSync && settings.EnableLapseSync)
+        {
+            actions.Add(AppText.Get("Maintenance_PlanApplyLapse"));
+            hasOperation = true;
+        }
         if (settings.MaintenanceApplyAudioSettings
             && (settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage))
         {

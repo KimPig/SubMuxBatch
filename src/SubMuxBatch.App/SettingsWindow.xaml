@@ -163,6 +163,10 @@
                             <Trigger Property="IsDropDownOpen" Value="True">
                                 <Setter TargetName="InputSurface" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                             </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="InputSurface" Property="Background" Value="#F3F2F1" />
+                                <Setter Property="Opacity" Value="0.55" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -494,6 +498,87 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="{loc:Loc Settings_TabSync}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_LapseHeading}" FontSize="18" FontWeight="SemiBold" />
+                                <CheckBox x:Name="EnableLapseSyncCheckBox" Margin="0,14,0,0">
+                                    <TextBlock Text="{loc:Loc Settings_EnableLapseSync}" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <TextBlock Margin="24,5,0,12" Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" Text="{loc:Loc Settings_LapseHelp}" />
+                                <Grid IsEnabled="{Binding IsChecked, ElementName=EnableLapseSyncCheckBox}" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="170" />
+                                        <ColumnDefinition Width="300" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <CheckBox x:Name="UseEmbeddedSubtitleReferenceCheckBox"
+                                              Grid.ColumnSpan="2"
+                                              Margin="0,0,0,0">
+                                        <TextBlock Text="{loc:Loc Settings_LapseUseEmbeddedReference}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <TextBlock Grid.Row="1"
+                                               Grid.ColumnSpan="2"
+                                               Margin="24,5,0,10"
+                                               Foreground="{StaticResource SecondaryTextBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Text="{loc:Loc Settings_LapseEmbeddedReferenceHelp}" />
+                                    <TextBlock Grid.Row="2" Text="{loc:Loc Settings_LapseMode}" VerticalAlignment="Center" Margin="0,0,14,10" />
+                                    <ComboBox x:Name="LapseModeComboBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,10"
+                                              Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag"
+                                              SelectionChanged="LapseModeComboBox_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_LapseModeAuto}" Tag="Auto" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_LapseModeNoSplit}" Tag="NoSplit" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_LapseModeOls}" Tag="Ols" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_LapseModeSplit}" Tag="Split" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="LapseSplitPenaltyLabel" Grid.Row="3"
+                                               Text="{loc:Loc Settings_LapseSplitPenalty}"
+                                               VerticalAlignment="Top" Margin="0,7,14,0" />
+                                    <StackPanel Grid.Row="3" Grid.Column="1">
+                                        <TextBox x:Name="LapseSplitPenaltyTextBox"
+                                                 Style="{StaticResource FieldTextBoxStyle}" Margin="0" />
+                                        <TextBlock x:Name="LapseSplitPenaltyHelpText"
+                                                   Margin="0,5,0,0"
+                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="{loc:Loc Settings_LapseSplitPenaltyHelp}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Row="4"
+                                               Text="{loc:Loc Settings_LapseConfidence}"
+                                               VerticalAlignment="Top"
+                                               Margin="0,17,14,0" />
+                                    <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
+                                        <TextBox x:Name="LapseConfidenceTextBox"
+                                                 Style="{StaticResource FieldTextBoxStyle}"
+                                                 Margin="0" />
+                                        <TextBlock Margin="0,5,0,0"
+                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="{loc:Loc Settings_LapseConfidenceHelp}" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="{loc:Loc Settings_TabBackupCleanup}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
@@ -795,6 +880,11 @@
                                 <CheckBox x:Name="MaintenanceUpdateFontsCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateFonts}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceApplyAudioSettingsCheckBox" Content="{loc:Loc Settings_MaintenanceApplyAudio}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceRefreshTagsCheckBox" Content="{loc:Loc Settings_MaintenanceRefreshTags}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceUpdateLapseSyncCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateLapse}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceForceLapseResyncCheckBox"
+                                          Content="{loc:Loc Settings_MaintenanceForceLapse}"
+                                          Margin="24,4,0,4"
+                                          IsEnabled="{Binding IsChecked, ElementName=MaintenanceUpdateLapseSyncCheckBox}" />
                                 <CheckBox x:Name="MaintenanceDetectLegacyAssCheckBox" Content="{loc:Loc Settings_MaintenanceDetectLegacy}" Margin="0,4,0,0" />
                                 <TextBlock Margin="24,5,0,10" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" TextWrapping="Wrap" Text="{loc:Loc Settings_MaintenanceDetectLegacyHelp}" />
                                 <Grid Margin="0,4,0,0"
@@ -889,7 +979,7 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="{loc:Loc Settings_TabOther}">
+            <TabItem x:Name="OtherTabItem" Header="{loc:Loc Settings_TabOther}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Padding="0,12,4,0">
@@ -948,32 +1038,28 @@
 
                         <Border Style="{StaticResource SectionCardStyle}">
                             <StackPanel>
-                                <TextBlock Text="MKVToolNix"
-                                           FontSize="18"
-                                           FontWeight="SemiBold" />
-                                <TextBlock x:Name="MkvToolNixSelectionText"
-                                           Margin="0,7,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap" />
-                                <TextBox x:Name="MkvToolNixPathText"
-                                         Margin="0,8,0,0"
-                                         Style="{StaticResource FieldTextBoxStyle}"
-                                         IsReadOnly="True"
-                                         HorizontalScrollBarVisibility="Auto"
-                                         TextWrapping="NoWrap" />
-                                <TextBlock Margin="0,7,0,0"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           FontSize="11"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_MkvToolNixHelp}" />
-                                <StackPanel Margin="0,14,0,0"
-                                            Orientation="Horizontal">
-                                    <Button x:Name="UseBundledMkvToolNixButton"
-                                            Content="{loc:Loc Settings_UseBundledMkvToolNix}"
-                                            Click="UseBundledMkvToolNix_Click" />
-                                    <Button Margin="8,0,0,0"
-                                            Content="{loc:Loc Common_Change}"
-                                            Click="ChangeMkvToolNix_Click" />
+                                <TextBlock Text="{loc:Loc Settings_BundledTools}" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,9,0,0">
+                                    <Hyperlink NavigateUri="https://mkvtoolnix.download/" RequestNavigate="ToolWebsite_RequestNavigate">MKVToolNix 102.0</Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,5,0,0">
+                                    <Hyperlink NavigateUri="https://ffmpeg.org/" RequestNavigate="ToolWebsite_RequestNavigate">FFmpeg 8.1</Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,5,0,0">
+                                    <Hyperlink NavigateUri="https://github.com/SubtitleEdit/subtitleedit/tree/main/src/libse" RequestNavigate="ToolWebsite_RequestNavigate">libse 5.1.0</Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,5,0,0">
+                                    <Hyperlink NavigateUri="https://github.com/Schwponaco-org/lapse" RequestNavigate="ToolWebsite_RequestNavigate">LAPSE 2.2.4</Hyperlink>
+                                </TextBlock>
+                                <TextBlock x:Name="BundledToolsStatusText" Margin="0,8,0,0"
+                                           Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
+                                    <Button Content="{loc:Loc Settings_OpenBundledToolsFolder}"
+                                            Click="OpenBundledToolsFolder_Click" />
+                                    <Button x:Name="RepairBundledToolsButton"
+                                            Margin="0"
+                                            Content="{loc:Loc Settings_RepairBundledTools}"
+                                            Click="RepairBundledTools_Click" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
