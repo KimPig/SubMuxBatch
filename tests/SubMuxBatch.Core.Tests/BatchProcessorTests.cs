@@ -491,10 +491,10 @@ public sealed class BatchProcessorTests : IDisposable
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
         const string sourceText = "5\n"
                                   + "00:00:-3,-900 --> 00:00:00,-140\n"
-                                  + "등장인물들은 모두 18세 이상입니다\n"
+                                  + "제거할 자막\n"
                                   + "5\n"
                                   + "00:00:00,-90 --> 00:00:03,340\n"
-                                  + "가져가 주세요\n"
+                                  + "유지할 자막\n"
                                   + "00:00:09,370 --> 00:00:13,280\n"
                                   + "번호 없는 자막\n";
         await File.WriteAllTextAsync(srt, sourceText);
@@ -511,7 +511,7 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(2, result.Warnings.Count(static warning =>
             warning.Contains("음수 타임스탬프", StringComparison.Ordinal)
             || warning.Contains("영상 시작 전에 끝나", StringComparison.Ordinal)));
-        Assert.DoesNotContain("등장인물들은", runner.MuxedSrtText);
+        Assert.DoesNotContain("제거할 자막", runner.MuxedSrtText);
         Assert.DoesNotContain(",-", runner.MuxedSrtText);
         Assert.DoesNotContain("00:00:-", runner.MuxedSrtText);
         Assert.Contains("1\r\n00:00:00,000 --> 00:00:03,340", runner.MuxedSrtText);

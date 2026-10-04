@@ -42,7 +42,7 @@ public sealed class MaintenanceIntegrationTests
                 """);
             await File.WriteAllTextAsync(
                 srt,
-                "1\r\n00:00:00,000 --> 00:00:01,000\r\n<font color = FC8046 face = Arial>test</font>\r\n");
+                "1\r\n00:00:00,000 --> 00:00:01,000\r\n<font color = 112233 face = Arial>test</font>\r\n");
             await File.WriteAllTextAsync(
                 extraSrt,
                 "1\r\n00:00:00,000 --> 00:00:01,000\r\nremove me\r\n");
@@ -94,7 +94,7 @@ public sealed class MaintenanceIntegrationTests
             Assert.InRange(extract.ExitCode, 0, 1);
             var maintainedAssText = await File.ReadAllTextAsync(maintainedAss);
             Assert.Contains(AppSettings.DefaultAssStyleLine, maintainedAssText);
-            Assert.Contains(@"\c&H4680fc&", maintainedAssText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(@"\c&H332211&", maintainedAssText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(@"\fnArial", maintainedAssText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains($"; SUBMUX_SUBTITLE_SOURCE={SubMuxMetadata.LegacySrtOrSmiSource}", maintainedAssText);
             var maintainedTags = await runner.RunAsync(new ProcessRequest(

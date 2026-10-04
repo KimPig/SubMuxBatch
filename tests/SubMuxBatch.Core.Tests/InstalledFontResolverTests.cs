@@ -175,18 +175,18 @@ public sealed class InstalledFontResolverTests : IDisposable
     {
         var scanned = Path.Combine(_root, "scanned");
         Directory.CreateDirectory(scanned);
-        var external = Path.Combine(_root, "YDOO08.TTF");
-        WriteFont(external, "Yj BACDOO", fullName: "Yj BACDOO Bold", weight: 700);
+        var external = Path.Combine(_root, "legacy-alias.ttf");
+        WriteFont(external, "Internal Legacy Family", fullName: "Internal Legacy Family Bold", weight: 700);
         var resolver = new InstalledFontResolver(
             [scanned],
-            [new InstalledFontResolver.RegisteredFontEntry("양재백두체B (TrueType)", external)]);
+            [new InstalledFontResolver.RegisteredFontEntry("Display Legacy Family (TrueType)", external)]);
 
-        var match = resolver.Resolve(new AssFontRequirement("양재백두체B", 700, false));
+        var match = resolver.Resolve(new AssFontRequirement("Display Legacy Family", 700, false));
 
         Assert.NotNull(match);
         Assert.Equal(InstalledFontMatchKind.RegistryAlias, match.MatchKind);
-        Assert.Equal("YDOO08.TTF", match.File.SourceFileName);
-        Assert.Equal("Yj BACDOO", match.InternalName);
+        Assert.Equal("legacy-alias.ttf", match.File.SourceFileName);
+        Assert.Equal("Internal Legacy Family", match.InternalName);
     }
 
     [Fact]
@@ -233,35 +233,6 @@ public sealed class InstalledFontResolverTests : IDisposable
         }
 
         var match = InstalledFontResolver.System.Resolve(new AssFontRequirement(familyName, weight, italic));
-
-        Assert.NotNull(match);
-        Assert.Equal(expectedFileName, match.File.SourceFileName, ignoreCase: true);
-    }
-
-    [Theory]
-    [Trait("Category", "Integration")]
-    [InlineData("a두리둥실", "A두리둥실.TTF")]
-    [InlineData("HY바다L", "HY바다L-YOOND1004.TTF")]
-    [InlineData("양재백두체B", "YDOO08.TTF")]
-    public void FindsKnownPerUserWindowsFonts(string requestedName, string expectedFileName)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var expectedPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Microsoft",
-            "Windows",
-            "Fonts",
-            expectedFileName);
-        if (!File.Exists(expectedPath))
-        {
-            return;
-        }
-
-        var match = InstalledFontResolver.System.Resolve(new AssFontRequirement(requestedName, 400, false));
 
         Assert.NotNull(match);
         Assert.Equal(expectedFileName, match.File.SourceFileName, ignoreCase: true);

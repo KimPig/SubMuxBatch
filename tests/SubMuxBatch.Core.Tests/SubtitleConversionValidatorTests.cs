@@ -23,7 +23,7 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         var ass = Path.Combine(_root, "result.ass");
         await File.WriteAllTextAsync(
             source,
-            "1\n00:00:00,000 --> 00:00:01,000\n<font color = FC8046 face = 휴먼편지체>테스트</font>\n",
+            "1\n00:00:00,000 --> 00:00:01,000\n<font color = 112233 face = Example Font A>테스트</font>\n",
             new UTF8Encoding(false));
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
         await File.WriteAllTextAsync(
@@ -82,10 +82,10 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         var ass = Path.Combine(_root, "result-unbalanced.ass");
         await File.WriteAllTextAsync(
             source,
-            "464\r\n00:17:57,970 --> 00:17:59,544\r\n"
-            + "<font color = #BBDDF7><font face = Test Family>첫째</font></font>\r\n"
-            + "<font color = #B4EDE2>둘째 줄</font></font>\r\n"
-            + "<font color = ff00ff>　</font>\r\n",
+            "1\r\n00:00:00,000 --> 00:00:01,000\r\n"
+            + "<font color = #112233><font face = Example Font A>첫째</font></font>\r\n"
+            + "<font color = #223344>둘째 줄</font></font>\r\n"
+            + "<font color = 334455>　</font>\r\n",
             new UTF8Encoding(false));
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
         await new LibSeSubtitleConverter().ConvertAsync(
@@ -145,12 +145,12 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         await File.WriteAllTextAsync(
             source,
             "1\n00:00:00,000 --> 00:00:01,000\n"
-            + "<font face = a시골b>"
-            + "<font color = FFA29B>변</font>"
-            + "<font color = F9F177>하</font>"
-            + "<font color = F3C2FC>고</font> "
-            + "<font color = 96E4F7>마</font>"
-            + "<font color = DEFF9E>는</font>"
+            + "<font face = Example Font A>"
+            + "<font color = 112233>가</font>"
+            + "<font color = 223344>나</font>"
+            + "<font color = 334455>다</font> "
+            + "<font color = 445566>라</font>"
+            + "<font color = 556677>마</font>"
             + "</font>\n",
             new UTF8Encoding(false));
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared, 75);
@@ -174,10 +174,10 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         SubtitleConversionValidator.ValidateAssOptimization(assText, optimizedAss);
         SubtitleConversionValidator.ValidateSrtToAss(preparedText, optimizedAss);
         Assert.True(
-            Regex.Matches(assText, @"\\fna시골b", RegexOptions.IgnoreCase).Count >= 5,
+            Regex.Matches(assText, @"\\fnExample Font A", RegexOptions.IgnoreCase).Count >= 5,
             assText);
         Assert.Single(
-            Regex.Matches(optimizedAss, @"\\fna시골b", RegexOptions.IgnoreCase).Cast<Match>());
+            Regex.Matches(optimizedAss, @"\\fnExample Font A", RegexOptions.IgnoreCase).Cast<Match>());
         Assert.DoesNotContain(@"{\fn\c", optimizedAss, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -185,8 +185,8 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
     public void RejectsPrematureFontResetInsideInheritedColourRuns()
     {
         const string srt = "1\n00:00:00,000 --> 00:00:01,000\n"
-                           + "<font face=\"a시골b\" color=\"#FFA29B\">변</font>"
-                           + "<font face=\"a시골b\" color=\"#F9F177\">하</font>\n";
+                           + "<font face=\"Example Font A\" color=\"#112233\">가</font>"
+                           + "<font face=\"Example Font A\" color=\"#223344\">나</font>\n";
         const string ass = "[Script Info]\n"
                            + "[V4+ Styles]\n"
                            + "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
@@ -194,18 +194,18 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
                            + "[Events]\n"
                            + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
                            + "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,"
-                           + "{\\fna시골b\\c&H9ba2ff&}변{\\fn\\c&H77f1f9&}하\n";
+                           + "{\\fnExample Font A\\c&H332211&}가{\\fn\\c&H443322&}나\n";
 
         var error = Assert.Throws<InvalidDataException>(() =>
             SubtitleConversionValidator.ValidateSrtToAss(srt, ass));
 
-        Assert.Contains("a시골b", error.Message);
+        Assert.Contains("Example Font A", error.Message);
     }
 
     [Fact]
     public void RejectsMissingFontFormattingEvenWhenTextAndTimingMatch()
     {
-        const string srt = "1\n00:00:00,000 --> 00:00:01,000\n<font face=\"휴먼편지체\">테스트</font>\n";
+        const string srt = "1\n00:00:00,000 --> 00:00:01,000\n<font face=\"Example Font A\">테스트</font>\n";
         const string ass = "[Events]\n"
                            + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
                            + "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,테스트\n";
@@ -213,7 +213,7 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         var error = Assert.Throws<InvalidDataException>(() =>
             SubtitleConversionValidator.ValidateSrtToAss(srt, ass));
 
-        Assert.Contains("휴먼편지체", error.Message);
+        Assert.Contains("Example Font A", error.Message);
     }
 
     [Fact]
@@ -235,9 +235,9 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         var prepared = Path.Combine(_root, "invalid-colour-prepared.srt");
         await File.WriteAllTextAsync(
             source,
-            "554\n00:23:15,180 --> 00:23:16,900\n<font color=9FFDDEF>첫째</font>\n\n"
-            + "555\n00:23:18,380 --> 00:23:21,260\n<font color=9FFDDEF>둘째</font>\n\n"
-            + "556\n00:23:23,036 --> 00:23:24,893\n<font color=9FFDDEF>셋째</font>\n",
+            "1\n00:00:00,000 --> 00:00:01,000\n<font color=9FFDDEF>첫째</font>\n\n"
+            + "2\n00:00:01,000 --> 00:00:02,000\n<font color=9FFDDEF>둘째</font>\n\n"
+            + "3\n00:00:02,000 --> 00:00:03,000\n<font color=9FFDDEF>셋째</font>\n",
             new UTF8Encoding(false));
 
         var result = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
@@ -245,16 +245,16 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
         var colour = Assert.Single(result.UnrecognizedColours);
         Assert.Equal("9FFDDEF", colour.Value);
         Assert.Equal(3, colour.Count);
-        Assert.Equal(554, colour.FirstCueNumber);
-        Assert.Equal("00:23:15.180", colour.FirstStart);
+        Assert.Equal(1, colour.FirstCueNumber);
+        Assert.Equal("00:00:00.000", colour.FirstStart);
         Assert.Contains("<font color=\"9FFDDEF\">첫째</font>", await File.ReadAllTextAsync(prepared));
 
         var warning = Assert.Single(
             SubtitleCompatibilityNormalizer.CreateUnrecognizedFontColourWarnings(result));
         Assert.Contains("9FFDDEF", warning);
         Assert.Contains("3", warning);
-        Assert.Contains("554", warning);
-        Assert.Contains("00:23:15.180", warning);
+        Assert.Contains("1", warning);
+        Assert.Contains("00:00:00.000", warning);
     }
 
     [Theory]

@@ -41,14 +41,14 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         const string text = "1\r\n"
                             + "00:00:00,000 --> 00:00:01,000\r\n"
                             + "<ruby>테스트<rt>test</rt></ruby> "
-                            + "<ruby>레나<rt>[零奈]</rt></ruby>\r\n";
+                            + "<ruby>기준<rt>[reading]</rt></ruby>\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output, 80);
 
         var normalized = await File.ReadAllTextAsync(output);
         Assert.Contains("테스트<font size=\"40\">test</font>", normalized);
-        Assert.Contains("레나<font size=\"40\">[零奈]</font>", normalized);
+        Assert.Contains("기준<font size=\"40\">[reading]</font>", normalized);
         Assert.DoesNotContain("<ruby", normalized, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
@@ -60,24 +60,24 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         var output = Path.Combine(_root, "nested-font-prepared.srt");
         const string text = "1\r\n"
                             + "00:00:00,000 --> 00:00:01,000\r\n"
-                            + "<font face = a시골b>"
-                            + "<font color = FFA29B>변</font>"
-                            + "<font color = F9F177>하</font>"
-                            + "<font color = F3C2FC>고</font> "
-                            + "<font color = 96E4F7>마</font>"
-                            + "<font color = DEFF9E>는</font>"
+                            + "<font face = Example Font A>"
+                            + "<font color = 112233>가</font>"
+                            + "<font color = 223344>나</font>"
+                            + "<font color = 334455>다</font> "
+                            + "<font color = 445566>라</font>"
+                            + "<font color = 556677>마</font>"
                             + "</font>\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.Contains("<font face=\"a시골b\" color=\"FFA29B\">변</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"F9F177\">하</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"F3C2FC\">고</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\"> </font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"96E4F7\">마</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"DEFF9E\">는</font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\" color=\"112233\">가</font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\" color=\"223344\">나</font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\" color=\"334455\">다</font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\"> </font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\" color=\"445566\">라</font>", normalized);
+        Assert.Contains("<font face=\"Example Font A\" color=\"556677\">마</font>", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 
@@ -89,7 +89,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         const string text = "1\r\n"
                             + "00:00:00,000 --> 00:00:01,000\r\n"
                             + "<font face=\"Example\" color=\"#112233\">"
-                            + "<ruby>레나<rt>[零奈]</rt></ruby>"
+                            + "<ruby>기준<rt>[reading]</rt></ruby>"
                             + "</font>\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
@@ -97,8 +97,8 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
 
         var normalized = await File.ReadAllTextAsync(output);
         Assert.Contains(
-            "<font face=\"Example\" color=\"#112233\">레나</font>"
-            + "<font face=\"Example\" color=\"#112233\" size=\"45\">[零奈]</font>",
+            "<font face=\"Example\" color=\"#112233\">기준</font>"
+            + "<font face=\"Example\" color=\"#112233\" size=\"45\">[reading]</font>",
             normalized);
     }
 
@@ -109,17 +109,17 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         var output = Path.Combine(_root, "prepared.srt");
         const string text = "1\r\n"
                             + "00:00:00,000 --> 00:00:01,000\r\n"
-                            + "<FONT COLOR = FC8046 FACE = 휴먼편지체>첫째</FONT>\r\n\r\n"
+                            + "<FONT COLOR = 112233 FACE = Example Font A>첫째</FONT>\r\n\r\n"
                             + "2\r\n"
                             + "00:00:01,000 --> 00:00:02,000\r\n"
-                            + "<font face = Malgun Gothic color = #46FFFF>둘째</font>\r\n";
+                            + "<font face = Example Font B color = #445566>둘째</font>\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.Contains("<font color=\"FC8046\" face=\"휴먼편지체\">첫째</font>", normalized);
-        Assert.Contains("<font face=\"Malgun Gothic\" color=\"#46FFFF\">둘째</font>", normalized);
+        Assert.Contains("<font color=\"112233\" face=\"Example Font A\">첫째</font>", normalized);
+        Assert.Contains("<font face=\"Example Font B\" color=\"#445566\">둘째</font>", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 
@@ -146,17 +146,17 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         var output = Path.Combine(_root, "prepared.srt");
         const string text = "1\r\n"
                             + "00:00:00,000 --> 00:00:01,000\r\n"
-                            + "<font color = #BBDDF7><font face = Test Family>첫째</font></font>\r\n"
-                            + "<font color = #B4EDE2>둘째</font></font>\r\n"
-                            + "<font color = ff00ff>셋째\r\n";
+                            + "<font color = #112233><font face = Test Family>첫째</font></font>\r\n"
+                            + "<font color = #223344>둘째</font></font>\r\n"
+                            + "<font color = 334455>셋째\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.Contains("<font color=\"#B4EDE2\">둘째</font>\r\n", normalized);
+        Assert.Contains("<font color=\"#223344\">둘째</font>\r\n", normalized);
         Assert.DoesNotContain("둘째</font></font>", normalized);
-        Assert.EndsWith("<font color=\"ff00ff\">셋째</font>\r\n", normalized);
+        Assert.EndsWith("<font color=\"334455\">셋째</font>\r\n", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 
@@ -225,7 +225,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
                             + "Intro\r\n\r\n"
                             + "2\r\n"
                             + "00:00:00,-160 --> 00:00:19,610\r\n"
-                            + "뭐든 잘하고 우수\r\n";
+                            + "유지할 자막\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
         var adjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSrtTimestampsAsync(
@@ -244,7 +244,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         Assert.DoesNotContain("Intro", normalized);
         Assert.DoesNotContain(",-", normalized);
         Assert.Contains("00:00:00,000 --> 00:00:19,610", normalized);
-        Assert.Contains("뭐든 잘하고 우수", normalized);
+        Assert.Contains("유지할 자막", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 
@@ -255,10 +255,10 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         var output = Path.Combine(_root, "normalized.srt");
         const string text = "5\r\n"
                             + "00:00:-3,-900 --> 00:00:00,-140\r\n"
-                            + "등장인물들은 모두 18세 이상입니다\r\n"
+                            + "제거할 자막\r\n"
                             + "5\r\n"
                             + "00:00:00,-90 --> 00:00:03,340\r\n"
-                            + "가져가 주세요\r\n"
+                            + "유지할 자막\r\n"
                             + "00:00:09,370 --> 00:00:13,280\r\n"
                             + "번호 없는 첫 줄\r\n"
                             + "번호 없는 둘째 줄\r\n";
@@ -274,7 +274,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         Assert.Equal("00:00:00,000 --> 00:00:03,340", adjustments[1].AdjustedRange);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.DoesNotContain("등장인물들은", normalized);
+        Assert.DoesNotContain("제거할 자막", normalized);
         Assert.DoesNotContain("00:00:-", normalized);
         Assert.DoesNotContain(",-", normalized);
         Assert.Contains("1\r\n00:00:00,000 --> 00:00:03,340", normalized);

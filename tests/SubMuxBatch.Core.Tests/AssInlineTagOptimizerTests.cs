@@ -8,33 +8,33 @@ public sealed class AssInlineTagOptimizerTests
     public void RemovesLibSeFontResetsAndRepeatedInheritedFace()
     {
         var source = CreateAss(
-            "{\\c&H9ba2ff&\\fna시골b}변"
-            + "{\\c}{\\fn\\c&H77f1f9&\\fna시골b}하"
-            + "{\\c}{\\fn\\c&Hfcc2f3&\\fna시골b}고"
-            + "{\\c}{\\fna시골b} "
-            + "{\\fn\\c&Hf7e496&\\fna시골b}마"
-            + "{\\c}{\\fn\\c&H9effde&\\fna시골b}는");
+            "{\\c&H112233&\\fnExample Font A}가"
+            + "{\\c}{\\fn\\c&H223344&\\fnExample Font A}나"
+            + "{\\c}{\\fn\\c&H334455&\\fnExample Font A}다"
+            + "{\\c}{\\fnExample Font A} "
+            + "{\\fn\\c&H445566&\\fnExample Font A}라"
+            + "{\\c}{\\fn\\c&H556677&\\fnExample Font A}마");
 
         var result = AssInlineTagOptimizer.OptimizeGeneratedAss(source);
 
         SubtitleConversionValidator.ValidateAssOptimization(source, result);
-        Assert.Contains("{\\fna시골b\\c&H9BA2FF&}변", result);
-        Assert.Contains("{\\c&H77F1F9&}하", result);
-        Assert.Contains("{\\c&HFCC2F3&}고", result);
+        Assert.Contains("{\\fnExample Font A\\c&H112233&}가", result);
+        Assert.Contains("{\\c&H223344&}나", result);
+        Assert.Contains("{\\c&H334455&}다", result);
         Assert.Contains("{\\c} ", result);
-        Assert.Contains("{\\c&HF7E496&}마", result);
-        Assert.Contains("{\\c&H9EFFDE&}는", result);
+        Assert.Contains("{\\c&H445566&}라", result);
+        Assert.Contains("{\\c&H556677&}마", result);
         Assert.DoesNotContain("{\\fn\\c", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, result.Split("\\fna시골b", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, result.Split("\\fnExample Font A", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
     public void KeepsRealFontTransitionAndDropsTrailingStateOnlyBlock()
     {
         var withFollowingText = CreateAss(
-            "{\\fn다른폰트\\c&H77f1f9&}테스트{\\fn\\c&H77f1f9&\\fna시골b}다음");
+            "{\\fnExample Font B\\c&H223344&}앞{\\fn\\c&H223344&\\fnExample Font A}뒤");
         var trailingOnly = CreateAss(
-            "{\\fn다른폰트\\c&H77f1f9&}테스트{\\fn\\c&H77f1f9&\\fna시골b}");
+            "{\\fnExample Font B\\c&H223344&}앞{\\fn\\c&H223344&\\fnExample Font A}");
 
         var withFollowingResult = AssInlineTagOptimizer.OptimizeGeneratedAss(withFollowingText);
         var trailingResult = AssInlineTagOptimizer.OptimizeGeneratedAss(trailingOnly);
@@ -42,10 +42,10 @@ public sealed class AssInlineTagOptimizerTests
         SubtitleConversionValidator.ValidateAssOptimization(withFollowingText, withFollowingResult);
         SubtitleConversionValidator.ValidateAssOptimization(trailingOnly, trailingResult);
         Assert.Contains(
-            "{\\fn다른폰트\\c&H77F1F9&}테스트{\\fna시골b}다음",
+            "{\\fnExample Font B\\c&H223344&}앞{\\fnExample Font A}뒤",
             withFollowingResult);
-        Assert.Contains("{\\fn다른폰트\\c&H77F1F9&}테스트", trailingResult);
-        Assert.DoesNotContain("fna시골b", trailingResult);
+        Assert.Contains("{\\fnExample Font B\\c&H223344&}앞", trailingResult);
+        Assert.DoesNotContain("fnExample Font A", trailingResult);
     }
 
     [Fact]

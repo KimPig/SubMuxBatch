@@ -176,7 +176,7 @@ public sealed class AssStyleTemplateTests
     public void ExistingSavedAssStyleIsNeverReplacedByTheNewDefault()
     {
         const string savedStyle =
-            "Style: Default,맑은 고딕,79.5,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.0,0,1,2.3,3.8,2,30,30,77,1";
+            "Style: Default,Example Font,42,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,2,3,2,20,20,60,1";
 
         var json = System.Text.Json.JsonSerializer.Serialize(new { AssStyleLine = savedStyle });
         var loaded = AppSettings.Deserialize(json);
