@@ -101,10 +101,12 @@ public sealed class SubMuxMetadataTests
             "abc",
             applicationVersion: "2026.10.04",
             lapseVersion: "2.2.4",
-            profile: "AUTO|AUDIOONLY|6");
+            profile: "AUTO|AUDIOONLY|6",
+            sourceFormat: "SRT");
 
         Assert.True(SubMuxMetadata.HasAssLapseMarker(marked));
         Assert.Equal("AUTO|AUDIOONLY|6", SubMuxMetadata.ReadAssLapseProfile(marked));
+        Assert.Contains("; SUBMUX_LAPSE_SOURCE_FORMAT=SRT", marked);
     }
 
     [Fact]
@@ -130,6 +132,9 @@ public sealed class SubMuxMetadataTests
                               ; SUBMUX_LAPSE_REFERENCE=AUDIO
                               ; SUBMUX_LAPSE_OFFSET_MS=-250
                               ; SUBMUX_LAPSE_CONFIDENCE=0.75
+                              ; SUBMUX_LAPSE_SRT_SYNC=2026.10.04
+                              ; SUBMUX_LAPSE_SRT_MODE=auto/shifted
+                              ; SUBMUX_LAPSE_SRT_SOURCE_FORMAT=SMI
                               ScriptType: v4.00+
                               [Events]
                               Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,; SUBMUX_LAPSE_RESULT=fake
@@ -143,6 +148,9 @@ public sealed class SubMuxMetadataTests
         Assert.Contains("; SUBMUX_LAPSE_REFERENCE=AUDIO", copied);
         Assert.Contains("; SUBMUX_LAPSE_OFFSET_MS=-250", copied);
         Assert.Contains("; SUBMUX_LAPSE_CONFIDENCE=0.75", copied);
+        Assert.Contains("; SUBMUX_LAPSE_SRT_SYNC=2026.10.04", copied);
+        Assert.Contains("; SUBMUX_LAPSE_SRT_MODE=auto/shifted", copied);
+        Assert.Contains("; SUBMUX_LAPSE_SRT_SOURCE_FORMAT=SMI", copied);
         Assert.DoesNotContain("SUBMUX_LAPSE_RESULT=fake", copied);
     }
 

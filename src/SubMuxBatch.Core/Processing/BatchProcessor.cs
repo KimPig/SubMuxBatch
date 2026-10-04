@@ -202,6 +202,15 @@ public sealed class BatchProcessor(
             settings.Validate();
             ValidateInputs(media, plan);
             var subtitleSourceTag = GetSubtitleSourceTagValue(plan);
+            if (plan.SrtSource == SrtSourceKind.Existing && media.SrtPath is not null)
+            {
+                var existingMarkerText = await File.ReadAllTextAsync(media.SrtPath, cancellationToken).ConfigureAwait(false);
+                var existingMarker = LapseSubtitleMetadata.ReadSrtMarker(existingMarkerText);
+                if (string.Equals(existingMarker?.SourceFormat, "SMI", StringComparison.OrdinalIgnoreCase))
+                {
+                    subtitleSourceTag = plan.AssSource == AssSourceKind.Existing ? "ASS+SMI" : "SMI";
+                }
+            }
             Report(
                 JobState.Verifying,
                 2,
@@ -222,6 +231,8 @@ public sealed class BatchProcessor(
             var externalSubtitleReplacements = new List<ExternalSubtitleReplacement>();
             LapseSyncResult? assLapseResult = null;
             string? assLapseSourceHash = null;
+            LapseSyncResult? standardSrtLapseResult = null;
+            string? standardSrtLapseSourceHash = null;
             string? synchronizedExistingAssPath = null;
             string? globalTagsPath = null;
             if (settings.AddSubMuxTag)
@@ -355,6 +366,17 @@ public sealed class BatchProcessor(
             var finalSrtTextForMarker = await File.ReadAllTextAsync(finalSrt, cancellationToken).ConfigureAwait(false);
             var existingSrtLapseMarker = LapseSubtitleMetadata.ReadSrtMarker(finalSrtTextForMarker);
             var srtAlreadyLapseMarked = LapseSubtitleMetadata.HasSrtMarker(finalSrtTextForMarker);
+            if (srtAlreadyLapseMarked && LapseSubtitleMetadata.HasIncompleteSrtDetails(finalSrtTextForMarker))
+            {
+                var warning = CoreText.Get("Batch_LapseMarkerDetailsIncomplete");
+                warnings.Add(warning);
+                Report(JobState.Verifying, 9, warning);
+            }
+            if (srtAlreadyLapseMarked
+                && string.Equals(existingSrtLapseMarker?.SourceFormat, "SMI", StringComparison.OrdinalIgnoreCase))
+            {
+                subtitleSourceTag = plan.AssSource == AssSourceKind.Existing ? "ASS+SMI" : "SMI";
+            }
             if (srtAlreadyLapseMarked)
             {
                 var markerFreeSrt = Path.Combine(workspace.Path, "marker-free.srt");
@@ -433,6 +455,8 @@ public sealed class BatchProcessor(
                                     synchronizedSrt)
                         };
                         finalSrt = synchronizedSrt;
+                        standardSrtLapseResult = srtLapseResult;
+                        standardSrtLapseSourceHash = srtLapseSourceHash;
                         externalSubtitleReplacements.Add(new ExternalSubtitleReplacement(
                             originalExternal,
                             synchronizedSrt,
@@ -588,7 +612,10 @@ public sealed class BatchProcessor(
                     reference: assLapseResult.Reference,
                     offsetMilliseconds: assLapseResult.OffsetMilliseconds,
                     ratio: assLapseResult.Ratio,
-                    confidence: assLapseResult.Confidence);
+                    confidence: assLapseResult.Confidence,
+                    sourceFormat: plan.AssSource == AssSourceKind.Existing
+                        ? "ASS"
+                        : plan.SrtSource == SrtSourceKind.ConvertFromSmi ? "SMI" : "SRT");
                 await File.WriteAllTextAsync(
                     finalAss,
                     markedAss,
@@ -609,13 +636,60 @@ public sealed class BatchProcessor(
             {
                 var markedAss = SubMuxMetadata.AddOrReplaceAssLapseMarker(
                     await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false),
-                    "existing",
-                    "solid",
-                    LapseSubtitleMetadata.ComputeSha256(media.SrtPath!),
+                    existingSrtLapseMarker?.Mode ?? "existing",
+                    existingSrtLapseMarker?.Result ?? "solid",
+                    existingSrtLapseMarker?.SourceSha256 ?? LapseSubtitleMetadata.ComputeSha256(media.SrtPath!),
                     applicationVersion: existingSrtLapseMarker?.ApplicationVersion,
                     lapseVersion: existingSrtLapseMarker?.LapseVersion,
                     profile: existingSrtLapseMarker?.SettingsProfile,
-                    reference: existingSrtLapseMarker?.Reference);
+                    reference: existingSrtLapseMarker?.Reference,
+                    offsetMilliseconds: existingSrtLapseMarker?.OffsetMilliseconds,
+                    ratio: existingSrtLapseMarker?.Ratio,
+                    confidence: existingSrtLapseMarker?.Confidence,
+                    sourceFormat: existingSrtLapseMarker?.SourceFormat ?? "SRT");
+                await File.WriteAllTextAsync(
+                    finalAss,
+                    markedAss,
+                    new UTF8Encoding(false),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (plan.AssSource == AssSourceKind.Existing
+                && plan.SrtSource != SrtSourceKind.ConvertFromAss
+                && (standardSrtLapseResult?.Applied == true || srtAlreadyLapseMarked))
+            {
+                var markedAss = await File.ReadAllTextAsync(finalAss, cancellationToken).ConfigureAwait(false);
+                if (standardSrtLapseResult?.Applied == true)
+                {
+                    markedAss = SubMuxMetadata.AddOrReplaceAssSrtLapseMarker(
+                        markedAss,
+                        standardSrtLapseResult.Mode,
+                        "solid",
+                        standardSrtLapseSourceHash ?? string.Empty,
+                        profile: LapseSubtitleMetadata.CreateSettingsProfile(settings),
+                        reference: standardSrtLapseResult.Reference,
+                        offsetMilliseconds: standardSrtLapseResult.OffsetMilliseconds,
+                        ratio: standardSrtLapseResult.Ratio,
+                        confidence: standardSrtLapseResult.Confidence,
+                        sourceFormat: plan.SrtSource == SrtSourceKind.ConvertFromSmi ? "SMI" : "SRT");
+                }
+                else
+                {
+                    markedAss = SubMuxMetadata.AddOrReplaceAssSrtLapseMarker(
+                        markedAss,
+                        existingSrtLapseMarker?.Mode ?? "existing",
+                        existingSrtLapseMarker?.Result ?? "solid",
+                        existingSrtLapseMarker?.SourceSha256
+                        ?? LapseSubtitleMetadata.ComputeSha256(media.SrtPath!),
+                        applicationVersion: existingSrtLapseMarker?.ApplicationVersion,
+                        lapseVersion: existingSrtLapseMarker?.LapseVersion,
+                        profile: existingSrtLapseMarker?.SettingsProfile,
+                        reference: existingSrtLapseMarker?.Reference,
+                        offsetMilliseconds: existingSrtLapseMarker?.OffsetMilliseconds,
+                        ratio: existingSrtLapseMarker?.Ratio,
+                        confidence: existingSrtLapseMarker?.Confidence,
+                        sourceFormat: existingSrtLapseMarker?.SourceFormat ?? "SRT");
+                }
                 await File.WriteAllTextAsync(
                     finalAss,
                     markedAss,

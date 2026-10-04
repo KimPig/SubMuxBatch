@@ -132,8 +132,11 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains("; SUBMUX_LAPSE_REFERENCE=AUDIO", runner.MuxedAssText);
         Assert.Contains("; SUBMUX_LAPSE_OFFSET_MS=-2000", runner.MuxedAssText);
         Assert.Contains("; SUBMUX_LAPSE_CONFIDENCE=10", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_SOURCE_FORMAT=SRT", runner.MuxedAssText);
         var replacedSrt = await File.ReadAllTextAsync(srt);
         Assert.Contains("_PROFILE_AUTO-AUDIOONLY-6-8_REF_AUDIO__", replacedSrt);
+        Assert.Contains("_DETAIL_MODE_AUTO-SHIFTED_RESULT_SOLID_OFFSET_MS_-2000_RATIO_1_CONFIDENCE_10_SOURCE_SRT__", replacedSrt);
+        Assert.Contains("_SOURCE_SHA256_", replacedSrt);
         Assert.Contains("00:00:01,000 --> 00:00:02,000", await File.ReadAllTextAsync(srt));
         var backup = Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Synced.srt");
         Assert.Equal(original, await File.ReadAllTextAsync(backup));
@@ -144,6 +147,58 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.True(startIndex >= 0, string.Join(Environment.NewLine, progressMessages));
         Assert.True(appliedIndex > startIndex, string.Join(Environment.NewLine, progressMessages));
         Assert.True(summaryIndex > appliedIndex, string.Join(Environment.NewLine, progressMessages));
+    }
+
+    [Fact]
+    public async Task ExistingDetailedSrtMarkerSkipsResyncAndRestoresCompleteAssHistory()
+    {
+        var mkv = Path.Combine(_root, "Marked.mkv");
+        var srt = Path.Combine(_root, "Marked.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        var marked = LapseSubtitleMetadata.AddSrtMarker(
+            "1\r\n00:00:01,000 --> 00:00:02,000\r\nText\r\n",
+            4_000_000_000,
+            "2026.10.05",
+            "AUTO|AUTO|6|8",
+            "embedded",
+            "auto/shifted",
+            "solid",
+            -110,
+            1,
+            0.663,
+            "SMI",
+            new string('b', 64));
+        await File.WriteAllTextAsync(srt, marked);
+        var media = new MediaSet(new MediaKey(_root, "Marked"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+        var synchronizer = new SolidLapseSynchronizer();
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: synchronizer).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = true
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Equal(0, synchronizer.Calls);
+        Assert.DoesNotContain(LapseSubtitleMetadata.SrtMarkerPrefix, runner.MuxedSrtText);
+        Assert.Contains("; SUBMUX_SUBTITLE_SOURCE=SMI", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_SYNC=2026.10.05", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_MODE=auto/shifted", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_RESULT=solid", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_OFFSET_MS=-110", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_RATIO=1", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CONFIDENCE=0.663", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_SOURCE_FORMAT=SMI", runner.MuxedAssText);
+        Assert.Contains($"; SUBMUX_LAPSE_SOURCE_SHA256={new string('b', 64)}", runner.MuxedAssText);
+        Assert.Equal(marked, await File.ReadAllTextAsync(srt));
     }
 
     [Fact]
@@ -183,12 +238,17 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.DoesNotContain(progressMessages, message => message.Contains("LAPSE 요약:", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task ExistingAssAndSrtAreIndependentlySynchronizedAndBackedUp()
+    [Theory]
+    [InlineData("srt", "SRT")]
+    [InlineData("smi", "SMI")]
+    public async Task ExistingAssAndStandardSubtitleAreIndependentlySynchronizedAndBackedUp(
+        string subtitleExtension,
+        string expectedSourceFormat)
     {
         var mkv = Path.Combine(_root, "Paired.mkv");
         var ass = Path.Combine(_root, "Paired.ass");
-        var srt = Path.Combine(_root, "Paired.srt");
+        var standardSubtitle = Path.Combine(_root, $"Paired.{subtitleExtension}");
+        var synchronizedSrt = Path.Combine(_root, "Paired.srt");
         await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
         await File.WriteAllTextAsync(ass, """
             [Script Info]
@@ -200,9 +260,20 @@ public sealed class BatchProcessorTests : IDisposable
             Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Text
             """);
-        await File.WriteAllTextAsync(srt, "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n");
+        if (subtitleExtension == "smi")
+        {
+            await File.WriteAllTextAsync(
+                standardSubtitle,
+                "<SAMI><BODY><SYNC Start=3000><P Class=KRCC>Text<SYNC Start=4000><P Class=KRCC>&nbsp;</BODY></SAMI>");
+        }
+        else
+        {
+            await File.WriteAllTextAsync(standardSubtitle, "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n");
+        }
         var synchronizer = new SolidLapseSynchronizer();
-        var media = new MediaSet(new MediaKey(_root, "Paired"), mkv, ass, srt, null);
+        var media = subtitleExtension == "smi"
+            ? new MediaSet(new MediaKey(_root, "Paired"), mkv, ass, null, standardSubtitle)
+            : new MediaSet(new MediaKey(_root, "Paired"), mkv, ass, standardSubtitle, null);
 
         var result = await new BatchProcessor(
             new FakeProcessRunner(),
@@ -222,12 +293,23 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.Equal(2, synchronizer.Calls);
         Assert.Contains("Dialogue: 0,0:00:01.00,0:00:02.00", await File.ReadAllTextAsync(ass));
-        Assert.Contains("; SUBMUX_SUBTITLE_SOURCE=ASS+SRT", await File.ReadAllTextAsync(ass));
+        Assert.Contains($"; SUBMUX_SUBTITLE_SOURCE=ASS+{expectedSourceFormat}", await File.ReadAllTextAsync(ass));
         Assert.Contains("; SUBMUX_LAPSE_RESULT=solid", await File.ReadAllTextAsync(ass));
-        Assert.Contains("00:00:01,000 --> 00:00:02,000", await File.ReadAllTextAsync(srt));
-        Assert.Contains(LapseSubtitleMetadata.SrtMarkerPrefix, await File.ReadAllTextAsync(srt));
+        Assert.Contains("; SUBMUX_LAPSE_SOURCE_FORMAT=ASS", await File.ReadAllTextAsync(ass));
+        Assert.Contains("; SUBMUX_LAPSE_SRT_RESULT=solid", await File.ReadAllTextAsync(ass));
+        Assert.Contains("; SUBMUX_LAPSE_SRT_MODE=auto/shifted", await File.ReadAllTextAsync(ass));
+        Assert.Contains($"; SUBMUX_LAPSE_SRT_SOURCE_FORMAT={expectedSourceFormat}", await File.ReadAllTextAsync(ass));
+        Assert.Contains("; SUBMUX_LAPSE_SRT_OFFSET_MS=-2000", await File.ReadAllTextAsync(ass));
+        Assert.Contains("00:00:01,000 --> 00:00:02,000", await File.ReadAllTextAsync(synchronizedSrt));
+        Assert.Contains(LapseSubtitleMetadata.SrtMarkerPrefix, await File.ReadAllTextAsync(synchronizedSrt));
+        var externalMarker = Assert.IsType<LapseSubtitleMetadata.SrtMarkerInfo>(
+            LapseSubtitleMetadata.ReadSrtMarker(await File.ReadAllTextAsync(synchronizedSrt)));
+        Assert.Equal(expectedSourceFormat, externalMarker.SourceFormat);
         Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Paired.ass")));
-        Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Paired.srt")));
+        Assert.True(File.Exists(Path.Combine(
+            _root,
+            ExternalSubtitleReplacement.ArchiveDirectoryName,
+            $"Paired.{subtitleExtension}")));
     }
 
     [Fact]

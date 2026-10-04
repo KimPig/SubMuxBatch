@@ -17,11 +17,34 @@ public static partial class LapseSubtitleMetadata
     public static bool HasSrtMarker(string text) =>
         text.Contains(SrtMarkerPrefix, StringComparison.OrdinalIgnoreCase);
 
+    public static bool HasIncompleteSrtDetails(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var hasDetailText = text.Contains(SrtMarkerPrefix + "DETAIL_", StringComparison.OrdinalIgnoreCase);
+        var hasSourceHashText = text.Contains(SrtMarkerPrefix + "SOURCE_SHA256_", StringComparison.OrdinalIgnoreCase);
+        var detail = SrtDetailMarkerRegex().Match(text);
+        var hasValidDetail = detail.Success;
+        var hasValidSourceHash = SrtSourceHashMarkerRegex().IsMatch(text);
+        return hasDetailText != hasValidDetail
+               || hasSourceHashText != hasValidSourceHash
+               || hasValidDetail != hasValidSourceHash
+               || hasValidDetail && (!long.TryParse(detail.Groups["offset"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                                     || !double.TryParse(detail.Groups["ratio"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
+                                     || !double.TryParse(detail.Groups["confidence"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
+    }
+
     public sealed record SrtMarkerInfo(
         string ApplicationVersion,
         string LapseVersion,
         string? SettingsProfile,
-        string? Reference);
+        string? Reference,
+        string? Mode = null,
+        string? Result = null,
+        long? OffsetMilliseconds = null,
+        double? Ratio = null,
+        double? Confidence = null,
+        string? SourceFormat = null,
+        string? SourceSha256 = null);
 
     public static SrtMarkerInfo? ReadSrtMarker(string text)
     {
@@ -31,11 +54,26 @@ public static partial class LapseSubtitleMetadata
         var profile = match.Groups["profile"].Success
             ? match.Groups["profile"].Value.Replace('-', '|')
             : null;
+        var detail = SrtDetailMarkerRegex().Match(text);
+        var source = SrtSourceHashMarkerRegex().Match(text);
         return new SrtMarkerInfo(
             match.Groups["app"].Value,
             match.Groups["lapse"].Value,
             profile,
-            match.Groups["reference"].Success ? match.Groups["reference"].Value.ToUpperInvariant() : null);
+            match.Groups["reference"].Success ? match.Groups["reference"].Value.ToUpperInvariant() : null,
+            detail.Success ? DecodeMarkerMode(detail.Groups["mode"].Value) : null,
+            detail.Success ? detail.Groups["result"].Value.ToLowerInvariant() : null,
+            detail.Success && long.TryParse(detail.Groups["offset"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var offset)
+                ? offset
+                : null,
+            detail.Success && double.TryParse(detail.Groups["ratio"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio)
+                ? ratio
+                : null,
+            detail.Success && double.TryParse(detail.Groups["confidence"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var confidence)
+                ? confidence
+                : null,
+            detail.Success ? detail.Groups["source"].Value.ToUpperInvariant() : null,
+            source.Success ? source.Groups["sha256"].Value.ToLowerInvariant() : null);
     }
 
     public static string CreateSettingsProfile(AppSettings settings)
@@ -58,7 +96,14 @@ public static partial class LapseSubtitleMetadata
         long? videoDurationNanoseconds,
         string? appVersion = null,
         string? settingsProfile = null,
-        string? reference = null)
+        string? reference = null,
+        string? mode = null,
+        string? result = null,
+        long? offsetMilliseconds = null,
+        double? ratio = null,
+        double? confidence = null,
+        string? sourceFormat = null,
+        string? sourceSha256 = null)
     {
         var clean = RemoveSrtMarkers(text);
         var cues = ParseSrtCues(clean);
@@ -75,8 +120,38 @@ public static partial class LapseSubtitleMetadata
         var referenceToken = string.IsNullOrWhiteSpace(reference)
             ? string.Empty
             : $"_REF_{NormalizeReference(reference)}";
-        var marker = $"<font face=\"{SrtMarkerPrefix}{version}_LAPSE_{BundledLapseProvider.Version}{profileToken}{referenceToken}__\">{InvisibleSeparator}</font>";
-        return clean.TrimEnd() + $"\r\n\r\n{nextNumber}\r\n{FormatTime(start)} --> {FormatTime(start + 1)}\r\n{marker}\r\n";
+        var markers = new List<string>
+        {
+            $"{SrtMarkerPrefix}{version}_LAPSE_{BundledLapseProvider.Version}{profileToken}{referenceToken}__"
+        };
+        if (!string.IsNullOrWhiteSpace(mode)
+            && !string.IsNullOrWhiteSpace(result)
+            && !string.IsNullOrWhiteSpace(sourceFormat))
+        {
+            markers.Add(
+                $"{SrtMarkerPrefix}DETAIL_MODE_{NormalizeMarkerToken(mode).ToUpperInvariant()}"
+                + $"_RESULT_{NormalizeMarkerToken(result).ToUpperInvariant()}"
+                + $"_OFFSET_MS_{FormatMarkerNumber(offsetMilliseconds)}"
+                + $"_RATIO_{FormatMarkerNumber(ratio)}"
+                + $"_CONFIDENCE_{FormatMarkerNumber(confidence)}"
+                + $"_SOURCE_{NormalizeMarkerToken(sourceFormat).ToUpperInvariant()}__");
+        }
+        if (!string.IsNullOrWhiteSpace(sourceSha256))
+        {
+            markers.Add($"{SrtMarkerPrefix}SOURCE_SHA256_{NormalizeMarkerToken(sourceSha256).ToLowerInvariant()}__");
+        }
+
+        var builder = new StringBuilder(clean.TrimEnd());
+        for (var index = 0; index < markers.Count; index++)
+        {
+            var cueStart = start + index;
+            builder.Append("\r\n\r\n")
+                .Append(nextNumber + index).Append("\r\n")
+                .Append(FormatTime(cueStart)).Append(" --> ").Append(FormatTime(cueStart + 1)).Append("\r\n")
+                .Append("<font face=\"").Append(markers[index]).Append("\">")
+                .Append(InvisibleSeparator).Append("</font>\r\n");
+        }
+        return builder.ToString();
     }
 
     public static string NormalizeReference(string? reference) => reference?.Trim().ToLowerInvariant() switch
@@ -354,6 +429,20 @@ public static partial class LapseSubtitleMetadata
     private static string NormalizeMarkerToken(string value) =>
         Regex.Replace(value.Trim(), @"[^A-Za-z0-9|.-]+", "-").Trim('-');
 
+    private static string DecodeMarkerMode(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized.StartsWith("auto-", StringComparison.Ordinal)
+            ? "auto/" + normalized["auto-".Length..]
+            : normalized;
+    }
+
+    private static string FormatMarkerNumber(long? value) =>
+        value?.ToString(CultureInfo.InvariantCulture) ?? "UNKNOWN";
+
+    private static string FormatMarkerNumber(double? value) =>
+        value?.ToString("R", CultureInfo.InvariantCulture) ?? "UNKNOWN";
+
     private static string NormalizeNewlines(string text) =>
         text.Replace("\r\n", "\n").Replace('\r', '\n');
 
@@ -367,6 +456,12 @@ public static partial class LapseSubtitleMetadata
 
     [GeneratedRegex(@"__SUBMUX_LAPSE_SYNC_(?<app>[^_""\s]+)_LAPSE_(?<lapse>[^_""\s]+)(?:_PROFILE_(?<profile>.*?))?(?:_REF_(?<reference>[^_""\s]+))?__", RegexOptions.IgnoreCase)]
     private static partial Regex SrtMarkerRegex();
+
+    [GeneratedRegex(@"__SUBMUX_LAPSE_SYNC_DETAIL_MODE_(?<mode>[^_""\s]+)_RESULT_(?<result>[^_""\s]+)_OFFSET_MS_(?<offset>[^_""\s]+)_RATIO_(?<ratio>[^_""\s]+)_CONFIDENCE_(?<confidence>[^_""\s]+)_SOURCE_(?<source>[^_""\s]+)__", RegexOptions.IgnoreCase)]
+    private static partial Regex SrtDetailMarkerRegex();
+
+    [GeneratedRegex(@"__SUBMUX_LAPSE_SYNC_SOURCE_SHA256_(?<sha256>[0-9a-f]{64})__", RegexOptions.IgnoreCase)]
+    private static partial Regex SrtSourceHashMarkerRegex();
 }
 
 public sealed record ExternalSubtitleBackupIndex(
@@ -426,7 +521,14 @@ public sealed class ExternalSubtitleReplacement(
                     text,
                     videoDurationNanoseconds,
                     settingsProfile: settingsProfile,
-                    reference: result.Reference);
+                    reference: result.Reference,
+                    mode: result.Mode,
+                    result: result.Verdict.ToString().ToLowerInvariant(),
+                    offsetMilliseconds: result.OffsetMilliseconds,
+                    ratio: result.Ratio,
+                    confidence: result.Confidence,
+                    sourceFormat: Path.GetExtension(originalPath).TrimStart('.').ToUpperInvariant(),
+                    sourceSha256: originalHash);
             }
             await File.WriteAllTextAsync(staged, text, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             File.Move(staged, replacementPath, overwrite: true);

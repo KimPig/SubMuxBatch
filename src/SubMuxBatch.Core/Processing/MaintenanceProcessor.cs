@@ -267,6 +267,8 @@ public sealed class MaintenanceProcessor(
                     var regenerated = false;
                     var updated = selected.Text;
                     LapseSyncResult? lapseResult = null;
+                    LapseSyncResult? independentSrtLapseResult = null;
+                    string? independentSrtLapseSourceHash = null;
                     string? lapseSourceHash = null;
                     string? synchronizedSrt = null;
                     var mayRunLapse = ShouldRunLapse(
@@ -356,7 +358,6 @@ public sealed class MaintenanceProcessor(
                             var synchronizedAssText = await File.ReadAllTextAsync(synchronizedAss, cancellationToken).ConfigureAwait(false);
                             var standardSrt = managedSrtTrack;
                             var pairedSubtitleReady = true;
-                            LapseSyncResult? independentSrtLapseResult = null;
                             if (standardSrt?.Id is not null)
                             {
                                 if (assIsCanonical)
@@ -383,6 +384,7 @@ public sealed class MaintenanceProcessor(
                                             .ConfigureAwait(false);
                                     }
                                     var synchronizedIndependentSrt = Path.Combine(workspace, "lapse-independent-maintained.srt");
+                                    independentSrtLapseSourceHash = LapseSubtitleMetadata.ComputeSha256(extractedSrt);
                                     ReportLapseStart("SRT", 16);
                                     var srtLapseResult = await RunLapseAsync(
                                         sourcePath,
@@ -550,7 +552,24 @@ public sealed class MaintenanceProcessor(
                             reference: lapseResult.Reference,
                             offsetMilliseconds: lapseResult.OffsetMilliseconds,
                             ratio: lapseResult.Ratio,
-                            confidence: lapseResult.Confidence);
+                            confidence: lapseResult.Confidence,
+                            sourceFormat: GetPrimaryLapseSourceFormat(sourceKind));
+                        if (independentSrtLapseResult?.Applied == true)
+                        {
+                            updated = SubMuxMetadata.AddOrReplaceAssSrtLapseMarker(
+                                updated,
+                                independentSrtLapseResult.Mode,
+                                "solid",
+                                independentSrtLapseSourceHash ?? string.Empty,
+                                profile: lapseProfile,
+                                reference: independentSrtLapseResult.Reference,
+                                offsetMilliseconds: independentSrtLapseResult.OffsetMilliseconds,
+                                ratio: independentSrtLapseResult.Ratio,
+                                confidence: independentSrtLapseResult.Confidence,
+                                sourceFormat: string.Equals(sourceKind, "ASS+SMI", StringComparison.OrdinalIgnoreCase)
+                                    ? "SMI"
+                                    : "SRT");
+                        }
                     }
                     else if (selected.HasLapseMarker)
                     {
@@ -1303,6 +1322,15 @@ public sealed class MaintenanceProcessor(
 
     private static bool IsGeneratedAssSource(string? source) =>
         source is "SRT" or "SMI" or SubMuxMetadata.LegacySrtOrSmiSource;
+
+    private static string? GetPrimaryLapseSourceFormat(string? source) => source switch
+    {
+        "ASS" or "ASS+SRT" or "ASS+SMI" or SubMuxMetadata.LegacyAssOrUnknownSource => "ASS",
+        "SRT" => "SRT",
+        "SMI" => "SMI",
+        SubMuxMetadata.LegacySrtOrSmiSource => "SRT_OR_SMI",
+        _ => null
+    };
 
     internal static bool IsAssCanonicalSource(
         string? sourceKind,

@@ -295,6 +295,7 @@
   "Batch_LapseReferenceFallback": "LAPSE reference fallback: {0} could not be used, so audio VAD is used.",
   "Batch_LapseApplied": "LAPSE {0} applied: solid · mode {1} · reference {2} · result confidence {3} · offset {4} ms",
   "Batch_LapseAlreadyApplied": "A LAPSE marker already exists, so synchronization was skipped.",
+  "Batch_LapseMarkerDetailsIncomplete": "Some LAPSE detail markers are missing or damaged. Available history was preserved without running synchronization again.",
   "Batch_LapseUnsure": "LAPSE {0} not applied: unsure · mode {1} · reference {2} · result confidence {3} · estimated offset {4} ms · original timing kept",
   "Batch_LapseNothing": "LAPSE {0} not applied: nothing · mode {1} · reference {2} · result confidence {3} · original timing kept",
   "Batch_LapseFailed": "LAPSE {0} failed: {1} · original timing kept",

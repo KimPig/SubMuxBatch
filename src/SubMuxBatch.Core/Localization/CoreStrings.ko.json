@@ -295,6 +295,7 @@
   "Batch_LapseReferenceFallback": "LAPSE 참조 전환: {0}을 사용할 수 없어 오디오 VAD를 사용합니다.",
   "Batch_LapseApplied": "LAPSE {0} 적용 완료: solid · 모드 {1} · 참조 {2} · 결과 신뢰도 {3} · 오프셋 {4}ms",
   "Batch_LapseAlreadyApplied": "이미 LAPSE 처리 표식이 있어 다시 동기화하지 않습니다.",
+  "Batch_LapseMarkerDetailsIncomplete": "LAPSE 상세 표식 일부가 없거나 손상되어 확인 가능한 이력만 보존합니다. 중복 동기화는 수행하지 않습니다.",
   "Batch_LapseUnsure": "LAPSE {0} 미적용: unsure · 모드 {1} · 참조 {2} · 결과 신뢰도 {3} · 예상 오프셋 {4}ms · 원본 타이밍 유지",
   "Batch_LapseNothing": "LAPSE {0} 미적용: nothing · 모드 {1} · 참조 {2} · 결과 신뢰도 {3} · 원본 타이밍 유지",
   "Batch_LapseFailed": "LAPSE {0} 실행 실패: {1} · 원본 타이밍 유지",

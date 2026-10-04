@@ -205,14 +205,32 @@ public sealed class LapseIntegrationTests : IDisposable
             5_000_000_000,
             "2026.10.03",
             "AUTO|AUTO|6|8",
-            "embedded");
+            "embedded",
+            "auto/shifted",
+            "solid",
+            -110,
+            1,
+            0.663,
+            "SMI",
+            new string('a', 64));
 
         Assert.Contains("00:00:05,001 --> 00:00:05,002", marked);
+        Assert.Contains("00:00:05,002 --> 00:00:05,003", marked);
+        Assert.Contains("00:00:05,003 --> 00:00:05,004", marked);
         Assert.Contains("__SUBMUX_LAPSE_SYNC_2026.10.03_LAPSE_2.2.4_PROFILE_AUTO-AUTO-6-8_REF_EMBEDDED__", marked);
+        Assert.Contains("__SUBMUX_LAPSE_SYNC_DETAIL_MODE_AUTO-SHIFTED_RESULT_SOLID_OFFSET_MS_-110_RATIO_1_CONFIDENCE_0.663_SOURCE_SMI__", marked);
+        Assert.Contains($"__SUBMUX_LAPSE_SYNC_SOURCE_SHA256_{new string('a', 64)}__", marked);
         Assert.True(LapseSubtitleMetadata.HasSrtMarker(marked));
         var marker = Assert.IsType<LapseSubtitleMetadata.SrtMarkerInfo>(LapseSubtitleMetadata.ReadSrtMarker(marked));
         Assert.Equal("AUTO|AUTO|6|8", marker.SettingsProfile);
         Assert.Equal("EMBEDDED", marker.Reference);
+        Assert.Equal("auto/shifted", marker.Mode);
+        Assert.Equal("solid", marker.Result);
+        Assert.Equal(-110, marker.OffsetMilliseconds);
+        Assert.Equal(1, marker.Ratio);
+        Assert.Equal(0.663, marker.Confidence);
+        Assert.Equal("SMI", marker.SourceFormat);
+        Assert.Equal(new string('a', 64), marker.SourceSha256);
         Assert.Equal(source, LapseSubtitleMetadata.RemoveSrtMarkers(marked));
     }
 
@@ -230,6 +248,48 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.Null(marker.SettingsProfile);
         Assert.Null(marker.Reference);
         Assert.True(LapseSubtitleMetadata.HasSrtMarker(text));
+        Assert.False(LapseSubtitleMetadata.HasIncompleteSrtDetails(text));
+    }
+
+    [Fact]
+    public void PartiallyDamagedDetailedMarkerIsRecognizedWithoutLosingAppliedState()
+    {
+        const string text = "1\n00:00:01,000 --> 00:00:02,000\nText\n\n"
+                            + "2\n00:00:03,000 --> 00:00:03,001\n"
+                            + "<font face=\"__SUBMUX_LAPSE_SYNC_2026.10.05_LAPSE_2.2.4_PROFILE_AUTO-AUTO-6-8_REF_AUDIO__\">⁣</font>\n\n"
+                            + "3\n00:00:03,001 --> 00:00:03,002\n"
+                            + "<font face=\"__SUBMUX_LAPSE_SYNC_DETAIL_BROKEN__\">⁣</font>\n";
+
+        Assert.True(LapseSubtitleMetadata.HasSrtMarker(text));
+        Assert.True(LapseSubtitleMetadata.HasIncompleteSrtDetails(text));
+        var marker = Assert.IsType<LapseSubtitleMetadata.SrtMarkerInfo>(LapseSubtitleMetadata.ReadSrtMarker(text));
+        Assert.Equal("AUDIO", marker.Reference);
+        Assert.Null(marker.Mode);
+        Assert.DoesNotContain(LapseSubtitleMetadata.SrtMarkerPrefix, LapseSubtitleMetadata.RemoveSrtMarkers(text));
+    }
+
+    [Fact]
+    public void DetailedMarkerKeepsItsSchemaWhenNumericResultFieldsAreUnavailable()
+    {
+        const string source = "1\r\n00:00:01,000 --> 00:00:02,000\r\nText\r\n";
+
+        var marked = LapseSubtitleMetadata.AddSrtMarker(
+            source,
+            null,
+            "2026.10.05",
+            "AUTO|AUTO|6|8",
+            "audio",
+            "auto/shifted",
+            "solid",
+            sourceFormat: "SRT",
+            sourceSha256: new string('b', 64));
+
+        Assert.Contains("_OFFSET_MS_UNKNOWN_RATIO_UNKNOWN_CONFIDENCE_UNKNOWN_SOURCE_SRT__", marked);
+        var marker = Assert.IsType<LapseSubtitleMetadata.SrtMarkerInfo>(LapseSubtitleMetadata.ReadSrtMarker(marked));
+        Assert.Null(marker.OffsetMilliseconds);
+        Assert.Null(marker.Ratio);
+        Assert.Null(marker.Confidence);
+        Assert.True(LapseSubtitleMetadata.HasIncompleteSrtDetails(marked));
     }
 
     [Fact]
