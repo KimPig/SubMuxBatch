@@ -14,7 +14,15 @@ public sealed class BundledMkvToolNixProvider
         new("mkvmerge.exe", ResourcePrefix + "mkvmerge.exe"),
         new("mkvextract.exe", ResourcePrefix + "mkvextract.exe"),
         new(Path.Combine("locale", "ko", "LC_MESSAGES", "mkvtoolnix.mo"), ResourcePrefix + "locale.ko.LC_MESSAGES.mkvtoolnix.mo"),
-        new("COPYING.txt", ResourcePrefix + "COPYING.txt")
+        new("COPYING.txt", ResourcePrefix + "COPYING.txt"),
+        new("README.txt", ResourcePrefix + "README.txt"),
+        new(Path.Combine("licenses", "pugixml-MIT.txt"), ResourcePrefix + "licenses.pugixml-MIT.txt"),
+        new(Path.Combine("licenses", "nlohmann-json-MIT.txt"), ResourcePrefix + "licenses.nlohmann-json-MIT.txt"),
+        new(Path.Combine("licenses", "QtWaitingSpinner-MIT.txt"), ResourcePrefix + "licenses.QtWaitingSpinner-MIT.txt"),
+        new(Path.Combine("licenses", "LGPL-3.0.txt"), ResourcePrefix + "licenses.LGPL-3.0.txt"),
+        new(Path.Combine("licenses", "LGPL-2.1.txt"), ResourcePrefix + "licenses.LGPL-2.1.txt"),
+        new(Path.Combine("licenses", "CC-BY-3.0.txt"), ResourcePrefix + "licenses.CC-BY-3.0.txt"),
+        new(Path.Combine("licenses", "Boost-1.0.txt"), ResourcePrefix + "licenses.Boost-1.0.txt")
     ];
 
     private readonly string _installDirectory;

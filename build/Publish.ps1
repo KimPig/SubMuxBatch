@@ -38,7 +38,8 @@ $lapseRoot = Join-Path $lapseCache 'bundle'
 $lapseExecutable = Join-Path $lapseRoot 'lapse.exe'
 $lapseOnnxRuntime = Join-Path $lapseRoot 'onnxruntime.dll'
 $lapseModel = Join-Path $lapseRoot 'silero_vad.onnx'
-$lapseLicense = Join-Path $lapseRoot 'LICENSE'
+
+& (Join-Path $PSScriptRoot 'Verify-ThirdPartySources.ps1')
 
 function Test-FileHash([string] $Path, [string] $ExpectedHash) {
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -279,7 +280,6 @@ dotnet publish $projectPath `
     -p:BundledLapseExePath=$lapseExecutable `
     -p:BundledLapseOnnxRuntimePath=$lapseOnnxRuntime `
     -p:BundledLapseModelPath=$lapseModel `
-    -p:BundledLapseLicensePath=$lapseLicense `
     -o $outputPath
 
 if ($LASTEXITCODE -ne 0) {

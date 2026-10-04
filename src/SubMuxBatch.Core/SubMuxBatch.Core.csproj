@@ -33,11 +33,40 @@
     <EmbeddedResource Include="$(BundledLapseModelPath)"
                       LogicalName="SubMuxBatch.Core.Resources.lapse.silero_vad.onnx"
                       Condition="'$(BundledLapseModelPath)' != '' and Exists('$(BundledLapseModelPath)')" />
-    <EmbeddedResource Include="$(BundledLapseLicensePath)"
-                      LogicalName="SubMuxBatch.Core.Resources.lapse.LICENSE.txt"
-                      Condition="'$(BundledLapseLicensePath)' != '' and Exists('$(BundledLapseLicensePath)')" />
-    <EmbeddedResource Include="..\..\licenses\MKVToolNix-GPL-2.0.txt"
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\LAPSE-GPL-3.0-or-later.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.LICENSE.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\FFmpeg-LGPL-2.1-or-later.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.FFmpeg-LGPL-2.1-or-later.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\FFTW-GPL-2.0-or-later.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.FFTW-GPL-2.0-or-later.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\libfvad-BSD-3-Clause.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.libfvad-BSD-3-Clause.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\zlib-License.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.zlib-License.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\ONNX-Runtime-MIT.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.ONNX-Runtime-MIT.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\ONNX-Runtime-ThirdPartyNotices.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.ONNX-Runtime-ThirdPartyNotices.txt" />
+    <EmbeddedResource Include="..\..\licenses\lapse\2.2.4\Silero-VAD-MIT.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.lapse.Silero-VAD-MIT.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\COPYING.txt"
                       LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"
-                      Condition="Exists('..\..\licenses\MKVToolNix-GPL-2.0.txt')" />
+                      Condition="Exists('..\..\licenses\mkvtoolnix\102.0\COPYING.txt')" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\README.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.README.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\pugixml-MIT.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.pugixml-MIT.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\nlohmann-json-MIT.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.nlohmann-json-MIT.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\QtWaitingSpinner-MIT.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.QtWaitingSpinner-MIT.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\LGPL-3.0.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.LGPL-3.0.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\LGPL-2.1.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.LGPL-2.1.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\CC-BY-3.0.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.CC-BY-3.0.txt" />
+    <EmbeddedResource Include="..\..\licenses\mkvtoolnix\102.0\licenses\Boost-1.0.txt"
+                      LogicalName="SubMuxBatch.Core.Resources.mkvtoolnix.licenses.Boost-1.0.txt" />
   </ItemGroup>
 </Project>

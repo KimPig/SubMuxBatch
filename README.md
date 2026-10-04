@@ -57,7 +57,7 @@ Whether a particular track can be remuxed depends on MKVToolNix support for the 
 
 ## Bundled tools
 
-Release builds include the command-line components from [MKVToolNix 102.0](https://mkvtoolnix.download/), FFmpeg 8.1, and [LAPSE 2.2.4](https://github.com/Schwponaco-org/lapse). They are SHA-256 verified and extracted to versioned folders under `%LocalAppData%\SubMuxBatch\tools`. SubMux Batch always uses these pinned copies so that processing does not change with separately installed tool versions. **Settings → Other → Reinstall bundled tools** verifies and restores missing or modified files.
+Release builds include the command-line components from [MKVToolNix 102.0](https://mkvtoolnix.download/), FFmpeg 8.1, and [LAPSE 2.2.4](https://github.com/Schwponaco-org/lapse/releases/tag/v2.2.4). They are SHA-256 verified and extracted to versioned folders under `%LocalAppData%\SubMuxBatch\tools`. SubMux Batch always uses these pinned copies so that processing does not change with separately installed tool versions. **Settings → Other → Reinstall bundled tools** verifies and restores missing or modified files.
 
 Media information shown in the queue and detail panel is read primarily with the bundled MediaInfoLib. This includes the actual container format, duration, overall and per-track bit rates, video frame rate and frame count, resolution, and audio properties. `mkvmerge` identification remains authoritative for remuxing track IDs, attachments, chapters, and output validation. The bundled library notice is included below.
 
@@ -163,7 +163,9 @@ Create a self-contained Windows build:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The publish script downloads the matching FFmpeg 8.1 LGPL build, pinned official MKVToolNix 102.0 portable package, and official LAPSE 2.2.4 Windows package, verifies their SHA-256 digests, and embeds the required tools with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE.
+The default output is written to `artifacts\publish\win-x64`. The publish script first verifies the checked-in corresponding source archives and license notices, then downloads the matching FFmpeg 8.1 LGPL build, pinned official MKVToolNix 102.0 portable package, and official LAPSE 2.2.4 Windows package, verifies their SHA-256 digests, and embeds the required tools with MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE.
+
+GitHub releases use `build\Publish-GitHubRelease.ps1`, which validates that the ZIP contains exactly one root `SubMuxBatch.exe` and always formats the description with a single `## What's changed` section.
 
 ## Project structure
 
@@ -171,10 +173,13 @@ The default output is written to `artifacts\publish\win-x64`. The publish script
 - `src/SubMuxBatch.Core`: discovery, planning, conversion, muxing, and output validation
 - `tests/SubMuxBatch.Core.Tests`: unit tests and optional real-tool integration tests
 - `build/Publish.ps1`: self-contained Windows publishing script
+- `build/Verify-ThirdPartySources.ps1`: corresponding-source and license hash/presence checks
+- `build/Publish-GitHubRelease.ps1`: validated GitHub release publishing with standardized notes
+- `third-party-sources`: corresponding source archives and reproducibility details for bundled GPL tools
 
 ## Third-party notices
 
-Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion. MKVToolNix 102.0 and LAPSE 2.2.4 are bundled and executed as separate GPL command-line programs; their project/source links and license texts are shown in the application.
+Open-source notices and license texts are available from **Settings → Other → Open-source licenses**. SubMux Sans is distributed under the SIL Open Font License 1.1. FFmpeg is bundled as an LGPL build and executed as a separate process for audio conversion. MKVToolNix 102.0 is GPL-2.0-only, and LAPSE 2.2.4 is GPL-3.0-or-later; both are bundled and executed as separate command-line programs. LAPSE's FFmpeg, FFTW, libfvad, zlib, ONNX Runtime, and Silero VAD notices are also included in the application. Bundled tools and dependencies remain subject to their own licenses and are not relicensed by SubMux Batch. Corresponding source archives, exact versions, hashes, and build provenance are available in [`third-party-sources`](third-party-sources).
 
 This product uses [MediaInfo](https://mediaarea.net/MediaInfo) library, Copyright (c) 2002-2025 [MediaArea.net SARL](https://mediaarea.net/).
 

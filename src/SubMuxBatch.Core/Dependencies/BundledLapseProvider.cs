@@ -13,7 +13,14 @@ public sealed class BundledLapseProvider
         new("lapse.exe", ResourcePrefix + "lapse.exe"),
         new("onnxruntime.dll", ResourcePrefix + "onnxruntime.dll"),
         new("silero_vad.onnx", ResourcePrefix + "silero_vad.onnx"),
-        new("LICENSE.txt", ResourcePrefix + "LICENSE.txt")
+        new("LICENSE.txt", ResourcePrefix + "LICENSE.txt"),
+        new("FFmpeg-LGPL-2.1-or-later.txt", ResourcePrefix + "FFmpeg-LGPL-2.1-or-later.txt"),
+        new("FFTW-GPL-2.0-or-later.txt", ResourcePrefix + "FFTW-GPL-2.0-or-later.txt"),
+        new("libfvad-BSD-3-Clause.txt", ResourcePrefix + "libfvad-BSD-3-Clause.txt"),
+        new("zlib-License.txt", ResourcePrefix + "zlib-License.txt"),
+        new("ONNX-Runtime-MIT.txt", ResourcePrefix + "ONNX-Runtime-MIT.txt"),
+        new("ONNX-Runtime-ThirdPartyNotices.txt", ResourcePrefix + "ONNX-Runtime-ThirdPartyNotices.txt"),
+        new("Silero-VAD-MIT.txt", ResourcePrefix + "Silero-VAD-MIT.txt")
     ];
 
     private readonly string _installDirectory;

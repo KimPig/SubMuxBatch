@@ -11,6 +11,9 @@ namespace SubMuxBatch.App;
 
 public partial class OpenSourceLicensesWindow : Window
 {
+    private const string CorrespondingSourceUrl =
+        "https://github.com/KimPig/SubMuxBatch/tree/main/third-party-sources";
+
     private const string MitTerms = """
         Permission is hereby granted, free of charge, to any person obtaining a copy
         of this software and associated documentation files (the "Software"), to deal
@@ -80,16 +83,48 @@ public partial class OpenSourceLicensesWindow : Window
             "https://ffmpeg.org/"),
         new(
             "MKVToolNix 102.0 — GPL-2.0-only",
-            ReadResource(
+            WithSourceNotice(ReadResource(
                 typeof(AppSettings).Assembly,
-                "SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt"),
+                "SubMuxBatch.Core.Resources.mkvtoolnix.COPYING.txt")),
             "https://mkvtoolnix.download/"),
         new(
-            "LAPSE 2.2.4 — GPL-3.0-only",
-            ReadResource(
+            "MKVToolNix 102.0 — bundled dependency notices",
+            ReadMkvToolNixNotices(),
+            "https://mkvtoolnix.download/doc/README.txt"),
+        new(
+            "LAPSE 2.2.4 — GPL-3.0-or-later",
+            WithSourceNotice(ReadResource(
                 typeof(AppSettings).Assembly,
-                "SubMuxBatch.Core.Resources.lapse.LICENSE.txt"),
-            "https://github.com/Schwponaco-org/lapse"),
+                "SubMuxBatch.Core.Resources.lapse.LICENSE.txt")),
+            "https://github.com/Schwponaco-org/lapse/releases/tag/v2.2.4"),
+        new(
+            "LAPSE: FFmpeg 7.1 — LGPL-2.1-or-later",
+            ReadLapseNotice("FFmpeg-LGPL-2.1-or-later.txt"),
+            "https://ffmpeg.org/releases/ffmpeg-7.1.html"),
+        new(
+            "LAPSE: FFTW 3.3.10 — GPL-2.0-or-later",
+            WithSourceNotice(ReadLapseNotice("FFTW-GPL-2.0-or-later.txt")),
+            "https://www.fftw.org/"),
+        new(
+            "LAPSE: libfvad — BSD-3-Clause",
+            ReadLapseNotice("libfvad-BSD-3-Clause.txt"),
+            "https://github.com/dpirch/libfvad/tree/532ab666c20d3cfda38bca63abbb0f152706c369"),
+        new(
+            "LAPSE: zlib 1.3.2 — zlib License",
+            ReadLapseNotice("zlib-License.txt"),
+            "https://github.com/madler/zlib/releases/tag/v1.3.2"),
+        new(
+            "LAPSE: ONNX Runtime 1.28.0 — MIT",
+            ReadLapseNotice("ONNX-Runtime-MIT.txt"),
+            "https://github.com/microsoft/onnxruntime/releases/tag/v1.28.0"),
+        new(
+            "LAPSE: ONNX Runtime — Third-party notices",
+            ReadLapseNotice("ONNX-Runtime-ThirdPartyNotices.txt"),
+            "https://github.com/microsoft/onnxruntime/blob/v1.28.0/ThirdPartyNotices.txt"),
+        new(
+            "LAPSE: Silero VAD 6.2.1 — MIT",
+            ReadLapseNotice("Silero-VAD-MIT.txt"),
+            "https://github.com/snakers4/silero-vad/releases/tag/v6.2.1"),
         new(
             "SubMux Sans — SIL Open Font License 1.1",
             ReadResource(
@@ -153,6 +188,34 @@ public partial class OpenSourceLicensesWindow : Window
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
+
+    private static string ReadLapseNotice(string fileName) =>
+        ReadResource(
+            typeof(AppSettings).Assembly,
+            "SubMuxBatch.Core.Resources.lapse." + fileName);
+
+    private static string ReadMkvToolNixNotices()
+    {
+        var assembly = typeof(AppSettings).Assembly;
+        var resources = new[]
+        {
+            "SubMuxBatch.Core.Resources.mkvtoolnix.README.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.pugixml-MIT.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.nlohmann-json-MIT.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.QtWaitingSpinner-MIT.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.LGPL-3.0.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.LGPL-2.1.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.CC-BY-3.0.txt",
+            "SubMuxBatch.Core.Resources.mkvtoolnix.licenses.Boost-1.0.txt"
+        };
+
+        return string.Join(
+            "\n\n" + new string('=', 72) + "\n\n",
+            resources.Select(resource => ReadResource(assembly, resource)));
+    }
+
+    private static string WithSourceNotice(string licenseText) =>
+        $"Corresponding source archives and build details:\n{CorrespondingSourceUrl}\n\n{licenseText}";
 
     private sealed record LicenseEntry(string Title, string Text, string ProjectUrl);
 }

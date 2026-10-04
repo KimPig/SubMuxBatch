@@ -1049,7 +1049,7 @@
                                     <Hyperlink NavigateUri="https://github.com/SubtitleEdit/subtitleedit/tree/main/src/libse" RequestNavigate="ToolWebsite_RequestNavigate">libse 5.1.0</Hyperlink>
                                 </TextBlock>
                                 <TextBlock Margin="0,5,0,0">
-                                    <Hyperlink NavigateUri="https://github.com/Schwponaco-org/lapse" RequestNavigate="ToolWebsite_RequestNavigate">LAPSE 2.2.4</Hyperlink>
+                                    <Hyperlink NavigateUri="https://github.com/Schwponaco-org/lapse/releases/tag/v2.2.4" RequestNavigate="ToolWebsite_RequestNavigate">LAPSE 2.2.4</Hyperlink>
                                 </TextBlock>
                                 <TextBlock x:Name="BundledToolsStatusText" Margin="0,8,0,0"
                                            Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" />

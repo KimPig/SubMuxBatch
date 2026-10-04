@@ -165,11 +165,34 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_root, "lapse", "onnxruntime.dll")));
         Assert.True(File.Exists(Path.Combine(_root, "lapse", "silero_vad.onnx")));
         Assert.True(File.Exists(Path.Combine(_root, "lapse", "LICENSE.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "FFmpeg-LGPL-2.1-or-later.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "FFTW-GPL-2.0-or-later.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "libfvad-BSD-3-Clause.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "zlib-License.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "ONNX-Runtime-MIT.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "ONNX-Runtime-ThirdPartyNotices.txt")));
+        Assert.True(File.Exists(Path.Combine(_root, "lapse", "Silero-VAD-MIT.txt")));
         await File.WriteAllTextAsync(executable, "corrupted");
 
         await provider.EnsureAvailableAsync();
 
         Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(executable));
+    }
+
+    [Fact]
+    public void BundledLapseLicenseAndNoticeResourcesAreEmbedded()
+    {
+        var assembly = typeof(BundledLapseProvider).Assembly;
+        var resourceNames = assembly.GetManifestResourceNames();
+
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.LICENSE.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.FFmpeg-LGPL-2.1-or-later.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.FFTW-GPL-2.0-or-later.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.libfvad-BSD-3-Clause.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.zlib-License.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.ONNX-Runtime-MIT.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.ONNX-Runtime-ThirdPartyNotices.txt", resourceNames);
+        Assert.Contains("SubMuxBatch.Core.Resources.lapse.Silero-VAD-MIT.txt", resourceNames);
     }
 
     [Fact]
