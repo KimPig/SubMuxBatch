@@ -43,6 +43,7 @@ public sealed record LapseSyncResult(
     string? Error)
 {
     public bool Applied => Verdict == LapseVerdict.Solid && OutputPath is not null;
+    public long? MaximumAdjustmentMilliseconds { get; init; }
 }
 
 public interface ILapseSynchronizer

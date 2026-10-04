@@ -248,6 +248,40 @@ public sealed class LapseIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void MaximumTimingAdjustmentUsesLargestCueMovement()
+    {
+        Directory.CreateDirectory(_root);
+        var original = Path.Combine(_root, "maximum-original.srt");
+        var shifted = Path.Combine(_root, "maximum-shifted.srt");
+        File.WriteAllText(original,
+            "1\n00:00:01,000 --> 00:00:02,000\nFirst\n\n"
+            + "2\n00:00:05,000 --> 00:00:06,000\nSecond\n");
+        File.WriteAllText(shifted,
+            "1\n00:00:01,500 --> 00:00:02,500\nFirst\n\n"
+            + "2\n00:00:03,750 --> 00:00:04,750\nSecond\n");
+
+        var maximum = LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(original, shifted);
+
+        Assert.Equal(1250, maximum);
+    }
+
+    [Fact]
+    public void MaximumTimingAdjustmentSupportsAssEvents()
+    {
+        Directory.CreateDirectory(_root);
+        var original = Path.Combine(_root, "maximum-original.ass");
+        var shifted = Path.Combine(_root, "maximum-shifted.ass");
+        File.WriteAllText(original,
+            "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Text\n");
+        File.WriteAllText(shifted,
+            "[Events]\nDialogue: 0,0:00:02.50,0:00:03.50,Default,,0,0,0,,Text\n");
+
+        var maximum = LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(original, shifted);
+
+        Assert.Equal(1500, maximum);
+    }
+
+    [Fact]
     public void TimingValidatorPreservesBlankLinesInsideSrtCueText()
     {
         Directory.CreateDirectory(_root);
@@ -274,6 +308,7 @@ public sealed class LapseIntegrationTests : IDisposable
             "[Events]\nComment: changed note\nDialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,Text\n");
 
         LapseSubtitleMetadata.ValidateTimingOnlyChange(original, shifted);
+        Assert.Equal(1000, LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(original, shifted));
         Assert.Throws<InvalidDataException>(() =>
             LapseSubtitleMetadata.ValidateTimingOnlyChange(original, changed));
     }
@@ -508,7 +543,9 @@ public sealed class LapseIntegrationTests : IDisposable
             OutputPrefix = "Anime_",
             EnableLapseSync = true,
             LapseMode = LapseSyncMode.Split,
-            LapseConfidenceThreshold = 5
+            LapseConfidenceThreshold = 5,
+            WarnOnLargeLapseCorrection = false,
+            LapseLargeCorrectionWarningSeconds = 2.5
         };
         var preset = ProcessingPresetSettings.Capture(source);
         var target = new AppSettings { Language = AppLanguage.Korean, ConcurrentJobCount = 2 };
@@ -519,6 +556,8 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.True(target.EnableLapseSync);
         Assert.Equal(LapseSyncMode.Split, target.LapseMode);
         Assert.Equal(5, target.LapseConfidenceThreshold);
+        Assert.False(target.WarnOnLargeLapseCorrection);
+        Assert.Equal(2.5, target.LapseLargeCorrectionWarningSeconds);
         Assert.Equal(AppLanguage.Korean, target.Language);
         Assert.Equal(2, target.ConcurrentJobCount);
     }
@@ -533,6 +572,8 @@ public sealed class LapseIntegrationTests : IDisposable
             LapseReference = LapseReferenceMode.AudioOnly,
             LapseSplitPenalty = 9,
             LapseConfidenceThreshold = 5,
+            WarnOnLargeLapseCorrection = false,
+            LapseLargeCorrectionWarningSeconds = 2.5,
             MaintenanceUpdateLapseSync = true,
             MaintenanceForceLapseResync = true,
             SelectedPresetId = "preset"
@@ -545,6 +586,8 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.Equal(LapseReferenceMode.AudioOnly, copy.LapseReference);
         Assert.Equal(9, copy.LapseSplitPenalty);
         Assert.Equal(5, copy.LapseConfidenceThreshold);
+        Assert.False(copy.WarnOnLargeLapseCorrection);
+        Assert.Equal(2.5, copy.LapseLargeCorrectionWarningSeconds);
         Assert.True(copy.MaintenanceUpdateLapseSync);
         Assert.True(copy.MaintenanceForceLapseResync);
         Assert.Equal("preset", copy.SelectedPresetId);
@@ -565,6 +608,39 @@ public sealed class LapseIntegrationTests : IDisposable
     {
         Assert.Throws<InvalidOperationException>(() =>
             new AppSettings { LapseConfidenceThreshold = value }.Validate());
+    }
+
+    [Fact]
+    public void LargeCorrectionWarningDefaultsToOneSecond()
+    {
+        var settings = new AppSettings();
+
+        Assert.True(settings.WarnOnLargeLapseCorrection);
+        Assert.Equal(1, settings.LapseLargeCorrectionWarningSeconds);
+        settings.Validate();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.09)]
+    [InlineData(3600.1)]
+    public void LargeCorrectionWarningRejectsInvalidEnabledThreshold(double value)
+    {
+        Assert.Throws<InvalidOperationException>(() => new AppSettings
+        {
+            WarnOnLargeLapseCorrection = true,
+            LapseLargeCorrectionWarningSeconds = value
+        }.Validate());
+    }
+
+    [Fact]
+    public void DisabledLargeCorrectionWarningAllowsStoredThresholdOutsideActiveRange()
+    {
+        new AppSettings
+        {
+            WarnOnLargeLapseCorrection = false,
+            LapseLargeCorrectionWarningSeconds = 0
+        }.Validate();
     }
 
     [Fact]

@@ -119,6 +119,45 @@ public static partial class LapseSubtitleMetadata
         }
     }
 
+    public static long MeasureMaximumTimingAdjustmentMilliseconds(
+        string originalPath,
+        string synchronizedPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(originalPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(synchronizedPath);
+        var extension = Path.GetExtension(originalPath);
+        var original = File.ReadAllText(originalPath);
+        var synchronized = File.ReadAllText(synchronizedPath);
+        var originalTimings = string.Equals(extension, ".ass", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(extension, ".ssa", StringComparison.OrdinalIgnoreCase)
+            ? ParseAssTimings(original)
+            : ParseSrtCues(RemoveSrtMarkers(original))
+                .Select(static cue => (cue.StartMilliseconds, cue.EndMilliseconds))
+                .ToArray();
+        var synchronizedTimings = string.Equals(extension, ".ass", StringComparison.OrdinalIgnoreCase)
+                                  || string.Equals(extension, ".ssa", StringComparison.OrdinalIgnoreCase)
+            ? ParseAssTimings(synchronized)
+            : ParseSrtCues(RemoveSrtMarkers(synchronized))
+                .Select(static cue => (cue.StartMilliseconds, cue.EndMilliseconds))
+                .ToArray();
+        if (originalTimings.Length != synchronizedTimings.Length)
+        {
+            throw new InvalidDataException("LAPSE changed the number of subtitle cues.");
+        }
+
+        long maximum = 0;
+        for (var index = 0; index < originalTimings.Length; index++)
+        {
+            maximum = Math.Max(maximum, AbsoluteDifference(
+                originalTimings[index].StartMilliseconds,
+                synchronizedTimings[index].StartMilliseconds));
+            maximum = Math.Max(maximum, AbsoluteDifference(
+                originalTimings[index].EndMilliseconds,
+                synchronizedTimings[index].EndMilliseconds));
+        }
+        return maximum;
+    }
+
     public static string ApplySrtTimingsToAss(string assText, string synchronizedSrt)
     {
         var cues = ParseSrtCues(RemoveSrtMarkers(synchronizedSrt));
@@ -186,6 +225,59 @@ public static partial class LapseSubtitleMetadata
         }
         return result;
     }
+
+    private static (long StartMilliseconds, long EndMilliseconds)[] ParseAssTimings(string text)
+    {
+        var result = new List<(long StartMilliseconds, long EndMilliseconds)>();
+        foreach (var line in NormalizeNewlines(text).Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+            if (!trimmed.StartsWith("Dialogue:", StringComparison.OrdinalIgnoreCase)
+                && !trimmed.StartsWith("Comment:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var fields = trimmed.Split(',', 10);
+            if (fields.Length != 10
+                || !TryParseAssTime(fields[1], out var start)
+                || !TryParseAssTime(fields[2], out var end))
+            {
+                // The existing semantic validator already requires malformed
+                // events to remain byte-for-byte equivalent. They have no
+                // reliable timestamps to include in the adjustment metric.
+                continue;
+            }
+            result.Add((start, end));
+        }
+        return result.ToArray();
+    }
+
+    private static bool TryParseAssTime(string value, out long milliseconds)
+    {
+        milliseconds = 0;
+        var fields = value.Trim().Split(':');
+        if (fields.Length != 3
+            || !long.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours)
+            || !int.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes)
+            || !double.TryParse(fields[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return false;
+        }
+        try
+        {
+            milliseconds = checked(hours * 3_600_000L
+                                   + minutes * 60_000L
+                                   + (long)Math.Round(seconds * 1000, MidpointRounding.AwayFromZero));
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private static long AbsoluteDifference(long left, long right) =>
+        left >= right ? left - right : right - left;
 
     private static List<SrtCue> ParseSrtCues(string text)
     {

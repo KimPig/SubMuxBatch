@@ -54,6 +54,8 @@ public sealed class AppSettings
     public const int MaxConcurrentJobCount = 8;
     public const int MinLapseConfidenceThreshold = 0;
     public const int MaxLapseConfidenceThreshold = 100;
+    public const double MinLapseLargeCorrectionWarningSeconds = 0.1;
+    public const double MaxLapseLargeCorrectionWarningSeconds = 3600;
     public const double DefaultFileColumnWeight = 2.1;
     public const double DefaultCompositionColumnWeight = 0.75;
     public const double DefaultMediaFormatColumnWeight = 0.8;
@@ -126,6 +128,8 @@ public sealed class AppSettings
     public LapseReferenceMode LapseReference { get; set; } = LapseReferenceMode.Auto;
     public int LapseSplitPenalty { get; set; } = 6;
     public int LapseConfidenceThreshold { get; set; } = 8;
+    public bool WarnOnLargeLapseCorrection { get; set; } = true;
+    public double LapseLargeCorrectionWarningSeconds { get; set; } = 1;
     public bool MaintenanceUpdateLapseSync { get; set; } = true;
     public bool MaintenanceForceLapseResync { get; set; }
     public string? SelectedPresetId { get; set; }
@@ -307,6 +311,8 @@ public sealed class AppSettings
         LapseReference = LapseReference,
         LapseSplitPenalty = LapseSplitPenalty,
         LapseConfidenceThreshold = LapseConfidenceThreshold,
+        WarnOnLargeLapseCorrection = WarnOnLargeLapseCorrection,
+        LapseLargeCorrectionWarningSeconds = LapseLargeCorrectionWarningSeconds,
         MaintenanceUpdateLapseSync = MaintenanceUpdateLapseSync,
         MaintenanceForceLapseResync = MaintenanceForceLapseResync,
         SelectedPresetId = SelectedPresetId
@@ -350,6 +356,17 @@ public sealed class AppSettings
         if (LapseConfidenceThreshold is < MinLapseConfidenceThreshold or > MaxLapseConfidenceThreshold)
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapseConfidence"));
+        }
+
+        if (WarnOnLargeLapseCorrection
+            && (!double.IsFinite(LapseLargeCorrectionWarningSeconds)
+                || LapseLargeCorrectionWarningSeconds < MinLapseLargeCorrectionWarningSeconds
+                || LapseLargeCorrectionWarningSeconds > MaxLapseLargeCorrectionWarningSeconds))
+        {
+            throw new InvalidOperationException(CoreText.Get(
+                "Settings_InvalidLapseLargeCorrectionWarning",
+                MinLapseLargeCorrectionWarningSeconds,
+                MaxLapseLargeCorrectionWarningSeconds));
         }
 
         if (ConcurrentJobCount is < MinConcurrentJobCount or > MaxConcurrentJobCount)

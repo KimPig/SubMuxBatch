@@ -134,6 +134,20 @@ public sealed class BatchProcessor(
         {
             Report(JobState.Verifying, percent, DescribeLapseApplied(target, result));
             lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+            if (!settings.WarnOnLargeLapseCorrection
+                || result.MaximumAdjustmentMilliseconds is not { } maximumAdjustment
+                || maximumAdjustment < settings.LapseLargeCorrectionWarningSeconds * 1000)
+            {
+                return;
+            }
+
+            var warning = CoreText.Get(
+                "Lapse_LargeCorrectionWarning",
+                target,
+                FormatLapseSeconds(maximumAdjustment),
+                FormatLapseSeconds(settings.LapseLargeCorrectionWarningSeconds * 1000));
+            warnings.Add(warning);
+            Report(JobState.Verifying, percent, warning);
         }
 
         void ReportLapseNotApplied(string target, LapseSyncResult result, int percent)
@@ -256,6 +270,13 @@ public sealed class BatchProcessor(
                         if (assLapseResult.Applied)
                         {
                             LapseSubtitleMetadata.ValidateTimingOnlyChange(normalizedExistingAss, synchronizedAss);
+                            assLapseResult = assLapseResult with
+                            {
+                                MaximumAdjustmentMilliseconds =
+                                    LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                        normalizedExistingAss,
+                                        synchronizedAss)
+                            };
                             normalizedExistingAss = synchronizedAss;
                             synchronizedExistingAssPath = media.AssPath;
                             ReportLapseApplied("ASS", assLapseResult, 7);
@@ -404,6 +425,13 @@ public sealed class BatchProcessor(
                     if (srtLapseResult.Applied)
                     {
                         LapseSubtitleMetadata.ValidateTimingOnlyChange(finalSrt, synchronizedSrt);
+                        srtLapseResult = srtLapseResult with
+                        {
+                            MaximumAdjustmentMilliseconds =
+                                LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                    finalSrt,
+                                    synchronizedSrt)
+                        };
                         finalSrt = synchronizedSrt;
                         externalSubtitleReplacements.Add(new ExternalSubtitleReplacement(
                             originalExternal,
@@ -971,6 +999,9 @@ public sealed class BatchProcessor(
 
     private static string FormatLapseConfidence(double? value) =>
         value?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—";
+
+    private static string FormatLapseSeconds(double milliseconds) =>
+        (milliseconds / 1000).ToString("0.###", CultureInfo.InvariantCulture);
 
     internal static string GetSubtitleSourceTagValue(ConversionPlan plan)
     {

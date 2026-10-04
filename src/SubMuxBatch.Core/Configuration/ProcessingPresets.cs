@@ -46,6 +46,8 @@ public sealed class ProcessingPresetSettings
     public LapseReferenceMode LapseReference { get; set; } = LapseReferenceMode.Auto;
     public int LapseSplitPenalty { get; set; } = 6;
     public int LapseConfidenceThreshold { get; set; } = 8;
+    public bool WarnOnLargeLapseCorrection { get; set; } = true;
+    public double LapseLargeCorrectionWarningSeconds { get; set; } = 1;
     public bool MaintenanceUpdateLapseSync { get; set; } = true;
     public bool MaintenanceForceLapseResync { get; set; }
 
@@ -85,6 +87,8 @@ public sealed class ProcessingPresetSettings
         LapseReference = value.LapseReference,
         LapseSplitPenalty = value.LapseSplitPenalty,
         LapseConfidenceThreshold = value.LapseConfidenceThreshold,
+        WarnOnLargeLapseCorrection = value.WarnOnLargeLapseCorrection,
+        LapseLargeCorrectionWarningSeconds = value.LapseLargeCorrectionWarningSeconds,
         MaintenanceUpdateLapseSync = value.MaintenanceUpdateLapseSync,
         MaintenanceForceLapseResync = value.MaintenanceForceLapseResync
     };
@@ -125,6 +129,8 @@ public sealed class ProcessingPresetSettings
         value.LapseReference = LapseReference;
         value.LapseSplitPenalty = LapseSplitPenalty;
         value.LapseConfidenceThreshold = LapseConfidenceThreshold;
+        value.WarnOnLargeLapseCorrection = WarnOnLargeLapseCorrection;
+        value.LapseLargeCorrectionWarningSeconds = LapseLargeCorrectionWarningSeconds;
         value.MaintenanceUpdateLapseSync = MaintenanceUpdateLapseSync;
         value.MaintenanceForceLapseResync = MaintenanceForceLapseResync;
     }

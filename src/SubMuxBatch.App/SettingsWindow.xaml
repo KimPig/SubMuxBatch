@@ -522,6 +522,8 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <CheckBox x:Name="UseEmbeddedSubtitleReferenceCheckBox"
                                               Grid.ColumnSpan="2"
@@ -571,6 +573,31 @@
                                                    FontSize="11"
                                                    TextWrapping="Wrap"
                                                    Text="{loc:Loc Settings_LapseConfidenceHelp}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="WarnOnLargeLapseCorrectionCheckBox"
+                                              Grid.Row="5"
+                                              Grid.ColumnSpan="2"
+                                              Margin="0,14,0,0">
+                                        <TextBlock Text="{loc:Loc Settings_LapseLargeCorrectionWarning}"
+                                                   TextWrapping="Wrap" />
+                                    </CheckBox>
+                                    <TextBlock Grid.Row="6"
+                                               Text="{loc:Loc Settings_LapseLargeCorrectionThreshold}"
+                                               VerticalAlignment="Top"
+                                               Margin="24,17,14,0"
+                                               IsEnabled="{Binding IsChecked, ElementName=WarnOnLargeLapseCorrectionCheckBox}" />
+                                    <StackPanel Grid.Row="6"
+                                                Grid.Column="1"
+                                                Margin="0,10,0,0"
+                                                IsEnabled="{Binding IsChecked, ElementName=WarnOnLargeLapseCorrectionCheckBox}">
+                                        <TextBox x:Name="LapseLargeCorrectionWarningSecondsTextBox"
+                                                 Style="{StaticResource FieldTextBoxStyle}"
+                                                 Margin="0" />
+                                        <TextBlock Margin="0,5,0,0"
+                                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="{loc:Loc Settings_LapseLargeCorrectionThresholdHelp}" />
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>

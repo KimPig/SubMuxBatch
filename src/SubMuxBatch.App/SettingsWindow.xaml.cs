@@ -128,6 +128,9 @@ public partial class SettingsWindow : Window
             settings.LapseReference != LapseReferenceMode.AudioOnly;
         LapseSplitPenaltyTextBox.Text = settings.LapseSplitPenalty.ToString(CultureInfo.InvariantCulture);
         LapseConfidenceTextBox.Text = settings.LapseConfidenceThreshold.ToString(CultureInfo.InvariantCulture);
+        WarnOnLargeLapseCorrectionCheckBox.IsChecked = settings.WarnOnLargeLapseCorrection;
+        LapseLargeCorrectionWarningSecondsTextBox.Text =
+            settings.LapseLargeCorrectionWarningSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         MaintenanceUpdateLapseSyncCheckBox.IsChecked = settings.MaintenanceUpdateLapseSync;
         MaintenanceForceLapseResyncCheckBox.IsChecked = settings.MaintenanceForceLapseResync;
         UpdateLapseSplitPenaltyControls();
@@ -244,6 +247,16 @@ public partial class SettingsWindow : Window
                 throw new InvalidOperationException(AppText.Get("Settings_LapseConfidenceError"));
             }
             updated.LapseConfidenceThreshold = confidenceThreshold;
+            updated.WarnOnLargeLapseCorrection = WarnOnLargeLapseCorrectionCheckBox.IsChecked == true;
+            if (!double.TryParse(
+                    LapseLargeCorrectionWarningSecondsTextBox.Text,
+                    NumberStyles.Float,
+                    CultureInfo.CurrentCulture,
+                    out var largeCorrectionWarningSeconds))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_LapseLargeCorrectionThresholdError"));
+            }
+            updated.LapseLargeCorrectionWarningSeconds = largeCorrectionWarningSeconds;
             updated.MaintenanceUpdateLapseSync = MaintenanceUpdateLapseSyncCheckBox.IsChecked == true;
             updated.MaintenanceForceLapseResync = MaintenanceForceLapseResyncCheckBox.IsChecked == true;
             updated.Validate();

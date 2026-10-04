@@ -122,7 +122,10 @@ public sealed class BatchProcessorTests : IDisposable
             CreateDependencies(),
             progress);
 
-        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Contains(result.Warnings, message =>
+            message.Contains("최대 2초", StringComparison.Ordinal)
+            && message.Contains("기준 1초", StringComparison.Ordinal));
         Assert.Contains("00:00:01,000 --> 00:00:02,000", runner.MuxedSrtText);
         Assert.DoesNotContain(LapseSubtitleMetadata.SrtMarkerPrefix, runner.MuxedSrtText);
         Assert.Contains("; SUBMUX_LAPSE_RESULT=solid", runner.MuxedAssText);
@@ -211,7 +214,8 @@ public sealed class BatchProcessorTests : IDisposable
             {
                 AttachAssStyleFonts = false,
                 EnableLapseSync = true,
-                LapseReference = LapseReferenceMode.AudioOnly
+                LapseReference = LapseReferenceMode.AudioOnly,
+                LapseLargeCorrectionWarningSeconds = 3
             },
             CreateDependencies());
 

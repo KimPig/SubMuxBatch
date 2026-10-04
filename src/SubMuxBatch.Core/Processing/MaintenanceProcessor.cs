@@ -78,6 +78,20 @@ public sealed class MaintenanceProcessor(
             {
                 Report(JobState.UpdatingAssStyle, percent, DescribeLapseApplied(target, result));
                 lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+                if (!settings.WarnOnLargeLapseCorrection
+                    || result.MaximumAdjustmentMilliseconds is not { } maximumAdjustment
+                    || maximumAdjustment < settings.LapseLargeCorrectionWarningSeconds * 1000)
+                {
+                    return;
+                }
+
+                var warning = CoreText.Get(
+                    "Lapse_LargeCorrectionWarning",
+                    target,
+                    FormatLapseSeconds(maximumAdjustment),
+                    FormatLapseSeconds(settings.LapseLargeCorrectionWarningSeconds * 1000));
+                warnings.Add(warning);
+                Report(JobState.UpdatingAssStyle, percent, warning);
             }
 
             void ReportLapseNotApplied(
@@ -298,6 +312,13 @@ public sealed class MaintenanceProcessor(
                             else
                             {
                                 LapseSubtitleMetadata.ValidateTimingOnlyChange(extractedSrt, synchronizedSrt);
+                                lapseResult = lapseResult with
+                                {
+                                    MaximumAdjustmentMilliseconds =
+                                        LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                            extractedSrt,
+                                            synchronizedSrt)
+                                };
                                 replacementSrtPath = synchronizedSrt;
                                 replacementSrtTrack = standardSrt;
                                 ReportLapseApplied("SRT→ASS", lapseResult, 17);
@@ -325,6 +346,13 @@ public sealed class MaintenanceProcessor(
                         if (lapseResult.Applied)
                         {
                             LapseSubtitleMetadata.ValidateTimingOnlyChange(selected.Path, synchronizedAss);
+                            lapseResult = lapseResult with
+                            {
+                                MaximumAdjustmentMilliseconds =
+                                    LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                        selected.Path,
+                                        synchronizedAss)
+                            };
                             var synchronizedAssText = await File.ReadAllTextAsync(synchronizedAss, cancellationToken).ConfigureAwait(false);
                             var standardSrt = managedSrtTrack;
                             var pairedSubtitleReady = true;
@@ -368,8 +396,15 @@ public sealed class MaintenanceProcessor(
                                         cancellationToken).ConfigureAwait(false);
                                     if (srtLapseResult.Applied)
                                     {
-                                        independentSrtLapseResult = srtLapseResult;
                                         LapseSubtitleMetadata.ValidateTimingOnlyChange(extractedSrt, synchronizedIndependentSrt);
+                                        srtLapseResult = srtLapseResult with
+                                        {
+                                            MaximumAdjustmentMilliseconds =
+                                                LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                                    extractedSrt,
+                                                    synchronizedIndependentSrt)
+                                        };
+                                        independentSrtLapseResult = srtLapseResult;
                                         if (LapseResultsAreCompatible(lapseResult, srtLapseResult))
                                         {
                                             replacementSrtPath = synchronizedIndependentSrt;
@@ -1104,6 +1139,9 @@ public sealed class MaintenanceProcessor(
 
     private static string FormatLapseConfidence(double? value) =>
         value?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—";
+
+    private static string FormatLapseSeconds(double milliseconds) =>
+        (milliseconds / 1000).ToString("0.###", CultureInfo.InvariantCulture);
 
     private static AssCandidate? SelectStyledTrack(IReadOnlyList<AssCandidate> candidates)
     {
