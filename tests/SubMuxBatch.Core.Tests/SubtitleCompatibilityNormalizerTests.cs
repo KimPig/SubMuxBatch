@@ -72,12 +72,12 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.Contains("<font face=\"a시골b\" color=\"#FFA29B\">변</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"#F9F177\">하</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"#F3C2FC\">고</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"FFA29B\">변</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"F9F177\">하</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"F3C2FC\">고</font>", normalized);
         Assert.Contains("<font face=\"a시골b\"> </font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"#96E4F7\">마</font>", normalized);
-        Assert.Contains("<font face=\"a시골b\" color=\"#DEFF9E\">는</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"96E4F7\">마</font>", normalized);
+        Assert.Contains("<font face=\"a시골b\" color=\"DEFF9E\">는</font>", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 
@@ -118,7 +118,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output);
 
         var normalized = await File.ReadAllTextAsync(output);
-        Assert.Contains("<font color=\"#FC8046\" face=\"휴먼편지체\">첫째</font>", normalized);
+        Assert.Contains("<font color=\"FC8046\" face=\"휴먼편지체\">첫째</font>", normalized);
         Assert.Contains("<font face=\"Malgun Gothic\" color=\"#46FFFF\">둘째</font>", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
@@ -156,7 +156,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         var normalized = await File.ReadAllTextAsync(output);
         Assert.Contains("<font color=\"#B4EDE2\">둘째</font>\r\n", normalized);
         Assert.DoesNotContain("둘째</font></font>", normalized);
-        Assert.EndsWith("<font color=\"#FF00FF\">셋째</font>\r\n", normalized);
+        Assert.EndsWith("<font color=\"ff00ff\">셋째</font>\r\n", normalized);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 

@@ -263,7 +263,7 @@
   "Maintenance_InvalidLegacyStyles": "Enter one valid legacy ASS Style per line.",
   "Subtitle_InvalidFontTag": "The SRT prepared for ASS contains an invalid FONT tag: {0}",
   "Subtitle_EmptyFontAttribute": "The FONT {0} attribute is empty in the SRT prepared for ASS.",
-  "Subtitle_UnsupportedFontColour": "Unsupported colour value '{0}' was found in {1} location(s). First location: cue {2} ({3}). Colours must use six-digit RGB notation. Correct the source subtitle and try again.",
+  "Subtitle_UnrecognizedFontColourWarning": "libse did not recognize colour value '{0}' in {1} location(s). The original value was passed through and may have been rendered as white. First location: cue {2} ({3}).",
   "Subtitle_AssValidationCueCount": "SRT-to-ASS validation failed. The SRT contains {0} cues and the ASS contains {1} Dialogue events.",
   "Subtitle_AssValidationTiming": "SRT-to-ASS validation failed. Cue {0} has different timing: {1} → {2}",
   "Subtitle_AssValidationText": "SRT-to-ASS validation failed. Cue {0} ({1}) has different visible text.",

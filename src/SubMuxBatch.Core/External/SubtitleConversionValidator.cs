@@ -153,7 +153,8 @@ public static partial class SubtitleConversionValidator
                     expectedCharacter.Style.FontName ?? "Default"));
             }
 
-            if (!string.Equals(
+            if (expectedCharacter.Style.CompareColour
+                && !string.Equals(
                     expectedCharacter.Style.Colour,
                     actualCharacter.Style.Colour,
                     StringComparison.OrdinalIgnoreCase))
@@ -210,7 +211,14 @@ public static partial class SubtitleConversionValidator
                     }
                     else if (name.Equals("color", StringComparison.OrdinalIgnoreCase))
                     {
-                        next = next with { Colour = NormalizeHtmlColour(attributeValue) };
+                        var resolution = LibSeFontColourResolver.Resolve(attributeValue);
+                        next = resolution.Recognized
+                            ? next with
+                            {
+                                Colour = resolution.CanonicalRgb,
+                                CompareColour = true
+                            }
+                            : next with { CompareColour = false };
                     }
                     else if (name.Equals("size", StringComparison.OrdinalIgnoreCase)
                              && double.TryParse(
@@ -272,7 +280,8 @@ public static partial class SubtitleConversionValidator
                 {
                     current = current with
                     {
-                        Colour = value.Length == 0 ? defaultStyle.Colour : NormalizeAssColour(value)
+                        Colour = value.Length == 0 ? defaultStyle.Colour : NormalizeAssColour(value),
+                        CompareColour = true
                     };
                 }
             }
@@ -316,17 +325,12 @@ public static partial class SubtitleConversionValidator
                 return new InlineStyleState(
                     NormalizeFontName(definition.FontName),
                     NormalizeAssColour(definition.PrimaryColour),
-                    definition.FontSize);
+                    definition.FontSize,
+                    true);
             }
         }
 
-        return new InlineStyleState(null, null, null);
-    }
-
-    private static string? NormalizeHtmlColour(string value)
-    {
-        var match = CanonicalHexColourRegex().Match(value);
-        return match.Success ? $"#{match.Groups["hex"].Value.ToUpperInvariant()}" : null;
+        return new InlineStyleState(null, null, null, true);
     }
 
     private static string? NormalizeAssColour(string value)
@@ -498,7 +502,11 @@ public static partial class SubtitleConversionValidator
 
     private sealed record SrtCue(long StartMilliseconds, long EndMilliseconds, string Text);
     private sealed record AssCue(long StartMilliseconds, long EndMilliseconds, string Text);
-    private sealed record InlineStyleState(string? FontName, string? Colour, double? FontSize);
+    private sealed record InlineStyleState(
+        string? FontName,
+        string? Colour,
+        double? FontSize,
+        bool CompareColour);
     private sealed record StyledCharacter(int Value, InlineStyleState Style);
 
     [GeneratedRegex(@"(?<sh>\d{1,3}):(?<sm>\d{2}):(?<ss>\d{2})[,.](?<sms>\d{3})\s*-->\s*(?<eh>\d{1,3}):(?<em>\d{2}):(?<es>\d{2})[,.](?<ems>\d{3})")]
@@ -512,9 +520,6 @@ public static partial class SubtitleConversionValidator
 
     [GeneratedRegex("(?<name>color|face|size)=\"(?<value>[^\"]*)\"", RegexOptions.IgnoreCase)]
     private static partial Regex CanonicalFontAttributeRegex();
-
-    [GeneratedRegex(@"^#(?<hex>[0-9a-f]{6})$", RegexOptions.IgnoreCase)]
-    private static partial Regex CanonicalHexColourRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTokenRegex();

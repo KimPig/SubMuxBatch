@@ -263,7 +263,7 @@
   "Maintenance_InvalidLegacyStyles": "구버전 감지용 ASS Style을 한 줄에 하나씩 올바르게 입력해 주세요.",
   "Subtitle_InvalidFontTag": "ASS 변환용 SRT에 올바르지 않은 FONT 태그가 있습니다: {0}",
   "Subtitle_EmptyFontAttribute": "ASS 변환용 SRT의 FONT {0} 속성값이 비어 있습니다.",
-  "Subtitle_UnsupportedFontColour": "지원하지 않는 색상값 '{0}'이 총 {1}곳에서 발견되었습니다. 첫 위치: {2}번 자막({3}). 색상은 6자리 RGB 형식이어야 합니다. 원본 자막을 수정한 후 다시 시도하세요.",
+  "Subtitle_UnrecognizedFontColourWarning": "libse가 인식하지 못한 색상값 '{0}'이 총 {1}곳에서 발견되었습니다. 원문 그대로 변환했으며 흰색으로 처리되었을 수 있습니다. 첫 위치: {2}번 자막({3}).",
   "Subtitle_AssValidationCueCount": "SRT→ASS 변환 검증에 실패했습니다. SRT 큐는 {0}개이고 ASS Dialogue는 {1}개입니다.",
   "Subtitle_AssValidationTiming": "SRT→ASS 변환 검증에 실패했습니다. {0}번 자막의 시간이 일치하지 않습니다: {1} → {2}",
   "Subtitle_AssValidationText": "SRT→ASS 변환 검증에 실패했습니다. {0}번 자막({1})의 본문이 일치하지 않습니다.",

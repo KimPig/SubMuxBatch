@@ -440,13 +440,19 @@ public sealed class BatchProcessor(
                     var compatibleSrt = Path.Combine(workspace.Path, "ass-compatible.srt");
                     try
                     {
-                        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
+                        var preparation = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
                             finalSrt,
                             compatibleSrt,
                             settings.UseCustomAssStyle
                                 ? AssStyleDefinition.Parse(settings.AssStyleLine).FontSize
                                 : 20d,
                             cancellationToken).ConfigureAwait(false);
+                        foreach (var warning in SubtitleCompatibilityNormalizer
+                                     .CreateUnrecognizedFontColourWarnings(preparation))
+                        {
+                            warnings.Add(warning);
+                            Report(JobState.ConvertingSrtToAss, 24, warning);
+                        }
                     }
                     catch (InvalidDataException exception)
                     {

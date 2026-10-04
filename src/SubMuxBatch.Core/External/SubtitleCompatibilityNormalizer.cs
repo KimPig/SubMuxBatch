@@ -23,10 +23,30 @@ public sealed record NegativeSubtitleTimestampAdjustment(
     public bool Removed => Kind != SubtitleTimestampAdjustmentKind.Adjusted;
 }
 
+public sealed record UnrecognizedFontColour(
+    string Value,
+    int Count,
+    int FirstCueNumber,
+    string FirstStart);
+
+public sealed record SrtFormattingPreparationResult(
+    IReadOnlyList<UnrecognizedFontColour> UnrecognizedColours);
+
 public static partial class SubtitleCompatibilityNormalizer
 {
     private const double DefaultRubyBaseFontSize = 75;
     private const double RubyFontSizeRatio = 0.5;
+
+    public static IReadOnlyList<string> CreateUnrecognizedFontColourWarnings(
+        SrtFormattingPreparationResult result) =>
+        result.UnrecognizedColours
+            .Select(static colour => CoreText.Get(
+                "Subtitle_UnrecognizedFontColourWarning",
+                colour.Value,
+                colour.Count,
+                colour.FirstCueNumber,
+                colour.FirstStart))
+            .ToArray();
 
     public static async Task<IReadOnlyList<NegativeSubtitleTimestampAdjustment>> NormalizeNegativeSrtTimestampsAsync(
         string sourcePath,
@@ -257,19 +277,19 @@ public static partial class SubtitleCompatibilityNormalizer
         return adjustments;
     }
 
-    public static async Task PrepareSrtForAssAsync(
+    public static async Task<SrtFormattingPreparationResult> PrepareSrtForAssAsync(
         string sourcePath,
         string outputPath,
         CancellationToken cancellationToken = default)
     {
-        await PrepareSrtForAssAsync(
+        return await PrepareSrtForAssAsync(
             sourcePath,
             outputPath,
             DefaultRubyBaseFontSize,
             cancellationToken).ConfigureAwait(false);
     }
 
-    public static async Task PrepareSrtForAssAsync(
+    public static async Task<SrtFormattingPreparationResult> PrepareSrtForAssAsync(
         string sourcePath,
         string outputPath,
         double rubyBaseFontSize,
@@ -282,7 +302,7 @@ public static partial class SubtitleCompatibilityNormalizer
 
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
         var text = DecodeSubtitle(bytes);
-        ValidateSrtFontColours(text);
+        var result = AnalyzeSrtFontColours(text);
         var normalized = FlattenRuby(text, rubyBaseFontSize * RubyFontSizeRatio);
         normalized = NormalizeSupportedHtmlTags(normalized);
         await File.WriteAllTextAsync(
@@ -290,6 +310,7 @@ public static partial class SubtitleCompatibilityNormalizer
             normalized,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken).ConfigureAwait(false);
+        return result;
     }
 
     public static async Task ValidateSrtFormattingForAssAsync(
@@ -297,12 +318,13 @@ public static partial class SubtitleCompatibilityNormalizer
         CancellationToken cancellationToken = default)
     {
         var bytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false);
-        ValidateSrtFontColours(DecodeSubtitle(bytes));
+        _ = NormalizeSupportedHtmlTags(DecodeSubtitle(bytes));
     }
 
-    private static void ValidateSrtFontColours(string text)
+    private static SrtFormattingPreparationResult AnalyzeSrtFontColours(string text)
     {
-        var invalid = new List<InvalidFontColour>();
+        var unrecognized = new Dictionary<string, MutableUnrecognizedFontColour>(
+            StringComparer.OrdinalIgnoreCase);
         var fallbackCueNumber = 0;
         foreach (var block in SrtBlockSeparatorRegex().Split(NormalizeLineEndings(text)))
         {
@@ -332,25 +354,39 @@ public static partial class SubtitleCompatibilityNormalizer
                         attribute.Name,
                         "color",
                         StringComparison.OrdinalIgnoreCase));
-                if (colour is not null && !FontHexColourRegex().IsMatch(colour.Value.Trim()))
+                if (colour is null)
                 {
-                    invalid.Add(new InvalidFontColour(colour.Value.Trim(), cueNumber, start));
+                    continue;
+                }
+
+                var value = colour.Value.Trim();
+                if (LibSeFontColourResolver.Resolve(value).Recognized)
+                {
+                    continue;
+                }
+
+                if (unrecognized.TryGetValue(value, out var existing))
+                {
+                    existing.Count++;
+                }
+                else
+                {
+                    unrecognized.Add(value, new MutableUnrecognizedFontColour(
+                        value,
+                        1,
+                        cueNumber,
+                        start));
                 }
             }
         }
 
-        if (invalid.Count == 0)
-        {
-            return;
-        }
-
-        var first = invalid[0];
-        throw new InvalidDataException(CoreText.Get(
-            "Subtitle_UnsupportedFontColour",
-            first.Value,
-            invalid.Count,
-            first.CueNumber,
-            first.Start));
+        return new SrtFormattingPreparationResult(unrecognized.Values
+            .Select(static item => new UnrecognizedFontColour(
+                item.Value,
+                item.Count,
+                item.FirstCueNumber,
+                item.FirstStart))
+            .ToArray());
     }
 
     public static async Task<int> PrepareAssForSrtAsync(
@@ -829,15 +865,6 @@ public static partial class SubtitleCompatibilityNormalizer
                 throw new InvalidDataException(CoreText.Get("Subtitle_EmptyFontAttribute", name));
             }
 
-            if (string.Equals(name, "color", StringComparison.OrdinalIgnoreCase))
-            {
-                var colour = FontHexColourRegex().Match(value);
-                if (colour.Success)
-                {
-                    value = $"#{colour.Groups["hex"].Value.ToUpperInvariant()}";
-                }
-            }
-
             builder.Append(' ')
                 .Append(name)
                 .Append("=\"")
@@ -953,9 +980,6 @@ public static partial class SubtitleCompatibilityNormalizer
     [GeneratedRegex(@"(\r?\n[\t ]*\r?\n)")]
     private static partial Regex SrtBlockSeparatorRegex();
 
-    [GeneratedRegex(@"^#?(?<hex>[0-9a-f]{6})$", RegexOptions.IgnoreCase)]
-    private static partial Regex FontHexColourRegex();
-
     [GeneratedRegex(@"<[^>]+>", RegexOptions.Singleline)]
     private static partial Regex AnyHtmlTagRegex();
 
@@ -979,7 +1003,17 @@ public static partial class SubtitleCompatibilityNormalizer
 
     private sealed record FontAttribute(string Name, string Value);
 
-    private sealed record InvalidFontColour(string Value, int CueNumber, string Start);
+    private sealed class MutableUnrecognizedFontColour(
+        string value,
+        int count,
+        int firstCueNumber,
+        string firstStart)
+    {
+        public string Value { get; } = value;
+        public int Count { get; set; } = count;
+        public int FirstCueNumber { get; } = firstCueNumber;
+        public string FirstStart { get; } = firstStart;
+    }
 
     [GeneratedRegex(@"^[ \t]*Dialogue[ \t]*:", RegexOptions.IgnoreCase)]
     private static partial Regex AssDialoguePrefixRegex();

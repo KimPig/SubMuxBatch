@@ -45,6 +45,36 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
     }
 
     [Fact]
+    public async Task ConvertsNamedColoursAndPassesAnUnknownColourWithAWarning()
+    {
+        var source = Path.Combine(_root, "named-and-unknown.srt");
+        var prepared = Path.Combine(_root, "named-and-unknown-prepared.srt");
+        var ass = Path.Combine(_root, "named-and-unknown.ass");
+        await File.WriteAllTextAsync(
+            source,
+            "1\n00:00:00,000 --> 00:00:01,000\n"
+            + "<font color=gray>회색</font> <font color=pink>분홍색</font> "
+            + "<font color=white>흰색</font> <font color=9FFDDEF>잘못된 값</font>\n",
+            new UTF8Encoding(false));
+
+        var result = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
+        var unknown = Assert.Single(result.UnrecognizedColours);
+        Assert.Equal("9FFDDEF", unknown.Value);
+
+        await new LibSeSubtitleConverter().ConvertAsync(
+            prepared,
+            ass,
+            SubtitleOutputFormat.AdvancedSubStationAlpha);
+
+        var preparedText = await File.ReadAllTextAsync(prepared);
+        var assText = await File.ReadAllTextAsync(ass);
+        SubtitleConversionValidator.ValidateSrtToAss(preparedText, assText);
+        Assert.Contains(@"\c&H808080&", assText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(@"\c&Hcbc0ff&", assText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(@"\c&Hffffff&", assText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AcceptsARealisticCueAfterOrphanFontClosingIsRemoved()
     {
         var source = Path.Combine(_root, "source-unbalanced.srt");
@@ -199,7 +229,7 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
     }
 
     [Fact]
-    public async Task RejectsUnsupportedFontColourWithOriginalValueCountAndLocation()
+    public async Task ReportsUnrecognizedFontColourWithoutBlockingConversion()
     {
         var source = Path.Combine(_root, "invalid-colour.srt");
         var prepared = Path.Combine(_root, "invalid-colour-prepared.srt");
@@ -210,14 +240,56 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
             + "556\n00:23:23,036 --> 00:23:24,893\n<font color=9FFDDEF>셋째</font>\n",
             new UTF8Encoding(false));
 
-        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
-            SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared));
+        var result = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
 
-        Assert.Contains("9FFDDEF", error.Message);
-        Assert.Contains("3", error.Message);
-        Assert.Contains("554", error.Message);
-        Assert.Contains("00:23:15.180", error.Message);
-        Assert.False(File.Exists(prepared));
+        var colour = Assert.Single(result.UnrecognizedColours);
+        Assert.Equal("9FFDDEF", colour.Value);
+        Assert.Equal(3, colour.Count);
+        Assert.Equal(554, colour.FirstCueNumber);
+        Assert.Equal("00:23:15.180", colour.FirstStart);
+        Assert.Contains("<font color=\"9FFDDEF\">첫째</font>", await File.ReadAllTextAsync(prepared));
+
+        var warning = Assert.Single(
+            SubtitleCompatibilityNormalizer.CreateUnrecognizedFontColourWarnings(result));
+        Assert.Contains("9FFDDEF", warning);
+        Assert.Contains("3", warning);
+        Assert.Contains("554", warning);
+        Assert.Contains("00:23:15.180", warning);
+    }
+
+    [Theory]
+    [InlineData("gray")]
+    [InlineData("pink")]
+    [InlineData("white")]
+    [InlineData("FFDFDF")]
+    [InlineData("#FFDFDF")]
+    public async Task AcceptsColoursRecognizedByLibSe(string value)
+    {
+        var source = Path.Combine(_root, $"recognized-{Guid.NewGuid():N}.srt");
+        var prepared = Path.Combine(_root, $"recognized-{Guid.NewGuid():N}-prepared.srt");
+        await File.WriteAllTextAsync(
+            source,
+            $"1\n00:00:00,000 --> 00:00:01,000\n<font color={value}>Test</font>\n",
+            new UTF8Encoding(false));
+
+        var result = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, prepared);
+
+        Assert.Empty(result.UnrecognizedColours);
+        Assert.Contains($"<font color=\"{value}\">Test</font>", await File.ReadAllTextAsync(prepared));
+    }
+
+    [Fact]
+    public void SkipsOnlyColourComparisonForAnUnrecognizedValue()
+    {
+        const string srt = "1\n00:00:00,000 --> 00:00:01,000\n<font color=\"9FFDDEF\" face=\"Arial\">Test</font>\n";
+        const string ass = "[V4+ Styles]\n"
+                           + "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                           + "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n"
+                           + "[Events]\n"
+                           + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                           + "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\c&Hffffff&}Test\n";
+
+        SubtitleConversionValidator.ValidateSrtToAss(srt, ass);
     }
 
     public void Dispose()

@@ -438,7 +438,12 @@ public sealed class MaintenanceProcessor(
                         if (shouldUpdateStyle)
                         {
                             updated = await RegenerateAssFromSrtAsync(
-                                synchronizedSrt, settings, workspace, cancellationToken).ConfigureAwait(false);
+                                    synchronizedSrt,
+                                    settings,
+                                    workspace,
+                                    warnings,
+                                    cancellationToken)
+                                .ConfigureAwait(false);
                             regenerated = true;
                         }
                         else
@@ -480,6 +485,7 @@ public sealed class MaintenanceProcessor(
                                         managedSrtExtractedPath,
                                         settings,
                                         workspace,
+                                        warnings,
                                         cancellationToken)
                                     .ConfigureAwait(false);
                             }
@@ -942,16 +948,22 @@ public sealed class MaintenanceProcessor(
         string extractedSrt,
         AppSettings settings,
         string workspace,
+        ICollection<string> warnings,
         CancellationToken cancellationToken)
     {
         var compatibleSrt = Path.Combine(workspace, "maintenance-ass-compatible.srt");
-        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
+        var preparation = await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(
             extractedSrt,
             compatibleSrt,
             settings.UseCustomAssStyle
                 ? AssStyleDefinition.Parse(settings.AssStyleLine).FontSize
                 : 20d,
             cancellationToken).ConfigureAwait(false);
+        foreach (var warning in SubtitleCompatibilityNormalizer
+                     .CreateUnrecognizedFontColourWarnings(preparation))
+        {
+            warnings.Add(warning);
+        }
 
         string? stylePath = null;
         if (settings.UseCustomAssStyle)
