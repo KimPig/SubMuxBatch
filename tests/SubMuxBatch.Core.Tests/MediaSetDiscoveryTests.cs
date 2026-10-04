@@ -1,4 +1,5 @@
 using SubMuxBatch.Core.Discovery;
+using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Planning;
 
 namespace SubMuxBatch.Core.Tests;
@@ -314,7 +315,7 @@ public sealed class MediaSetDiscoveryTests : IDisposable
     }
 
     [Fact]
-    public async Task RecursiveDiscoveryIgnoresSubMuxBackupDirectory()
+    public async Task RecursiveDiscoveryIgnoresSubMuxManagedArchiveDirectories()
     {
         Touch("Movie.mkv");
         Touch("Movie.srt");
@@ -322,6 +323,10 @@ public sealed class MediaSetDiscoveryTests : IDisposable
         Directory.CreateDirectory(backup);
         File.WriteAllText(Path.Combine(backup, "Backup.mkv"), "x");
         File.WriteAllText(Path.Combine(backup, "Backup.srt"), "x");
+        var archive = Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName);
+        Directory.CreateDirectory(archive);
+        File.WriteAllText(Path.Combine(archive, "Archived.mkv"), "x");
+        File.WriteAllText(Path.Combine(archive, "Archived.srt"), "x");
 
         var result = await new MediaSetDiscovery().DiscoverAsync([_root], true);
 

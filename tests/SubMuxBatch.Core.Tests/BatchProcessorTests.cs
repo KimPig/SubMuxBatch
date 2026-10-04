@@ -135,9 +135,9 @@ public sealed class BatchProcessorTests : IDisposable
         var replacedSrt = await File.ReadAllTextAsync(srt);
         Assert.Contains("_PROFILE_AUTO-AUDIOONLY-6-8_REF_AUDIO__", replacedSrt);
         Assert.Contains("00:00:01,000 --> 00:00:02,000", await File.ReadAllTextAsync(srt));
-        var backup = Path.Combine(_root, ".submux-backup", "external-subtitles", "Synced.srt");
+        var backup = Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Synced.srt");
         Assert.Equal(original, await File.ReadAllTextAsync(backup));
-        Assert.True(File.Exists(Path.Combine(_root, ".submux-backup", "external-subtitles", ".index", "Synced.srt.json")));
+        Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, ".index", "Synced.srt.json")));
         var startIndex = progressMessages.FindIndex(message => message.Contains("LAPSE 동기화를 시작", StringComparison.Ordinal));
         var appliedIndex = progressMessages.FindIndex(message => message.Contains("LAPSE SRT 적용 완료", StringComparison.Ordinal));
         var summaryIndex = progressMessages.FindIndex(message => message.Contains("LAPSE 요약", StringComparison.Ordinal));
@@ -226,8 +226,8 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains("; SUBMUX_LAPSE_RESULT=solid", await File.ReadAllTextAsync(ass));
         Assert.Contains("00:00:01,000 --> 00:00:02,000", await File.ReadAllTextAsync(srt));
         Assert.Contains(LapseSubtitleMetadata.SrtMarkerPrefix, await File.ReadAllTextAsync(srt));
-        Assert.True(File.Exists(Path.Combine(_root, ".submux-backup", "external-subtitles", "Paired.ass")));
-        Assert.True(File.Exists(Path.Combine(_root, ".submux-backup", "external-subtitles", "Paired.srt")));
+        Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Paired.ass")));
+        Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "Paired.srt")));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using SubMuxBatch.Core.Domain;
+using SubMuxBatch.Core.External;
 
 namespace SubMuxBatch.Core.Discovery;
 
@@ -13,7 +14,7 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
         var inputSnapshot = inputs
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
-            .Where(static path => !IsInBackupDirectory(path))
+            .Where(static path => !IsInManagedStorageDirectory(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -300,10 +301,7 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
                         continue;
                     }
 
-                    if (string.Equals(
-                            Path.GetFileName(child),
-                            ".submux-backup",
-                            StringComparison.OrdinalIgnoreCase))
+                    if (IsManagedStorageDirectoryName(Path.GetFileName(child)))
                     {
                         continue;
                     }
@@ -326,18 +324,27 @@ public sealed class MediaSetDiscovery(bool allowSubtitleSuffixMatch = false)
         }
     }
 
-    private static bool IsInBackupDirectory(string path)
+    private static bool IsInManagedStorageDirectory(string path)
     {
         var current = File.Exists(path) ? Path.GetDirectoryName(path) : path;
         while (!string.IsNullOrWhiteSpace(current))
         {
-            if (string.Equals(Path.GetFileName(current), ".submux-backup", StringComparison.OrdinalIgnoreCase))
+            if (IsManagedStorageDirectoryName(Path.GetFileName(current)))
             {
                 return true;
             }
             current = Path.GetDirectoryName(current);
         }
         return false;
+    }
+
+    private static bool IsManagedStorageDirectoryName(string? name)
+    {
+        return string.Equals(name, ".submux-backup", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(
+                   name,
+                   ExternalSubtitleReplacement.ArchiveDirectoryName,
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record SuffixDirectorySnapshot(

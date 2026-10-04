@@ -501,7 +501,7 @@ public sealed class LapseIntegrationTests : IDisposable
         File.WriteAllText(original, "1\n00:00:03,000 --> 00:00:04,000\nOld\n");
         await new ExternalSubtitleReplacement(original, synchronized, result, 4_000_000_000, true).CommitAsync();
 
-        var backup = Path.Combine(_root, ".submux-backup", "external-subtitles");
+        var backup = Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName);
         Assert.True(File.Exists(Path.Combine(backup, "E01.srt")));
         Assert.True(File.Exists(Path.Combine(backup, "E01 (1).srt")));
         Assert.True(File.Exists(Path.Combine(backup, ".index", "E01.srt.json")));
@@ -530,7 +530,7 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.Equal(Path.Combine(_root, "E02.srt"), newPath);
         Assert.False(File.Exists(original));
         Assert.True(File.Exists(newPath));
-        Assert.True(File.Exists(Path.Combine(_root, ".submux-backup", "external-subtitles", "E02.smi")));
+        Assert.True(File.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName, "E02.smi")));
     }
 
     [Fact]

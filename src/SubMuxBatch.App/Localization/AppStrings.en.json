@@ -436,7 +436,7 @@
   "Settings_TabSync": "Subtitle sync",
   "Settings_LapseHeading": "LAPSE automatic sync",
   "Settings_EnableLapseSync": "Automatically align the overall timing of external subtitles",
-  "Settings_LapseHelp": "Only solid results are applied. After the MKV output passes validation, the synchronized subtitle is saved at the original subtitle location and the previous file is moved to .submux-backup\\external-subtitles. SMI subtitles are converted to SRT before synchronization, while the original SMI is preserved in the backup folder. Unsure or failed results keep the original subtitle and add a warning.",
+  "Settings_LapseHelp": "Only solid results are applied. After the MKV output passes validation, the synchronized subtitle is saved at the original subtitle location and the pre-sync file is moved to .submux-subtitle-archive. SMI subtitles are converted to SRT before synchronization, while the original SMI is preserved in the archive folder. Unsure or failed results keep the original subtitle and add a warning.",
   "Settings_LapseUseEmbeddedReference": "Prefer an MKV embedded subtitle as the LAPSE reference",
   "Settings_LapseEmbeddedReferenceHelp": "A suitable MKV embedded subtitle is used when available; otherwise LAPSE analyzes the audio. SubMux-generated, forced, hearing-impaired, commentary, signs, and songs tracks are excluded.",
   "Settings_LapseMode": "Correction mode",

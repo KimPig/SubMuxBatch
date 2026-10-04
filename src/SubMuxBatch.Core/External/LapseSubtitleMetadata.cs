@@ -393,11 +393,13 @@ public sealed class ExternalSubtitleReplacement(
     bool addSrtMarker,
     string? settingsProfile = null)
 {
+    public const string ArchiveDirectoryName = ".submux-subtitle-archive";
+
     public async Task<string> CommitAsync(CancellationToken cancellationToken = default)
     {
         var sourceDirectory = Path.GetDirectoryName(originalPath)
                               ?? throw new InvalidOperationException("The subtitle path has no parent directory.");
-        var backupRoot = Path.Combine(sourceDirectory, ".submux-backup", "external-subtitles");
+        var backupRoot = Path.Combine(sourceDirectory, ArchiveDirectoryName);
         var indexRoot = Path.Combine(backupRoot, ".index");
         Directory.CreateDirectory(indexRoot);
         var backupPath = GetAvailablePath(Path.Combine(backupRoot, Path.GetFileName(originalPath)));
