@@ -109,6 +109,52 @@
                     </Setter.Value>
                 </Setter>
             </Style>
+            <Style x:Key="MediaInfoTabRadioStyle" TargetType="RadioButton">
+                <Setter Property="MinWidth" Value="92" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="Padding" Value="10,4" />
+                <Setter Property="Background" Value="White" />
+                <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="TabSurface"
+                                    Padding="{TemplateBinding Padding}"
+                                    Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="TabSurface" Property="Background" Value="{StaticResource ControlHoverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="TabSurface" Property="Background" Value="{StaticResource SelectionBrush}" />
+                                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="MediaSizeSummaryLabelStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+            </Style>
+            <Style x:Key="MediaSizeSummaryValueStyle" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,3,0,0" />
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}" />
+            </Style>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -118,17 +164,49 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <Border Grid.Row="0" Padding="20,15" Background="White"
+        <Border Grid.Row="0" Padding="20,15,20,9" Background="White"
                 BorderBrush="#D1D1D1" BorderThickness="0,0,0,1">
             <StackPanel>
-                <TextBlock x:Name="HeadingText" Text="{loc:Loc MediaDetails_Heading}"
+                <TextBlock x:Name="HeadingText"
+                           Text="{loc:Loc MediaDetails_Heading}"
                            FontSize="21"
                            FontWeight="SemiBold"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-                <TextBlock Margin="0,3,0,0" Text="{loc:Loc MediaDetails_Description}"
-                           Foreground="{StaticResource SecondaryTextBrush}" />
+                <Grid Margin="0,7,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               Margin="0,0,16,0"
+                               VerticalAlignment="Center"
+                               Text="{loc:Loc MediaDetails_Description}"
+                               Foreground="{StaticResource SecondaryTextBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" />
+                    <Border Grid.Column="1"
+                            VerticalAlignment="Center"
+                            BorderBrush="{StaticResource StrongBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="MediaInfoTabButton"
+                                         Content="{loc:Loc MediaSizes_InfoTab}"
+                                         GroupName="MediaInfoView"
+                                         IsChecked="True"
+                                         Style="{StaticResource MediaInfoTabRadioStyle}"
+                                         Checked="MediaInfoView_Checked" />
+                            <Border Width="1" Background="{StaticResource BorderBrush}" />
+                            <RadioButton x:Name="TrackSizesTabButton"
+                                         Content="{loc:Loc MediaSizes_TabTitle}"
+                                         GroupName="MediaInfoView"
+                                         Style="{StaticResource MediaInfoTabRadioStyle}"
+                                         Checked="MediaInfoView_Checked" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
                 <TextBlock Margin="0,6,0,0"
                            Text="{loc:Loc MediaDetails_ProcessedBySubMux}"
                            Foreground="#107C10"
@@ -147,7 +225,7 @@
             </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="1" Padding="16" VerticalScrollBarVisibility="Auto"
+        <ScrollViewer x:Name="GeneralInfoPanel" Grid.Row="1" Padding="16" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <Border Margin="0,0,0,10" Padding="14,11" Background="White"
@@ -192,6 +270,137 @@
                 </ItemsControl>
             </StackPanel>
         </ScrollViewer>
+
+        <Grid x:Name="TrackSizesPanel" Grid.Row="1" Margin="16" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                <TextBlock Text="{loc:Loc MediaSizes_Description}" FontWeight="SemiBold" />
+                <TextBlock Margin="0,4,0,0"
+                           Text="{Binding SizeStatusText}"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Border Grid.Row="1" Margin="0,0,0,10" Padding="14,10"
+                    Background="White" BorderBrush="#D1D1D1" BorderThickness="1" CornerRadius="2">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{loc:Loc MediaSizes_TotalFileSize}" Style="{StaticResource MediaSizeSummaryLabelStyle}" />
+                        <TextBlock Text="{Binding TotalFileSizeText}" Style="{StaticResource MediaSizeSummaryValueStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                        <TextBlock Text="{loc:Loc MediaSizes_VideoTotal}" Style="{StaticResource MediaSizeSummaryLabelStyle}" />
+                        <TextBlock Text="{Binding VideoSizeText}" Style="{StaticResource MediaSizeSummaryValueStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Margin="16,0,0,0">
+                        <TextBlock Text="{loc:Loc MediaSizes_AudioTotal}" Style="{StaticResource MediaSizeSummaryLabelStyle}" />
+                        <TextBlock Text="{Binding AudioSizeText}" Style="{StaticResource MediaSizeSummaryValueStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Margin="16,0,0,0">
+                        <TextBlock Text="{loc:Loc MediaSizes_SubtitleAttachmentTotal}" Style="{StaticResource MediaSizeSummaryLabelStyle}" />
+                        <TextBlock Text="{Binding SubtitleAttachmentSizeText}" Style="{StaticResource MediaSizeSummaryValueStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4" Margin="16,0,0,0">
+                        <TextBlock Text="{loc:Loc MediaSizes_OverheadSize}" Style="{StaticResource MediaSizeSummaryLabelStyle}" />
+                        <TextBlock Text="{Binding ContainerOverheadText}" Style="{StaticResource MediaSizeSummaryValueStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Background="White" BorderBrush="#D1D1D1" BorderThickness="1" CornerRadius="2">
+                <Grid Grid.IsSharedSizeScope="True">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Padding="10,6" BorderBrush="#D1D1D1" BorderThickness="0,0,0,1">
+                        <Grid>
+                            <TextBlock VerticalAlignment="Center"
+                                       Text="{loc:Loc MediaSizes_Breakdown}"
+                                       FontWeight="SemiBold" />
+                            <Button HorizontalAlignment="Right"
+                                    Margin="0"
+                                    Padding="10,3"
+                                    MinHeight="28"
+                                    Content="{loc:Loc MediaSizes_Calculate}"
+                                    IsEnabled="{Binding CanCalculateExactSizes}"
+                                    Click="CalculateExactSizesButton_Click" />
+                        </Grid>
+                    </Border>
+                    <Border Grid.Row="1" Padding="10,7" Background="#F7F7F7" BorderBrush="#D1D1D1" BorderThickness="0,0,0,1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="64" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{loc:Loc MediaSizes_Item}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="1" Text="{loc:Loc MediaSizes_Details}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Text="{loc:Loc MediaSizes_Size}" FontWeight="SemiBold" TextAlignment="Right" />
+                            <TextBlock Grid.Column="3" Text="{loc:Loc MediaSizes_Share}" FontWeight="SemiBold" TextAlignment="Right" />
+                        </Grid>
+                    </Border>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding SizeRows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="10,8" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="160" />
+                                                <ColumnDefinition Width="64" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                                <TextBlock Margin="0,2,0,0" Text="{Binding Category}" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Text="{Binding Details}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Details}" />
+                                            <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
+                                                <TextBlock VerticalAlignment="Center" Text="{Binding Size}" ToolTip="{Binding SizeToolTip}" />
+                                                <Border Margin="7,0,0,0" Padding="4,1" Background="#F0F0F0" CornerRadius="2">
+                                                    <TextBlock Text="{Binding Basis}" FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Text="{Binding Share}" TextAlignment="Right" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <ProgressBar Grid.Row="3" Height="4" Margin="0,10,0,0" IsIndeterminate="True">
+                <ProgressBar.Style>
+                    <Style TargetType="ProgressBar">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCalculatingSizes}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ProgressBar.Style>
+            </ProgressBar>
+        </Grid>
 
         <Border Grid.Row="2" Padding="16,10" Background="White"
                 BorderBrush="#D1D1D1" BorderThickness="0,1,0,0">

@@ -37,7 +37,8 @@ public sealed record MediaInfoVideoStream(
     string? ScanType,
     string? ScanOrder,
     bool? Default,
-    bool? Forced);
+    bool? Forced,
+    long? StreamSizeBytes = null);
 
 public sealed record MediaInfoAudioStream(
     string? Id,
@@ -58,7 +59,8 @@ public sealed record MediaInfoAudioStream(
     string? CompressionMode,
     double? DelayMilliseconds,
     bool? Default,
-    bool? Forced);
+    bool? Forced,
+    long? StreamSizeBytes = null);
 
 public sealed record MediaInfoTextStream(
     string? Id,
@@ -71,7 +73,13 @@ public sealed record MediaInfoTextStream(
     long? DurationNanoseconds,
     long? ElementCount,
     bool? Default,
-    bool? Forced);
+    bool? Forced,
+    long? StreamSizeBytes = null);
+
+public sealed record MediaInfoStreamSizeReport(
+    IReadOnlyList<long?> VideoStreams,
+    IReadOnlyList<long?> AudioStreams,
+    IReadOnlyList<long?> TextStreams);
 
 public sealed record MediaInfoMetadataTag(string Name, string Value);
 
@@ -422,7 +430,8 @@ public sealed class MediaInfoClient : IMediaInfoRawReader
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ScanType")),
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Video, index, "ScanOrder")),
         ParseBoolean(Get(mediaInfo, StreamKind.Video, index, "Default")),
-        ParseBoolean(Get(mediaInfo, StreamKind.Video, index, "Forced")));
+        ParseBoolean(Get(mediaInfo, StreamKind.Video, index, "Forced")),
+        ParseLong(Get(mediaInfo, StreamKind.Video, index, "StreamSize")));
 
     private static MediaInfoAudioStream ReadAudioStream(MediaInfo mediaInfo, int index) => new(
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "ID")),
@@ -443,7 +452,8 @@ public sealed class MediaInfoClient : IMediaInfoRawReader
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Audio, index, "Compression_Mode")),
         ParseDouble(Get(mediaInfo, StreamKind.Audio, index, "Delay")),
         ParseBoolean(Get(mediaInfo, StreamKind.Audio, index, "Default")),
-        ParseBoolean(Get(mediaInfo, StreamKind.Audio, index, "Forced")));
+        ParseBoolean(Get(mediaInfo, StreamKind.Audio, index, "Forced")),
+        ParseLong(Get(mediaInfo, StreamKind.Audio, index, "StreamSize")));
 
     private static MediaInfoTextStream ReadTextStream(MediaInfo mediaInfo, int index) => new(
         NullIfWhiteSpace(Get(mediaInfo, StreamKind.Text, index, "ID")),
@@ -456,7 +466,8 @@ public sealed class MediaInfoClient : IMediaInfoRawReader
         ParseDuration(Get(mediaInfo, StreamKind.Text, index, "Duration")),
         ParseLong(Get(mediaInfo, StreamKind.Text, index, "ElementCount")),
         ParseBoolean(Get(mediaInfo, StreamKind.Text, index, "Default")),
-        ParseBoolean(Get(mediaInfo, StreamKind.Text, index, "Forced")));
+        ParseBoolean(Get(mediaInfo, StreamKind.Text, index, "Forced")),
+        ParseLong(Get(mediaInfo, StreamKind.Text, index, "StreamSize")));
 
     private static string Get(MediaInfo mediaInfo, StreamKind kind, int index, string parameter) =>
         mediaInfo.Get(kind, index, parameter).Trim();

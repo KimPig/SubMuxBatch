@@ -37,5 +37,20 @@ public partial class MediaInfoWindow : Window
         }
     }
 
+    private void MediaInfoView_Checked(object sender, RoutedEventArgs e)
+    {
+        if (GeneralInfoPanel is null || TrackSizesPanel is null || TrackSizesTabButton is null)
+        {
+            return;
+        }
+
+        var showTrackSizes = TrackSizesTabButton.IsChecked == true;
+        GeneralInfoPanel.Visibility = showTrackSizes ? Visibility.Collapsed : Visibility.Visible;
+        TrackSizesPanel.Visibility = showTrackSizes ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void CalculateExactSizesButton_Click(object sender, RoutedEventArgs e) =>
+        await _viewModel.CalculateExactSizesAsync();
+
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 }

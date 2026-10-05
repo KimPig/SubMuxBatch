@@ -27,7 +27,9 @@ public sealed record MkvTrackInfo(
     bool VisualImpaired = false,
     bool TextDescriptions = false,
     bool OriginalLanguage = false,
-    bool Commentary = false);
+    bool Commentary = false,
+    int? Number = null,
+    long? SizeBytes = null);
 
 public sealed record MkvAttachmentInfo(
     string? FileName,
@@ -1279,7 +1281,9 @@ public sealed class MkvMergeClient(string executablePath, IProcessRunner process
                         GetBoolean(properties, "visual_impaired"),
                         GetBoolean(properties, "text_descriptions"),
                         GetBoolean(properties, "original"),
-                        GetBoolean(properties, "commentary")));
+                        GetBoolean(properties, "commentary"),
+                        GetInt32(properties, "number"),
+                        GetFlexibleInt64(properties, "tag_number_of_bytes")));
                 }
             }
 

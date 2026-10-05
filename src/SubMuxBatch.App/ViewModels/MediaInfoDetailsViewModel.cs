@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using SubMuxBatch.App.Localization;
@@ -15,12 +16,34 @@ public sealed record MediaInfoDetailSection(
     IReadOnlyList<MediaInfoDetailRow> Rows,
     bool IsExpanded);
 
+public sealed record MediaSizeDisplayRow(
+    string Category,
+    string Name,
+    string Details,
+    string Size,
+    string Share,
+    string Basis,
+    string? SizeToolTip = null);
+
 public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly QueueItemViewModel _source;
     private IReadOnlyList<MediaInfoDetailSection> _sections = [];
+    private IReadOnlyList<MediaSizeDisplayRow> _sizeRows = [];
     private string _copyText = string.Empty;
     private bool _isProcessedBySubMux;
+    private bool _isCalculatingSizes;
+    private bool _canCalculateExactSizes;
+    private bool _hasInexactTrackSizes;
+    private string _sizeStatusText = string.Empty;
+    private string _totalFileSizeText = string.Empty;
+    private string _videoSizeText = string.Empty;
+    private string _audioSizeText = string.Empty;
+    private string _subtitleAttachmentSizeText = string.Empty;
+    private string _containerOverheadText = string.Empty;
+    private MediaInfoStreamSizeReport? _fullSizeReport;
+    private string? _fullSizeReportPath;
+    private CancellationTokenSource? _sizeCancellation;
 
     public MediaInfoDetailsViewModel(QueueItemViewModel source)
     {
@@ -33,10 +56,66 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
 
     public string Path => _source.MediaDetailsPath;
     public IReadOnlyList<MediaInfoDetailSection> Sections => _sections;
+    public IReadOnlyList<MediaSizeDisplayRow> SizeRows => _sizeRows;
     public string CopyText => _copyText;
     public bool IsProcessedBySubMux => _isProcessedBySubMux;
+    public bool IsCalculatingSizes => _isCalculatingSizes;
+    public bool CanCalculateExactSizes => _canCalculateExactSizes;
+    public string SizeStatusText => _sizeStatusText;
+    public string TotalFileSizeText => _totalFileSizeText;
+    public string VideoSizeText => _videoSizeText;
+    public string AudioSizeText => _audioSizeText;
+    public string SubtitleAttachmentSizeText => _subtitleAttachmentSizeText;
+    public string ContainerOverheadText => _containerOverheadText;
 
-    public void Dispose() => _source.PropertyChanged -= Source_PropertyChanged;
+    public void Dispose()
+    {
+        _source.PropertyChanged -= Source_PropertyChanged;
+        _sizeCancellation?.Cancel();
+        _sizeCancellation?.Dispose();
+    }
+
+    public async Task CalculateExactSizesAsync()
+    {
+        if (_isCalculatingSizes || !_canCalculateExactSizes || !File.Exists(Path))
+        {
+            return;
+        }
+
+        _sizeCancellation?.Cancel();
+        _sizeCancellation?.Dispose();
+        _sizeCancellation = new CancellationTokenSource();
+        _isCalculatingSizes = true;
+        _canCalculateExactSizes = false;
+        _sizeStatusText = AppText.Get("MediaSizes_Calculating");
+        RaiseSizeProperties();
+
+        try
+        {
+            var ffmpegPath = File.Exists(BundledFfmpegProvider.ExecutablePath)
+                ? BundledFfmpegProvider.ExecutablePath
+                : await new BundledFfmpegProvider().GetExecutablePathAsync(_sizeCancellation.Token);
+            _fullSizeReport = await new FfmpegPacketSizeAnalyzer(ffmpegPath).AnalyzeAsync(
+                Path,
+                _sizeCancellation.Token);
+            _fullSizeReportPath = Path;
+            RebuildSizes();
+        }
+        catch (OperationCanceledException)
+        {
+            _sizeStatusText = AppText.Get("MediaSizes_Cancelled");
+        }
+        catch (Exception exception)
+        {
+            _sizeStatusText = AppText.Get("MediaSizes_Failed", exception.Message);
+        }
+        finally
+        {
+            _isCalculatingSizes = false;
+            _canCalculateExactSizes = _hasInexactTrackSizes;
+            RaiseSizeProperties();
+        }
+    }
 
     private void Source_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -44,6 +123,12 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
             or nameof(QueueItemViewModel.DisplayInspection)
             or nameof(QueueItemViewModel.MediaDetailsPath))
         {
+            if (e.PropertyName == nameof(QueueItemViewModel.MediaDetailsPath)
+                && !string.Equals(_fullSizeReportPath, Path, StringComparison.OrdinalIgnoreCase))
+            {
+                _fullSizeReport = null;
+                _fullSizeReportPath = null;
+            }
             Rebuild();
         }
     }
@@ -74,7 +159,8 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
         }
 
         _sections = sections;
-        _copyText = BuildCopyText(sections, _isProcessedBySubMux);
+        RebuildSizes();
+        _copyText = BuildCopyText(sections, _isProcessedBySubMux) + BuildSizeCopyText();
         OnPropertyChanged(nameof(Path));
         OnPropertyChanged(nameof(Sections));
         OnPropertyChanged(nameof(CopyText));
@@ -298,6 +384,244 @@ public sealed class MediaInfoDetailsViewModel : INotifyPropertyChanged, IDisposa
 
         return new MediaInfoDetailSection(AppText.Get("MediaDetails_Attachments"), rows, false);
     }
+
+    private void RebuildSizes()
+    {
+        var mediaInfo = _source.DisplayInspection;
+        var mkvInfo = _source.MkvInspection;
+        var totalBytes = mediaInfo?.FileSizeBytes ?? mkvInfo?.FileSizeBytes;
+        var duration = mediaInfo?.DurationNanoseconds ?? mkvInfo?.DurationNanoseconds;
+        var entries = new List<MediaSizeEntry>();
+        var trackEntries = new List<MediaSizeEntry>();
+        var videoEntries = new List<MediaSizeEntry>();
+        var audioEntries = new List<MediaSizeEntry>();
+        var subtitleEntries = new List<MediaSizeEntry>();
+        var attachmentEntries = new List<MediaSizeEntry>();
+
+        var mediaVideo = mediaInfo?.VideoStreams ?? [];
+        var mkvVideo = Tracks(mkvInfo, "video");
+        var videoCount = Math.Max(mediaVideo.Count, mkvVideo.Count);
+        for (var index = 0; index < videoCount; index++)
+        {
+            var stream = index < mediaVideo.Count ? mediaVideo[index] : null;
+            var mkv = index < mkvVideo.Count ? mkvVideo[index] : null;
+            var size = MediaSizeResolver.ResolveTrackSize(
+                ReportedSize(_fullSizeReport?.VideoStreams, index) ?? stream?.StreamSizeBytes,
+                mkvInfo,
+                "video",
+                index,
+                MediaBitrateResolver.ResolveTrackBitrate(stream?.Bitrate, mkvInfo, "video", index),
+                stream?.DurationNanoseconds ?? duration);
+            videoEntries.Add(new MediaSizeEntry(
+                AppText.Get("MediaDetails_Video"),
+                AppText.Get("MediaDetails_TrackTitle", AppText.Get("MediaDetails_Video"), index + 1),
+                BuildSizeDetails(stream?.Format ?? mkv?.CodecName, stream?.Language ?? mkv?.LanguageIetf ?? mkv?.Language, stream?.Title ?? mkv?.TrackName),
+                size.Bytes,
+                size.IsEstimated));
+        }
+
+        var mediaAudio = mediaInfo?.AudioStreams ?? [];
+        var mkvAudio = Tracks(mkvInfo, "audio");
+        var audioCount = Math.Max(mediaAudio.Count, mkvAudio.Count);
+        for (var index = 0; index < audioCount; index++)
+        {
+            var stream = index < mediaAudio.Count ? mediaAudio[index] : null;
+            var mkv = index < mkvAudio.Count ? mkvAudio[index] : null;
+            var size = MediaSizeResolver.ResolveTrackSize(
+                ReportedSize(_fullSizeReport?.AudioStreams, index) ?? stream?.StreamSizeBytes,
+                mkvInfo,
+                "audio",
+                index,
+                MediaBitrateResolver.ResolveTrackBitrate(stream?.Bitrate, mkvInfo, "audio", index),
+                stream?.DurationNanoseconds ?? duration);
+            audioEntries.Add(new MediaSizeEntry(
+                AppText.Get("MediaDetails_Audio"),
+                AppText.Get("MediaDetails_TrackTitle", AppText.Get("MediaDetails_Audio"), index + 1),
+                BuildSizeDetails(stream?.Format ?? mkv?.CodecName, stream?.Language ?? mkv?.LanguageIetf ?? mkv?.Language, stream?.Title ?? mkv?.TrackName),
+                size.Bytes,
+                size.IsEstimated));
+        }
+
+        var mediaText = mediaInfo?.TextStreams ?? [];
+        var mkvText = Tracks(mkvInfo, "subtitles");
+        var textCount = Math.Max(mediaText.Count, mkvText.Count);
+        for (var index = 0; index < textCount; index++)
+        {
+            var stream = index < mediaText.Count ? mediaText[index] : null;
+            var mkv = index < mkvText.Count ? mkvText[index] : null;
+            var size = MediaSizeResolver.ResolveTrackSize(
+                ReportedSize(_fullSizeReport?.TextStreams, index) ?? stream?.StreamSizeBytes,
+                mkvInfo,
+                "subtitles",
+                index,
+                null,
+                stream?.DurationNanoseconds ?? duration);
+            subtitleEntries.Add(new MediaSizeEntry(
+                AppText.Get("MediaDetails_Subtitle"),
+                AppText.Get("MediaDetails_TrackTitle", AppText.Get("MediaDetails_Subtitle"), index + 1),
+                BuildSizeDetails(stream?.Format ?? mkv?.CodecName, stream?.Language ?? mkv?.LanguageIetf ?? mkv?.Language, stream?.Title ?? mkv?.TrackName),
+                size.Bytes,
+                size.IsEstimated));
+        }
+
+        trackEntries.AddRange(videoEntries);
+        trackEntries.AddRange(audioEntries);
+        trackEntries.AddRange(subtitleEntries);
+        entries.AddRange(trackEntries);
+        foreach (var (attachment, index) in (mkvInfo?.Attachments ?? []).Select((value, index) => (value, index)))
+        {
+            attachmentEntries.Add(new MediaSizeEntry(
+                AppText.Get("MediaSizes_AttachmentCategory"),
+                attachment.FileName ?? AppText.Get("MediaDetails_AttachmentTitle", index + 1),
+                BuildSizeDetails(attachment.ContentType, null, attachment.Description),
+                attachment.Size,
+                false));
+        }
+        entries.AddRange(attachmentEntries);
+
+        _hasInexactTrackSizes = trackEntries.Any(static entry => entry.Bytes is null || entry.IsEstimated);
+        var allContentKnown = entries.All(static entry => entry.Bytes is >= 0);
+        var contentBytes = entries.Where(static entry => entry.Bytes is >= 0).Sum(static entry => entry.Bytes!.Value);
+        if (totalBytes is >= 0 && allContentKnown)
+        {
+            var overheadBytes = Math.Max(0, totalBytes.Value - contentBytes);
+            entries.Add(new MediaSizeEntry(
+                AppText.Get("MediaSizes_OtherCategory"),
+                AppText.Get("MediaSizes_ContainerOverhead"),
+                AppText.Get("MediaSizes_ContainerOverheadDetails"),
+                overheadBytes,
+                entries.Any(static entry => entry.IsEstimated)));
+            _containerOverheadText = FormatCompactFileSize(overheadBytes, entries.Any(static entry => entry.IsEstimated));
+        }
+        else
+        {
+            _containerOverheadText = AppText.Get("Common_Undetermined");
+        }
+
+        _sizeRows = entries.Select(entry => new MediaSizeDisplayRow(
+                entry.Category,
+                entry.Name,
+                entry.Details,
+                entry.Bytes is >= 0
+                    ? FormatCompactFileSize(entry.Bytes.Value, entry.IsEstimated)
+                    : AppText.Get("Common_Undetermined"),
+                FormatShare(entry.Bytes, totalBytes),
+                entry.Bytes is null
+                    ? AppText.Get("MediaSizes_Unknown")
+                    : AppText.Get(entry.IsEstimated ? "MediaSizes_Estimated" : "MediaSizes_Exact"),
+                entry.Bytes is >= 0 ? $"{entry.Bytes.Value:N0} bytes" : null))
+            .ToArray();
+
+        _totalFileSizeText = totalBytes is >= 0
+            ? FormatCompactFileSize(totalBytes.Value, false)
+            : AppText.Get("Common_Undetermined");
+        _videoSizeText = FormatAggregateSize(videoEntries);
+        _audioSizeText = FormatAggregateSize(audioEntries);
+        _subtitleAttachmentSizeText = FormatAggregateSize(subtitleEntries.Concat(attachmentEntries));
+
+        var allTracksExact = trackEntries.Count > 0 && trackEntries.All(static entry => entry.Bytes is >= 0 && !entry.IsEstimated);
+        _sizeStatusText = _fullSizeReport is not null
+            ? allTracksExact
+                ? AppText.Get("MediaSizes_ScanComplete")
+                : AppText.Get("MediaSizes_ScanPartial")
+            : allTracksExact
+                ? AppText.Get("MediaSizes_StatisticsAvailable")
+                : AppText.Get("MediaSizes_EstimatesAvailable");
+        _canCalculateExactSizes = !_isCalculatingSizes && _hasInexactTrackSizes && File.Exists(Path);
+        _copyText = BuildCopyText(_sections, _isProcessedBySubMux) + BuildSizeCopyText();
+
+        RaiseSizeProperties();
+    }
+
+    private string BuildSizeCopyText()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine($"[{AppText.Get("MediaSizes_TabTitle")}]");
+        foreach (var row in _sizeRows)
+        {
+            builder.AppendLine($"{row.Name}: {row.Size} · {row.Share} · {row.Basis}");
+        }
+        builder.AppendLine($"{AppText.Get("MediaSizes_TotalFileSize")}: {_totalFileSizeText}");
+        return builder.ToString().TrimEnd();
+    }
+
+    private static long? ReportedSize(IReadOnlyList<long?>? values, int index) =>
+        values is not null && index >= 0 && index < values.Count ? values[index] : null;
+
+    private static string BuildSizeDetails(params string?[] values) =>
+        string.Join(" · ", values.Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!.Trim()));
+
+    private static string FormatAggregateSize(IEnumerable<MediaSizeEntry> source)
+    {
+        var entries = source.ToArray();
+        if (entries.Length == 0)
+        {
+            return "0 B";
+        }
+
+        var known = entries.Where(static entry => entry.Bytes is >= 0).ToArray();
+        if (known.Length == 0)
+        {
+            return AppText.Get("Common_Undetermined");
+        }
+
+        var bytes = known.Sum(static entry => entry.Bytes!.Value);
+        var incomplete = known.Length != entries.Length;
+        return $"{(incomplete ? "≥ " : string.Empty)}{FormatCompactFileSize(bytes, known.Any(static entry => entry.IsEstimated))}";
+    }
+
+    private static string FormatCompactFileSize(long bytes, bool estimated)
+    {
+        var prefix = estimated ? AppText.Get("MediaSizes_ApproximatePrefix") : string.Empty;
+        if (bytes >= 1024L * 1024L * 1024L)
+        {
+            return $"{prefix}{bytes / 1024d / 1024d / 1024d:N2} GiB";
+        }
+        if (bytes >= 1024L * 1024L)
+        {
+            return $"{prefix}{bytes / 1024d / 1024d:N2} MiB";
+        }
+        if (bytes >= 1024L)
+        {
+            return $"{prefix}{bytes / 1024d:N2} KiB";
+        }
+        return $"{prefix}{bytes:N0} B";
+    }
+
+    private static string FormatShare(long? bytes, long? totalBytes)
+    {
+        if (bytes is not >= 0 || totalBytes is not > 0)
+        {
+            return "—";
+        }
+
+        var percentage = bytes.Value * 100d / totalBytes.Value;
+        return percentage is > 0 and < 0.1 ? "<0.1%" : $"{percentage:0.0}%";
+    }
+
+    private void RaiseSizeProperties()
+    {
+        OnPropertyChanged(nameof(SizeRows));
+        OnPropertyChanged(nameof(IsCalculatingSizes));
+        OnPropertyChanged(nameof(CanCalculateExactSizes));
+        OnPropertyChanged(nameof(SizeStatusText));
+        OnPropertyChanged(nameof(TotalFileSizeText));
+        OnPropertyChanged(nameof(VideoSizeText));
+        OnPropertyChanged(nameof(AudioSizeText));
+        OnPropertyChanged(nameof(SubtitleAttachmentSizeText));
+        OnPropertyChanged(nameof(ContainerOverheadText));
+        OnPropertyChanged(nameof(CopyText));
+    }
+
+    private sealed record MediaSizeEntry(
+        string Category,
+        string Name,
+        string Details,
+        long? Bytes,
+        bool IsEstimated);
 
     private string BuildCopyText(
         IEnumerable<MediaInfoDetailSection> sections,

@@ -273,8 +273,8 @@ public sealed class MkvValidationTests
                 {
                   "container":{"type":"Matroska","properties":{"duration":1441118000000}},
                   "tracks":[
-                    {"id":0,"type":"video","codec":"HEVC/H.265/MPEG-H","properties":{"codec_id":"V_MPEGH/ISO/HEVC","pixel_dimensions":"1920x1080","default_duration":41708333,"tag_bps":"1182329"}},
-                    {"id":1,"type":"audio","codec":"Opus","properties":{"codec_id":"A_OPUS","language":"jpn","language_ietf":"ja","audio_channels":2,"audio_sampling_frequency":48000,"tag_bps":"126567"}}
+                    {"id":0,"type":"video","codec":"HEVC/H.265/MPEG-H","properties":{"codec_id":"V_MPEGH/ISO/HEVC","number":1,"pixel_dimensions":"1920x1080","default_duration":41708333,"tag_bps":"1182329","tag_number_of_bytes":"213000000"}},
+                    {"id":1,"type":"audio","codec":"Opus","properties":{"codec_id":"A_OPUS","number":2,"language":"jpn","language_ietf":"ja","audio_channels":2,"audio_sampling_frequency":48000,"tag_bps":"126567","tag_number_of_bytes":"22800000"}}
                   ],
                   "attachments":[],
                   "chapters":[]
@@ -292,10 +292,14 @@ public sealed class MkvValidationTests
             Assert.Equal("1920x1080", video.PixelDimensions);
             Assert.Equal(41_708_333L, video.DefaultDurationNanoseconds);
             Assert.Equal(1_182_329L, video.Bitrate);
+            Assert.Equal(1, video.Number);
+            Assert.Equal(213_000_000L, video.SizeBytes);
             var audio = Assert.Single(inspection.Tracks, static track => track.Type == "audio");
             Assert.Equal(2, audio.AudioChannels);
             Assert.Equal(48_000d, audio.AudioSamplingFrequency);
             Assert.Equal(126_567L, audio.Bitrate);
+            Assert.Equal(2, audio.Number);
+            Assert.Equal(22_800_000L, audio.SizeBytes);
         }
         finally
         {

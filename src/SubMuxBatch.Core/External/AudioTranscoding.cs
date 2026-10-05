@@ -434,6 +434,20 @@ public sealed class BundledFfmpegProvider
         "ffmpeg",
         Version);
 
+    public static string ExecutablePath
+    {
+        get
+        {
+            var architecture = RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.X64 => "win-x64",
+                Architecture.Arm64 => "win-arm64",
+                _ => throw new PlatformNotSupportedException(CoreText.Get("Ffmpeg_UnsupportedArchitecture"))
+            };
+            return Path.Combine(InstallDirectory, architecture, "ffmpeg.exe");
+        }
+    }
+
     public async Task<string> GetExecutablePathAsync(CancellationToken cancellationToken = default)
     {
         var architecture = RuntimeInformation.ProcessArchitecture switch
@@ -450,11 +464,9 @@ public sealed class BundledFfmpegProvider
         {
             expectedHash = await SHA256.HashDataAsync(resource, cancellationToken).ConfigureAwait(false);
         }
-        var directory = Path.Combine(
-            InstallDirectory,
-            architecture);
+        var directory = Path.Combine(InstallDirectory, architecture);
         Directory.CreateDirectory(directory);
-        var destination = Path.Combine(directory, "ffmpeg.exe");
+        var destination = ExecutablePath;
         await ExtractionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
