@@ -349,7 +349,7 @@ public sealed class BatchProcessor(
                     Report(JobState.ConvertingSmiToSrt, 8, CoreText.Get("Batch_ConvertSmiToSrt"));
                     finalSrt = Path.Combine(workspace.Path, "secondary.srt");
                     var normalizedSmi = Path.Combine(workspace.Path, "normalized.smi");
-                    var smiTimestampAdjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSmiTimestampsAsync(
+                    var smiTimestampAdjustments = await SubtitleCompatibilityNormalizer.PrepareSmiForConversionAsync(
                         media.SmiPath!,
                         normalizedSmi,
                         cancellationToken).ConfigureAwait(false);

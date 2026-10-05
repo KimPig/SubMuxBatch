@@ -754,6 +754,42 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Equal(sourceText, await File.ReadAllTextAsync(smi));
     }
 
+    [Fact]
+    public async Task SmiBodyCommentsAreRemovedBeforeLibSeConversion()
+    {
+        var mkv = Path.Combine(_root, "SmiComments.mkv");
+        var smi = Path.Combine(_root, "SmiComments.smi");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string sourceText = "<SAMI>\n"
+                                  + "<HEAD><STYLE><!-- P { color:white; } --></STYLE></HEAD>\n"
+                                  + "<BODY>\n"
+                                  + "<SYNC Start=1000><P Class=KRCC>\n"
+                                  + "<!-- End=5000\nHold=-1|ED\n-->\n"
+                                  + "Visible\n"
+                                  + "<SYNC Start=5000><P Class=KRCC>&nbsp;\n"
+                                  + "</BODY>\n</SAMI>\n";
+        await File.WriteAllTextAsync(smi, sourceText);
+        var media = new MediaSet(new MediaKey(_root, "SmiComments"), mkv, null, null, smi);
+        var runner = new FakeProcessRunner();
+        var converter = new RecordingSubtitleConverter();
+
+        var result = await new BatchProcessor(runner, subtitleConverter: converter).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        var smiConversion = Assert.Single(
+            converter.Calls,
+            call => call.InputExtension.Equals(".smi", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("End=5000", smiConversion.InputText);
+        Assert.DoesNotContain("Hold=-1|ED", smiConversion.InputText);
+        Assert.Contains("<STYLE><!-- P { color:white; } --></STYLE>", smiConversion.InputText);
+        Assert.Contains("Visible", smiConversion.InputText);
+        Assert.Equal(sourceText, await File.ReadAllTextAsync(smi));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

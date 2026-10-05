@@ -103,6 +103,55 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
     }
 
     [Fact]
+    public async Task RubyReadingPreservesItsColourWhileUsingFiftyPercentSize()
+    {
+        var source = Path.Combine(_root, "ruby-colour.srt");
+        var output = Path.Combine(_root, "ruby-colour-prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<FONT color=\"#FFDD11\"></FONT>"
+                            + "<RUBY><FONT color=\"#FFDD11\">惑星</FONT>"
+                            + "<RT><RP>(</RP><FONT color=\"#FFDD11\">ほし</FONT><RP>)</RP></RT>"
+                            + "</RUBY><FONT color=\"#FFDD11\">の</FONT>"
+                            + "<FONT color=\"#EE9011\">隅</FONT>"
+                            + "<FONT color=\"#DD4411\">々まで</FONT><br>행성 구석구석까지\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output, 75);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains("<font color=\"#FFDD11\">惑星</font>", normalized);
+        Assert.Contains("<font size=\"37.5\" color=\"#FFDD11\">ほし</font>", normalized);
+        Assert.Contains("<font color=\"#FFDD11\">の</font>", normalized);
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task RubyReadingPreservesSupportedFormattingAndOverridesItsOwnSize()
+    {
+        var source = Path.Combine(_root, "ruby-formatting.srt");
+        var output = Path.Combine(_root, "ruby-formatting-prepared.srt");
+        const string text = "1\r\n"
+                            + "00:00:00,000 --> 00:00:01,000\r\n"
+                            + "<font face=\"Outer\" color=\"#112233\">"
+                            + "<ruby>기준<rt><font face=\"Reading\" color=\"#445566\" size=\"99\">"
+                            + "<b><i>reading</i></b><unsupported>text</unsupported>"
+                            + "</font></rt></ruby>뒤"
+                            + "</font>\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        await SubtitleCompatibilityNormalizer.PrepareSrtForAssAsync(source, output, 80);
+
+        var normalized = await File.ReadAllTextAsync(output);
+        Assert.Contains(
+            "<font face=\"Reading\" color=\"#445566\" size=\"40\"><b><i>reading</i></b>text</font>",
+            normalized);
+        Assert.Contains("<font face=\"Outer\" color=\"#112233\">뒤</font>", normalized);
+        Assert.DoesNotContain("size=\"99\"", normalized);
+        Assert.DoesNotContain("unsupported", normalized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CanonicalizesWhitespaceUnquotedColoursAndFontNamesBeforeAssConversion()
     {
         var source = Path.Combine(_root, "legacy-font-spacing.srt");
@@ -370,7 +419,7 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
                             + "</BODY>\r\n</SAMI>\r\n";
         await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
 
-        var adjustments = await SubtitleCompatibilityNormalizer.NormalizeNegativeSmiTimestampsAsync(
+        var adjustments = await SubtitleCompatibilityNormalizer.PrepareSmiForConversionAsync(
             source,
             output);
 
@@ -379,6 +428,44 @@ public sealed class SubtitleCompatibilityNormalizerTests : IDisposable
         Assert.Equal("Start=-1000 ms", adjustment.OriginalRange);
         Assert.Equal("Start=0 ms", adjustment.AdjustedRange);
         Assert.Contains("<SYNC Start=\"0\"><P>Test", await File.ReadAllTextAsync(output));
+        Assert.Equal(text, await File.ReadAllTextAsync(source));
+    }
+
+    [Fact]
+    public async Task RemovesPlaybackCommentsAfterBodyStartsBeforeSmiConversion()
+    {
+        var source = Path.Combine(_root, "comments.smi");
+        var output = Path.Combine(_root, "prepared.smi");
+        const string text = "<SAMI>\r\n"
+                            + "<HEAD><STYLE><!-- P { color:white; } --></STYLE></HEAD>\r\n"
+                            + "<BODY>\r\n"
+                            + "<Sync Start=1345448><P Class=KRCC>\r\n"
+                            + "<!-- End=1425007\r\n"
+                            + "Hold=-1|ED\r\n"
+                            + "-->\r\n"
+                            + "<FONT color=\"#44ffaa\">S</FONT>ometimes\r\n"
+                            + "<Sync Start=1345511><P Class=KRCC>\r\n"
+                            + "@<br><b>　</b>\r\n"
+                            + "</BODY>\r\n"
+                            + "</SAMI>\r\n"
+                            + "<!-- Hold=-1|ED\r\n"
+                            + "disabled editor backup\r\n"
+                            + "-->\r\n";
+        await File.WriteAllTextAsync(source, text, new UTF8Encoding(false));
+
+        var adjustments = await SubtitleCompatibilityNormalizer.PrepareSmiForConversionAsync(
+            source,
+            output);
+
+        Assert.Empty(adjustments);
+        var prepared = await File.ReadAllTextAsync(output);
+        Assert.Contains("<STYLE><!-- P { color:white; } --></STYLE>", prepared);
+        Assert.DoesNotContain("End=1425007", prepared);
+        Assert.DoesNotContain("Hold=-1|ED", prepared);
+        Assert.DoesNotContain("disabled editor backup", prepared);
+        Assert.Contains("<Sync Start=1345448><P Class=KRCC>", prepared);
+        Assert.Contains("<FONT color=\"#44ffaa\">S</FONT>ometimes", prepared);
+        Assert.Contains("@<br><b>　</b>", prepared);
         Assert.Equal(text, await File.ReadAllTextAsync(source));
     }
 

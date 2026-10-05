@@ -248,7 +248,7 @@ public static partial class SubtitleCompatibilityNormalizer
         return adjustments;
     }
 
-    public static async Task<IReadOnlyList<NegativeSubtitleTimestampAdjustment>> NormalizeNegativeSmiTimestampsAsync(
+    public static async Task<IReadOnlyList<NegativeSubtitleTimestampAdjustment>> PrepareSmiForConversionAsync(
         string sourcePath,
         string outputPath,
         CancellationToken cancellationToken = default)
@@ -268,6 +268,7 @@ public static partial class SubtitleCompatibilityNormalizer
                 "Start=0 ms"));
             return $"{match.Groups["prefix"].Value}0{match.Groups["suffix"].Value}";
         });
+        normalized = RemoveSmiPlaybackComments(normalized);
 
         await File.WriteAllTextAsync(
             outputPath,
@@ -275,6 +276,25 @@ public static partial class SubtitleCompatibilityNormalizer
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             cancellationToken).ConfigureAwait(false);
         return adjustments;
+    }
+
+    private static string RemoveSmiPlaybackComments(string text)
+    {
+        var bodyOpen = SmiBodyOpenTagRegex().Match(text);
+        if (!bodyOpen.Success)
+        {
+            return text;
+        }
+
+        var bodyStart = bodyOpen.Index + bodyOpen.Length;
+        var playbackContent = text[bodyStart..];
+        var normalizedContent = SmiHtmlCommentRegex().Replace(playbackContent, string.Empty);
+        if (string.Equals(playbackContent, normalizedContent, StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        return string.Concat(text.AsSpan(0, bodyStart), normalizedContent);
     }
 
     public static async Task<SrtFormattingPreparationResult> PrepareSrtForAssAsync(
@@ -682,15 +702,65 @@ public static partial class SubtitleCompatibilityNormalizer
             content = RubyBaseTagRegex().Replace(content, string.Empty);
             return RubyTextRegex().Replace(content, readingMatch =>
             {
-                var reading = StripTags(readingMatch.Groups["text"].Value).Trim();
-                return reading.Length == 0
+                var reading = SanitizeRubyReadingMarkup(readingMatch.Groups["text"].Value);
+                return StripTags(reading).Trim().Length == 0
                     ? string.Empty
-                    : $"<font size=\"{size}\">{WebUtility.HtmlEncode(reading)}</font>";
+                    : $"<font size=\"{size}\">{reading}</font>";
             });
         });
 
         // Avoid literal tag leakage for malformed or unclosed ruby fragments.
         return OrphanRubyTagRegex().Replace(result, string.Empty);
+    }
+
+    private static string SanitizeRubyReadingMarkup(string text) =>
+        AnyHtmlTagRegex().Replace(text, static match => SanitizeRubyReadingTag(match.Value)).Trim();
+
+    private static string SanitizeRubyReadingTag(string tag)
+    {
+        var match = RubyReadingSupportedTagRegex().Match(tag);
+        if (!match.Success)
+        {
+            return string.Empty;
+        }
+
+        var name = match.Groups["name"].Value.ToLowerInvariant();
+        var isClosing = match.Groups["slash"].Length > 0;
+        var isSelfClosing = tag.TrimEnd().EndsWith("/>", StringComparison.Ordinal);
+        if (name == "br")
+        {
+            return isClosing ? string.Empty : "<br>";
+        }
+
+        if (name != "font")
+        {
+            if (isSelfClosing)
+            {
+                return string.Empty;
+            }
+
+            return isClosing ? $"</{name}>" : $"<{name}>";
+        }
+
+        if (isClosing)
+        {
+            return "</font>";
+        }
+
+        if (isSelfClosing)
+        {
+            return string.Empty;
+        }
+
+        var normalized = NormalizeFontTag(tag);
+        var attributes = ParseNormalizedFontAttributes(normalized)
+            .Where(static attribute =>
+                attribute.Name.Equals("color", StringComparison.OrdinalIgnoreCase)
+                || attribute.Name.Equals("face", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var builder = new StringBuilder();
+        AppendFontOpenTag(builder, attributes);
+        return builder.ToString();
     }
 
     private static string NormalizeSupportedHtmlTags(string text)
@@ -971,6 +1041,9 @@ public static partial class SubtitleCompatibilityNormalizer
     [GeneratedRegex(@"<\s*(?<slash>/?)\s*(?<name>font|b|i|u|s|br)\b", RegexOptions.IgnoreCase)]
     private static partial Regex SupportedTagNameRegex();
 
+    [GeneratedRegex(@"^<\s*(?<slash>/?)\s*(?<name>font|b|i|u|s|br)\b[^>]*>$", RegexOptions.IgnoreCase)]
+    private static partial Regex RubyReadingSupportedTagRegex();
+
     [GeneratedRegex(@"<font\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex FontTagRegex();
 
@@ -1022,6 +1095,12 @@ public static partial class SubtitleCompatibilityNormalizer
         @"(?<prefix><sync\b[^>]*\bstart\s*=\s*[""']?)(?<value>-\d+)(?<suffix>[""']?[^>]*>)",
         RegexOptions.IgnoreCase)]
     private static partial Regex SmiSyncTagRegex();
+
+    [GeneratedRegex(@"<body\b[^>]*>", RegexOptions.IgnoreCase)]
+    private static partial Regex SmiBodyOpenTagRegex();
+
+    [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline)]
+    private static partial Regex SmiHtmlCommentRegex();
 
     private sealed record SrtCueCandidate(
         int CueStartLine,

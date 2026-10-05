@@ -649,7 +649,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var stylePath = Path.Combine(root, "style.ass");
             var assPath = Path.Combine(root, "Korean.ass");
             var roundTripSrtPath = Path.Combine(root, "round-trip.srt");
-            const string smi = "<SAMI><BODY><SYNC Start=0><P Class=KRCC><FONT COLOR=\"#00FF00\"><B>안녕하세요</B></FONT> <RUBY><RB>漢</RB><RT>かん</RT></RUBY><SYNC Start=1000><P Class=KRCC>&nbsp;</BODY></SAMI>";
+            const string smi = "<SAMI><BODY><SYNC Start=0><P Class=KRCC><FONT COLOR=\"#00FF00\"><B>안녕하세요</B></FONT> <RUBY><RB>漢</RB><RT><FONT COLOR=\"#00FF00\">かん</FONT></RT></RUBY><SYNC Start=1000><P Class=KRCC>&nbsp;</BODY></SAMI>";
             await File.WriteAllTextAsync(smiPath, smi, Encoding.GetEncoding(949));
 
             var client = new LibSeSubtitleConverter();
@@ -669,7 +669,7 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             var normalized = await File.ReadAllTextAsync(normalizedSrtPath);
             Assert.DoesNotContain("<FONT", normalized, StringComparison.Ordinal);
             Assert.DoesNotContain("<RUBY", normalized, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("漢<font size=\"21\">かん</font>", normalized);
+            Assert.Contains("漢<font size=\"21\" color=\"#00FF00\">かん</font>", normalized);
 
             await File.WriteAllTextAsync(
                 stylePath,
@@ -689,7 +689,13 @@ public sealed class ExternalToolSmokeTests(ITestOutputHelper output)
             Assert.Contains(@"\b1", ass, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("漢", ass);
             Assert.Contains("かん", ass);
-            Assert.Contains(@"\fs21", ass, StringComparison.OrdinalIgnoreCase);
+            var readingIndex = ass.IndexOf("かん", StringComparison.Ordinal);
+            var readingOverrideStart = ass.LastIndexOf('{', readingIndex);
+            var readingOverrideEnd = ass.IndexOf('}', readingOverrideStart);
+            Assert.True(readingOverrideStart >= 0 && readingOverrideEnd > readingOverrideStart);
+            var readingOverride = ass[readingOverrideStart..(readingOverrideEnd + 1)];
+            Assert.Contains(@"\fs21", readingOverride, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(@"\c&H00ff00&", readingOverride, StringComparison.OrdinalIgnoreCase);
 
             await client.ConvertAsync(
                 assPath,
