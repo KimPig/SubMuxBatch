@@ -95,6 +95,42 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task SmiCueThatCollapsesAtAssPrecisionCompletesWithoutAWarning()
+    {
+        var mkv = Path.Combine(_root, "ShortCue.mkv");
+        var smi = Path.Combine(_root, "ShortCue.smi");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(
+            smi,
+            "<SAMI><BODY>"
+            + "<SYNC Start=0><P>First"
+            + "<SYNC Start=1000><P>Transient"
+            + "<SYNC Start=1003><P>Visible"
+            + "<SYNC Start=2000><P>&nbsp;"
+            + "</BODY></SAMI>");
+        var media = new MediaSet(new MediaKey(_root, "ShortCue"), mkv, null, null, smi);
+        var runner = new FakeProcessRunner();
+        var progressMessages = new List<string>();
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { AttachAssStyleFonts = false },
+            CreateDependencies(),
+            new InlineProgress<JobProgress>(update => progressMessages.Add(update.Message)));
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Empty(result.Warnings);
+        Assert.Contains("Transient", runner.MuxedSrtText);
+        Assert.DoesNotContain("Transient", runner.MuxedAssText);
+        Assert.Contains(progressMessages, message =>
+            message.Contains("ASS 시간 정밀도", StringComparison.Ordinal)
+            && message.Contains("1개", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SolidLapseResultIsMuxedWithoutSrtMarkerThenBackedUpAndCommitted()
     {
         var mkv = Path.Combine(_root, "Synced.mkv");

@@ -569,8 +569,37 @@ public sealed class BatchProcessor(
                 finalAss,
                 verifiedAss,
                 cancellationToken).ConfigureAwait(false);
-            AddNegativeTimestampWarnings("ASS", finalAssAdjustments);
             finalAss = verifiedAss;
+
+            string? assValidationSourceText = null;
+            IReadOnlySet<int> assPrecisionCollapsedCueNumbers = new HashSet<int>();
+            if (assValidationSourceSrt is not null)
+            {
+                assValidationSourceText = await File.ReadAllTextAsync(
+                    assValidationSourceSrt,
+                    cancellationToken).ConfigureAwait(false);
+                assPrecisionCollapsedCueNumbers =
+                    SubtitleConversionValidator.FindAssPrecisionCollapsedSrtCues(
+                        assValidationSourceText,
+                        finalAssAdjustments);
+                if (assPrecisionCollapsedCueNumbers.Count > 0)
+                {
+                    Report(
+                        JobState.Verifying,
+                        27,
+                        CoreText.Get(
+                            "Batch_AssPrecisionCollapsedCuesRemoved",
+                            assPrecisionCollapsedCueNumbers.Count));
+                }
+            }
+
+            AddNegativeTimestampWarnings(
+                "ASS",
+                finalAssAdjustments
+                    .Where(adjustment =>
+                        adjustment.CueNumber is not { } cueNumber
+                        || !assPrecisionCollapsedCueNumbers.Contains(cueNumber))
+                    .ToArray());
 
             if (assValidationSourceSrt is not null)
             {
@@ -580,8 +609,9 @@ public sealed class BatchProcessor(
                     var optimizedAss = AssInlineTagOptimizer.OptimizeGeneratedAss(generatedAss);
                     SubtitleConversionValidator.ValidateAssOptimization(generatedAss, optimizedAss);
                     SubtitleConversionValidator.ValidateSrtToAss(
-                        await File.ReadAllTextAsync(assValidationSourceSrt, cancellationToken).ConfigureAwait(false),
-                        optimizedAss);
+                        assValidationSourceText!,
+                        optimizedAss,
+                        assPrecisionCollapsedCueNumbers);
                     if (!string.Equals(generatedAss, optimizedAss, StringComparison.Ordinal))
                     {
                         await File.WriteAllTextAsync(

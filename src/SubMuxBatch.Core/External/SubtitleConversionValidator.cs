@@ -63,27 +63,63 @@ public static partial class SubtitleConversionValidator
         }
     }
 
-    public static void ValidateSrtToAss(string preparedSrt, string convertedAss)
+    public static IReadOnlySet<int> FindAssPrecisionCollapsedSrtCues(
+        string preparedSrt,
+        IReadOnlyList<NegativeSubtitleTimestampAdjustment> assAdjustments)
+    {
+        ArgumentNullException.ThrowIfNull(preparedSrt);
+        ArgumentNullException.ThrowIfNull(assAdjustments);
+
+        var srtCues = ParseSrt(preparedSrt);
+        var collapsedCueNumbers = new HashSet<int>();
+        foreach (var adjustment in assAdjustments)
+        {
+            if (adjustment.Kind != SubtitleTimestampAdjustmentKind.RemovedInvalidRange
+                || adjustment.CueNumber is not { } cueNumber
+                || cueNumber < 1
+                || cueNumber > srtCues.Count)
+            {
+                continue;
+            }
+
+            var source = srtCues[cueNumber - 1];
+            var duration = source.EndMilliseconds - source.StartMilliseconds;
+            if (duration is > 0 and < 10)
+            {
+                collapsedCueNumbers.Add(cueNumber);
+            }
+        }
+
+        return collapsedCueNumbers;
+    }
+
+    public static void ValidateSrtToAss(
+        string preparedSrt,
+        string convertedAss,
+        IReadOnlySet<int>? ignoredSrtCueNumbers = null)
     {
         ArgumentNullException.ThrowIfNull(preparedSrt);
         ArgumentNullException.ThrowIfNull(convertedAss);
 
-        var srtCues = ParseSrt(preparedSrt);
+        var srtCues = ParseSrt(preparedSrt)
+            .Select(static (cue, index) => new IndexedSrtCue(index + 1, cue))
+            .Where(cue => ignoredSrtCueNumbers?.Contains(cue.Number) != true)
+            .ToArray();
         var assCues = ParseAss(convertedAss);
         var defaultStyle = ParseDefaultStyle(convertedAss);
-        if (srtCues.Count != assCues.Count)
+        if (srtCues.Length != assCues.Count)
         {
             throw new InvalidDataException(CoreText.Get(
                 "Subtitle_AssValidationCueCount",
-                srtCues.Count,
+                srtCues.Length,
                 assCues.Count));
         }
 
-        for (var index = 0; index < srtCues.Count; index++)
+        for (var index = 0; index < srtCues.Length; index++)
         {
-            var source = srtCues[index];
+            var source = srtCues[index].Cue;
             var target = assCues[index];
-            var cueNumber = index + 1;
+            var cueNumber = srtCues[index].Number;
             if (Math.Abs(source.StartMilliseconds - target.StartMilliseconds) > 15
                 || Math.Abs(source.EndMilliseconds - target.EndMilliseconds) > 15)
             {
@@ -501,6 +537,7 @@ public static partial class SubtitleConversionValidator
         $"{milliseconds / 3_600_000:00}:{milliseconds / 60_000 % 60:00}:{milliseconds / 1_000 % 60:00}.{milliseconds % 1_000:000}";
 
     private sealed record SrtCue(long StartMilliseconds, long EndMilliseconds, string Text);
+    private sealed record IndexedSrtCue(int Number, SrtCue Cue);
     private sealed record AssCue(long StartMilliseconds, long EndMilliseconds, string Text);
     private sealed record InlineStyleState(
         string? FontName,

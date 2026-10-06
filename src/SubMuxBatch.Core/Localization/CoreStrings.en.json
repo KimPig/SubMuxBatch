@@ -21,6 +21,7 @@
   "Batch_NegativeSubtitleTimestampRemoved": "The subtitle at {0} line {1} ends before the video starts and was removed from the working subtitle: {2}",
   "Batch_InvalidSubtitleTimestampRangeRemoved": "The subtitle at {0} line {1} ends before or at its start time and was removed from the working subtitle: {2}",
   "Batch_InvalidSubtitleTimestampRemoved": "The timestamp at {0} line {1} could not be parsed and was removed from the working subtitle: {2}",
+  "Batch_AssPrecisionCollapsedCuesRemoved": "Removed {0} subtitle cue(s) from the ASS because they became zero-length at ASS timestamp precision.",
   "Batch_SkipNoValidSubtitleCues": "No valid subtitle cues remained after normalization, so no output file was created.",
   "Batch_FindFonts": "Finding installed fonts required by the ASS styles.",
   "Batch_BundledFontSelected": "The '{0}' font is not installed in Windows; using the bundled font.",

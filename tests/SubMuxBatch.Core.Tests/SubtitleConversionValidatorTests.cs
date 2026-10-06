@@ -229,6 +229,57 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
     }
 
     [Fact]
+    public void AcceptsAValidMillisecondCueThatCollapsesAtAssTimestampPrecision()
+    {
+        const string srt = "1\n"
+                           + "00:00:01,000 --> 00:00:01,003\n"
+                           + "Transient\n\n"
+                           + "2\n"
+                           + "00:00:01,003 --> 00:00:02,000\n"
+                           + "Visible\n";
+        const string ass = "[Events]\n"
+                           + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                           + "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Visible\n";
+        NegativeSubtitleTimestampAdjustment[] adjustments =
+        [
+            new(
+                3,
+                "0:00:01.00 --> 0:00:01.00",
+                string.Empty,
+                SubtitleTimestampAdjustmentKind.RemovedInvalidRange,
+                CueNumber: 1)
+        ];
+
+        var collapsed = SubtitleConversionValidator.FindAssPrecisionCollapsedSrtCues(
+            srt,
+            adjustments);
+
+        Assert.Contains(1, collapsed);
+        Assert.Throws<InvalidDataException>(() =>
+            SubtitleConversionValidator.ValidateSrtToAss(srt, ass));
+        SubtitleConversionValidator.ValidateSrtToAss(srt, ass, collapsed);
+    }
+
+    [Fact]
+    public void DoesNotClassifyALongerCueAsAnAssPrecisionCollapse()
+    {
+        const string srt = "1\n00:00:01,000 --> 00:00:01,010\nText\n";
+        NegativeSubtitleTimestampAdjustment[] adjustments =
+        [
+            new(
+                3,
+                "0:00:01.00 --> 0:00:01.00",
+                string.Empty,
+                SubtitleTimestampAdjustmentKind.RemovedInvalidRange,
+                CueNumber: 1)
+        ];
+
+        Assert.Empty(SubtitleConversionValidator.FindAssPrecisionCollapsedSrtCues(
+            srt,
+            adjustments));
+    }
+
+    [Fact]
     public async Task ReportsUnrecognizedFontColourWithoutBlockingConversion()
     {
         var source = Path.Combine(_root, "invalid-colour.srt");

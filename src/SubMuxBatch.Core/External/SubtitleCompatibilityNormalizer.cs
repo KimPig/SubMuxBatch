@@ -18,7 +18,8 @@ public sealed record NegativeSubtitleTimestampAdjustment(
     int LineNumber,
     string OriginalRange,
     string AdjustedRange,
-    SubtitleTimestampAdjustmentKind Kind = SubtitleTimestampAdjustmentKind.Adjusted)
+    SubtitleTimestampAdjustmentKind Kind = SubtitleTimestampAdjustmentKind.Adjusted,
+    int? CueNumber = null)
 {
     public bool Removed => Kind != SubtitleTimestampAdjustmentKind.Adjusted;
 }
@@ -179,8 +180,10 @@ public static partial class SubtitleCompatibilityNormalizer
         var adjustments = new List<NegativeSubtitleTimestampAdjustment>();
         var currentLine = 1;
         var scannedIndex = 0;
+        var cueNumber = 0;
         var normalized = AssDialogueLineRegex().Replace(text, match =>
         {
+            cueNumber++;
             AdvanceLineNumber(text, match.Index, ref currentLine, ref scannedIndex);
             var originalStart = match.Groups["start"].Value.Trim();
             var originalEnd = match.Groups["end"].Value.Trim();
@@ -199,7 +202,8 @@ public static partial class SubtitleCompatibilityNormalizer
                     currentLine,
                     originalRange,
                     string.Empty,
-                    SubtitleTimestampAdjustmentKind.RemovedInvalidTimestamp));
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidTimestamp,
+                    cueNumber));
                 return match.Groups["cr"].Value;
             }
 
@@ -209,7 +213,8 @@ public static partial class SubtitleCompatibilityNormalizer
                     currentLine,
                     originalRange,
                     string.Empty,
-                    SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart));
+                    SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart,
+                    cueNumber));
                 return match.Groups["cr"].Value;
             }
 
@@ -220,7 +225,8 @@ public static partial class SubtitleCompatibilityNormalizer
                     currentLine,
                     originalRange,
                     string.Empty,
-                    SubtitleTimestampAdjustmentKind.RemovedInvalidRange));
+                    SubtitleTimestampAdjustmentKind.RemovedInvalidRange,
+                    cueNumber));
                 return match.Groups["cr"].Value;
             }
 
@@ -235,7 +241,8 @@ public static partial class SubtitleCompatibilityNormalizer
             adjustments.Add(new NegativeSubtitleTimestampAdjustment(
                 currentLine,
                 originalRange,
-                adjustedRange));
+                adjustedRange,
+                CueNumber: cueNumber));
 
             return $"{match.Groups["prefix"].Value}{adjustedStart},{adjustedEnd}{match.Groups["suffix"].Value}{match.Groups["cr"].Value}";
         });
