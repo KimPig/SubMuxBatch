@@ -2103,6 +2103,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             target.Error = null;
             target.SetRuntimeWarnings([]);
             target.SetLapseAdjustments([]);
+            target.SetLapseChecks([]);
             target.ResetElapsedTime();
         }
         SetOverallProgress(0);
@@ -2225,6 +2226,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 target.Error = result.Error;
                 target.SetRuntimeWarnings(result.Warnings);
                 target.SetLapseAdjustments(result.LapseAdjustments ?? []);
+                target.SetLapseChecks(result.LapseChecks ?? []);
                 if (result.State is JobState.Succeeded or JobState.SucceededWithWarnings or JobState.Skipped)
                 {
                     target.Progress = 100;
@@ -2633,13 +2635,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CancelButton.IsEnabled = false;
         OverallStatusText.Text = status;
         foreach (var item in Jobs.Where(static job => job.State is JobState.Queued
+                     or JobState.AnalyzingInput
+                     or JobState.AnalyzingLapse
                      or JobState.Muxing
                      or JobState.ConvertingAssToSrt
                      or JobState.ConvertingSmiToSrt
                      or JobState.ConvertingSrtToAss
                      or JobState.UpdatingAssStyle
+                     or JobState.PreparingFonts
+                     or JobState.PreparingJob
+                     or JobState.BackingUp
                      or JobState.ConvertingAudio
-                     or JobState.Verifying))
+                     or JobState.Verifying
+                     or JobState.Finalizing))
         {
             item.State = JobState.Cancelling;
         }

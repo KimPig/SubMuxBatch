@@ -18,6 +18,7 @@ internal sealed record MaintenanceApplicationPolicy(
     bool ApplyAudio,
     bool RefreshTags,
     bool ApplyLapse,
+    bool CheckLapse,
     bool RemoveOtherSubtitles,
     bool RemoveChapters,
     bool CleanMetadata);
@@ -44,9 +45,11 @@ public sealed class MaintenanceProcessor(
         var warnings = new List<string>();
         var lapseAppliedSummaries = new List<string>();
         var lapseAdjustments = new List<LapseAppliedAdjustment>();
+        var lapseCheckSummaries = new List<LapseCheckSummary>();
         settings.Validate();
         var policy = CreateApplicationPolicy(settings);
         var updateLapseFromCurrentPreset = policy.ApplyLapse;
+        var checkLapseFromCurrentPreset = policy.CheckLapse;
         var lapseProfile = LapseSubtitleMetadata.CreateSettingsProfile(settings);
         if (!string.Equals(Path.GetExtension(sourcePath), ".mkv", StringComparison.OrdinalIgnoreCase))
         {
@@ -67,7 +70,7 @@ public sealed class MaintenanceProcessor(
 
             void ReportLapseStart(string target, int percent) =>
                 Report(
-                    JobState.UpdatingAssStyle,
+                    JobState.AnalyzingLapse,
                     percent,
                     CoreText.Get(
                         "Maintenance_LapseStart",
@@ -77,7 +80,7 @@ public sealed class MaintenanceProcessor(
 
             void ReportLapseApplied(string target, LapseSyncResult result, int percent)
             {
-                Report(JobState.UpdatingAssStyle, percent, DescribeLapseApplied(target, result));
+                Report(JobState.AnalyzingLapse, percent, DescribeLapseApplied(target, result));
                 lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
                 lapseAdjustments.Add(new LapseAppliedAdjustment(
                     target,
@@ -91,7 +94,7 @@ public sealed class MaintenanceProcessor(
                         target,
                         result.Mode);
                     warnings.Add(strategyWarning);
-                    Report(JobState.UpdatingAssStyle, percent, strategyWarning);
+                    Report(JobState.AnalyzingLapse, percent, strategyWarning);
                 }
                 if (!settings.WarnOnLargeLapseCorrection
                     || result.MaximumAdjustmentMilliseconds is not { } maximumAdjustment
@@ -106,7 +109,7 @@ public sealed class MaintenanceProcessor(
                     FormatLapseSeconds(maximumAdjustment),
                     FormatLapseSeconds(settings.LapseLargeCorrectionWarningSeconds * 1000));
                 warnings.Add(warning);
-                Report(JobState.UpdatingAssStyle, percent, warning);
+                Report(JobState.AnalyzingLapse, percent, warning);
             }
 
             void ReportLapseNotApplied(
@@ -115,14 +118,83 @@ public sealed class MaintenanceProcessor(
                 int percent,
                 bool addSummaryWarning = true)
             {
-                Report(JobState.UpdatingAssStyle, percent, DescribeLapseWarning(target, result));
+                Report(JobState.AnalyzingLapse, percent, DescribeLapseWarning(target, result));
                 if (!addSummaryWarning) return;
                 var summary = CoreText.Get("Maintenance_LapseSummaryKept");
                 if (!warnings.Contains(summary, StringComparer.Ordinal)) warnings.Add(summary);
             }
 
+            void ReportLapseCheckStart(string target, int percent) =>
+                Report(
+                    JobState.AnalyzingLapse,
+                    percent,
+                    CoreText.Get(
+                        "Lapse_CheckStart",
+                        target,
+                        settings.LapseMode.ToString().ToLowerInvariant(),
+                        settings.LapseConfidenceThreshold));
+
+            void ReportLapseCheckResult(string target, LapseSyncResult result, int percent)
+            {
+                if (!result.Applied)
+                {
+                    lapseCheckSummaries.Add(new LapseCheckSummary(
+                        target,
+                        result.Verdict.ToString().ToLowerInvariant(),
+                        result.Mode,
+                        result.OffsetMilliseconds,
+                        null,
+                        settings.LapseValidationWarningSeconds));
+                    var warning = CoreText.Get(
+                        "Lapse_CheckInconclusive",
+                        target,
+                        result.Error ?? result.Verdict.ToString().ToLowerInvariant());
+                    warnings.Add(warning);
+                    Report(JobState.AnalyzingLapse, percent, warning);
+                    return;
+                }
+
+                var maximumAdjustment = result.MaximumAdjustmentMilliseconds
+                                        ?? Math.Abs(result.OffsetMilliseconds ?? 0);
+                lapseCheckSummaries.Add(new LapseCheckSummary(
+                    target,
+                    result.Verdict.ToString().ToLowerInvariant(),
+                    result.Mode,
+                    result.OffsetMilliseconds,
+                    maximumAdjustment,
+                    settings.LapseValidationWarningSeconds));
+                Report(
+                    JobState.AnalyzingLapse,
+                    percent,
+                    IsShiftMode(result.Mode) && result.OffsetMilliseconds is { } offsetMilliseconds
+                        ? CoreText.Get(
+                            "Lapse_CheckShifted",
+                            target,
+                            result.Mode,
+                            result.Reference,
+                            FormatSignedLapseSeconds(offsetMilliseconds))
+                        : CoreText.Get(
+                            "Lapse_CheckSolid",
+                            target,
+                            result.Mode,
+                            result.Reference,
+                            FormatLapseSeconds(maximumAdjustment)));
+                if (maximumAdjustment < settings.LapseValidationWarningSeconds * 1000)
+                {
+                    return;
+                }
+
+                var thresholdWarning = CoreText.Get(
+                    "Lapse_CheckThresholdWarning",
+                    target,
+                    FormatLapseSeconds(maximumAdjustment),
+                    FormatLapseSeconds(settings.LapseValidationWarningSeconds * 1000));
+                warnings.Add(thresholdWarning);
+                Report(JobState.AnalyzingLapse, percent, thresholdWarning);
+            }
+
             var mkvMerge = new MkvMergeClient(dependencies.MkvMerge.Path, processRunner);
-            Report(JobState.Verifying, 4, CoreText.Get("Maintenance_Analyze"));
+            Report(JobState.AnalyzingInput, 4, CoreText.Get("Maintenance_Analyze"));
             var sourceIdentification = await mkvMerge.IdentifyAsync(sourcePath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var sourceInspection = sourceIdentification.Inspection;
@@ -134,7 +206,7 @@ public sealed class MaintenanceProcessor(
                 return new JobResult(JobState.Skipped, null, warnings, CoreText.Get("Maintenance_NotSubMux"));
             }
             Report(
-                JobState.Verifying,
+                JobState.AnalyzingInput,
                 6,
                 CoreText.Get("Maintenance_TagDetected", tags.Version ?? "—"));
 
@@ -153,12 +225,12 @@ public sealed class MaintenanceProcessor(
             var candidates = new List<AssCandidate>();
             var extractedSubtitlePaths = new Dictionary<int, string>();
             var ambiguousAssWarningPending = false;
-            if ((policy.UpdateSubtitles || policy.RefreshTags || updateLapseFromCurrentPreset)
+            if ((policy.UpdateSubtitles || policy.RefreshTags || settings.MaintenanceUpdateLapseSync)
                 && assTracks.Length > 0)
             {
                 Report(JobState.UpdatingAssStyle, 12, CoreText.Get("Maintenance_CheckAssStyle"));
                 var tracksToExtract = assTracks
-                    .Concat(policy.UpdateSubtitles || updateLapseFromCurrentPreset
+                    .Concat(policy.UpdateSubtitles || updateLapseFromCurrentPreset || checkLapseFromCurrentPreset
                         ? sourceInspection.Tracks.Where(IsSrtTrack)
                         : [])
                     .Where(static track => track.Id is not null)
@@ -191,7 +263,9 @@ public sealed class MaintenanceProcessor(
                         SubMuxMetadata.ReadSubtitleSourceMarker(text),
                         SubMuxMetadata.HasSubtitleSourceMarker(text),
                         SubMuxMetadata.HasAssLapseMarker(text),
-                        SubMuxMetadata.ReadAssLapseProfile(text)));
+                        SubMuxMetadata.HasAssLapseMetadata(text),
+                        SubMuxMetadata.ReadAssLapseProfile(text),
+                        SubMuxMetadata.ReadAssLapsePolicy(text)));
                 }
 
                 var internallyMarked = candidates.Where(static candidate => candidate.SubtitleSource is not null).ToArray();
@@ -242,7 +316,7 @@ public sealed class MaintenanceProcessor(
                     managedAssTrack = selected.Track;
                     managedSrtTrack = SelectStandardSrtTrack(sourceInspection.Tracks, selected.Track);
                     if (managedSrtTrack?.Id is { } managedSrtId
-                        && (policy.UpdateSubtitles || updateLapseFromCurrentPreset))
+                        && (policy.UpdateSubtitles || updateLapseFromCurrentPreset || checkLapseFromCurrentPreset))
                     {
                         managedSrtExtractedPath = extractedSubtitlePaths.GetValueOrDefault(managedSrtId);
                     }
@@ -286,13 +360,114 @@ public sealed class MaintenanceProcessor(
                     string? independentSrtLapseSourceHash = null;
                     string? lapseSourceHash = null;
                     string? synchronizedSrt = null;
+                    LapseSyncResult? lapseCheckResult = null;
+                    string? lapseCheckSourceHash = null;
+                    LapseSyncResult? independentSrtLapseCheckResult = null;
+                    string? independentSrtLapseCheckSourceHash = null;
+
+                    async Task<LapseSyncResult> RunCheckAsync(
+                        string target,
+                        string inputPath,
+                        string outputPath)
+                    {
+                        ReportLapseCheckStart(target, 16);
+                        var result = await RunLapseAsync(
+                                sourcePath,
+                                inputPath,
+                                outputPath,
+                                sourceInspection,
+                                settings,
+                                ManagedSubtitleTrackIds(managedAssTrack, managedSrtTrack),
+                                16,
+                                progress,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        if (result.Applied)
+                        {
+                            LapseSubtitleMetadata.ValidateTimingOnlyChange(inputPath, outputPath);
+                            result = result with
+                            {
+                                MaximumAdjustmentMilliseconds =
+                                    LapseSubtitleMetadata.MeasureMaximumTimingAdjustmentMilliseconds(
+                                        inputPath,
+                                        outputPath)
+                            };
+                        }
+                        ReportLapseCheckResult(target, result, 17);
+                        return result;
+                    }
+
+                    if (checkLapseFromCurrentPreset)
+                    {
+                        if (IsGeneratedAssSource(sourceKind))
+                        {
+                            if (managedSrtTrack?.Id is not { } checkSrtId)
+                            {
+                                warnings.Add(CoreText.Get("Maintenance_StandardSrtMissing"));
+                            }
+                            else
+                            {
+                                var checkSrt = managedSrtExtractedPath
+                                               ?? Path.Combine(workspace, $"check-standard-{checkSrtId}.srt");
+                                if (managedSrtExtractedPath is null)
+                                {
+                                    await ExtractTrackAsync(
+                                            mkvExtractPath,
+                                            sourcePath,
+                                            checkSrtId,
+                                            checkSrt,
+                                            cancellationToken)
+                                        .ConfigureAwait(false);
+                                }
+                                lapseCheckSourceHash = LapseSubtitleMetadata.ComputeSha256(checkSrt);
+                                lapseCheckResult = await RunCheckAsync(
+                                        "SRT→ASS",
+                                        checkSrt,
+                                        Path.Combine(workspace, "lapse-check-primary.srt"))
+                                    .ConfigureAwait(false);
+                            }
+                        }
+                        else
+                        {
+                            lapseCheckSourceHash = LapseSubtitleMetadata.ComputeSha256(selected.Path);
+                            lapseCheckResult = await RunCheckAsync(
+                                    assIsCanonical && managedSrtTrack?.Id is not null ? "ASS→SRT" : "ASS",
+                                    selected.Path,
+                                    Path.Combine(workspace, "lapse-check-primary.ass"))
+                                .ConfigureAwait(false);
+
+                            if (!assIsCanonical && managedSrtTrack?.Id is { } independentCheckSrtId)
+                            {
+                                var independentCheckSrt = managedSrtExtractedPath
+                                                          ?? Path.Combine(workspace, $"check-independent-{independentCheckSrtId}.srt");
+                                if (managedSrtExtractedPath is null)
+                                {
+                                    await ExtractTrackAsync(
+                                            mkvExtractPath,
+                                            sourcePath,
+                                            independentCheckSrtId,
+                                            independentCheckSrt,
+                                            cancellationToken)
+                                        .ConfigureAwait(false);
+                                }
+                                independentSrtLapseCheckSourceHash =
+                                    LapseSubtitleMetadata.ComputeSha256(independentCheckSrt);
+                                independentSrtLapseCheckResult = await RunCheckAsync(
+                                        "SRT",
+                                        independentCheckSrt,
+                                        Path.Combine(workspace, "lapse-check-independent.srt"))
+                                    .ConfigureAwait(false);
+                            }
+                        }
+                    }
                     var mayRunLapse = ShouldRunLapse(
                         updateLapseFromCurrentPreset,
                         settings.MaintenanceForceLapseResync,
                         sourceKind,
                         selected.HasLapseMarker,
                         selected.LapseProfile,
-                        lapseProfile);
+                        lapseProfile,
+                        selected.LapsePolicy);
                     if (mayRunLapse && IsGeneratedAssSource(sourceKind))
                     {
                         var standardSrt = managedSrtTrack;
@@ -431,7 +606,7 @@ public sealed class MaintenanceProcessor(
                                         {
                                             pairedSubtitleReady = false;
                                             Report(
-                                                JobState.UpdatingAssStyle,
+                                                JobState.AnalyzingLapse,
                                                 17,
                                                 CoreText.Get("Maintenance_LapsePairNotUpdated"));
                                             warnings.Add(CoreText.Get("Maintenance_LapsePairNotUpdated"));
@@ -442,7 +617,7 @@ public sealed class MaintenanceProcessor(
                                         pairedSubtitleReady = false;
                                         ReportLapseNotApplied("SRT", srtLapseResult, 17, addSummaryWarning: false);
                                         Report(
-                                            JobState.UpdatingAssStyle,
+                                            JobState.AnalyzingLapse,
                                             17,
                                             CoreText.Get("Maintenance_LapsePairNotUpdated"));
                                         warnings.Add(CoreText.Get("Maintenance_LapsePairNotUpdated"));
@@ -470,10 +645,19 @@ public sealed class MaintenanceProcessor(
                             ReportLapseNotApplied(primaryLapseTarget, lapseResult, 17);
                         }
                     }
+                    else if (updateLapseFromCurrentPreset
+                             && !settings.MaintenanceForceLapseResync
+                             && string.Equals(selected.LapsePolicy, "DISABLED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Report(
+                            JobState.AnalyzingLapse,
+                            17,
+                            CoreText.Get("Maintenance_LapseDisabledPolicy"));
+                    }
                     else if (updateLapseFromCurrentPreset && selected.HasLapseMarker)
                     {
                         Report(
-                            JobState.UpdatingAssStyle,
+                            JobState.AnalyzingLapse,
                             17,
                             CoreText.Get(selected.LapseProfile is null
                                 ? "Maintenance_LapseLegacyMarker"
@@ -482,7 +666,7 @@ public sealed class MaintenanceProcessor(
                     else if (updateLapseFromCurrentPreset && selected.SubtitleSource is null)
                     {
                         var warning = CoreText.Get("Maintenance_LapseSourceUnknown");
-                        Report(JobState.UpdatingAssStyle, 17, warning);
+                        Report(JobState.AnalyzingLapse, 17, warning);
                         warnings.Add(warning);
                     }
                     if (synchronizedSrt is not null)
@@ -586,9 +770,55 @@ public sealed class MaintenanceProcessor(
                                     : "SRT");
                         }
                     }
-                    else if (selected.HasLapseMarker)
+                    else if (selected.HasLapseMetadata)
                     {
                         updated = SubMuxMetadata.CopyAssLapseMarkers(selected.Text, updated);
+                    }
+
+                    var disabledPolicyBlocksApply = updateLapseFromCurrentPreset
+                                                    && !settings.MaintenanceForceLapseResync
+                                                    && string.Equals(
+                                                        selected.LapsePolicy,
+                                                        "DISABLED",
+                                                        StringComparison.OrdinalIgnoreCase);
+                    if (settings.MaintenanceUpdateLapseSync && !disabledPolicyBlocksApply)
+                    {
+                        updated = SubMuxMetadata.AddOrReplaceAssLapsePolicyMarker(
+                            updated,
+                            settings.EnableLapseSync);
+                    }
+
+                    if (checkLapseFromCurrentPreset && lapseCheckResult is not null)
+                    {
+                        updated = SubMuxMetadata.AddOrReplaceAssLapseCheckMarker(
+                            updated,
+                            lapseCheckResult.Mode,
+                            lapseCheckResult.Verdict.ToString().ToLowerInvariant(),
+                            lapseCheckSourceHash ?? string.Empty,
+                            lapseCheckResult.MaximumAdjustmentMilliseconds,
+                            profile: lapseProfile,
+                            reference: lapseCheckResult.Reference,
+                            offsetMilliseconds: lapseCheckResult.OffsetMilliseconds,
+                            ratio: lapseCheckResult.Ratio,
+                            confidence: lapseCheckResult.Confidence,
+                            sourceFormat: GetPrimaryLapseSourceFormat(sourceKind));
+                    }
+                    if (checkLapseFromCurrentPreset && independentSrtLapseCheckResult is not null)
+                    {
+                        updated = SubMuxMetadata.AddOrReplaceAssSrtLapseCheckMarker(
+                            updated,
+                            independentSrtLapseCheckResult.Mode,
+                            independentSrtLapseCheckResult.Verdict.ToString().ToLowerInvariant(),
+                            independentSrtLapseCheckSourceHash ?? string.Empty,
+                            independentSrtLapseCheckResult.MaximumAdjustmentMilliseconds,
+                            profile: lapseProfile,
+                            reference: independentSrtLapseCheckResult.Reference,
+                            offsetMilliseconds: independentSrtLapseCheckResult.OffsetMilliseconds,
+                            ratio: independentSrtLapseCheckResult.Ratio,
+                            confidence: independentSrtLapseCheckResult.Confidence,
+                            sourceFormat: string.Equals(sourceKind, "ASS+SMI", StringComparison.OrdinalIgnoreCase)
+                                ? "SMI"
+                                : "SRT");
                     }
 
                     if (policy.UpdateSubtitles
@@ -653,7 +883,7 @@ public sealed class MaintenanceProcessor(
                     }
                     else if (policy.UpdateSubtitles && !shouldUpdateStyle)
                     {
-                        Report(JobState.Verifying, 20, CoreText.Get("Maintenance_OriginalAssRetained"));
+                        Report(JobState.UpdatingAssStyle, 20, CoreText.Get("Maintenance_OriginalAssRetained"));
                     }
                 }
                 else if (ambiguousAssWarningPending || sourceKind is null)
@@ -700,7 +930,7 @@ public sealed class MaintenanceProcessor(
                         }
                         replacementSrtTrack = managedSrtTrack;
                     }
-                    Report(JobState.Verifying, 22, CoreText.Get("Maintenance_SubtitleProtectionReady"));
+                    Report(JobState.PreparingJob, 22, CoreText.Get("Maintenance_SubtitleProtectionReady"));
                 }
                 else
                 {
@@ -715,12 +945,12 @@ public sealed class MaintenanceProcessor(
                 && managedSubtitleIdentityIsCertain
                 && IsGeneratedAssSource(sourceKind))
             {
-                Report(JobState.Verifying, 24, CoreText.Get("Maintenance_PrepareFont"));
+                Report(JobState.PreparingFonts, 24, CoreText.Get("Maintenance_PrepareFont"));
                 var resolvedFonts = await ResolveStyleFontsAsync(assPathForFonts, settings, workspace, cancellationToken)
                     .ConfigureAwait(false);
                 fontAttachments = resolvedFonts.Attachments;
                 Report(
-                    JobState.Verifying,
+                    JobState.PreparingFonts,
                     26,
                     ProcessingDecisionFormatter.DescribeFontAttachments(fontAttachments));
                 removeExistingStyleFonts = policy.RemoveFonts
@@ -743,7 +973,7 @@ public sealed class MaintenanceProcessor(
                 conversionPlan = AudioConversionPlanner.Create(sourceInspection, settings);
                 foreach (var message in ProcessingDecisionFormatter.DescribeAudioPlan(sourceInspection, conversionPlan))
                 {
-                    Report(JobState.Verifying, 27, message);
+                    Report(JobState.PreparingJob, 27, message);
                 }
                 var generated = new List<GeneratedAudioTrack>();
                 for (var index = 0; index < conversionPlan.Transcodes.Count; index++)
@@ -783,7 +1013,7 @@ public sealed class MaintenanceProcessor(
                 await File.WriteAllTextAsync(updatedTagsPath, updatedTags, new UTF8Encoding(false), cancellationToken)
                     .ConfigureAwait(false);
                 Report(
-                    JobState.Verifying,
+                    JobState.PreparingJob,
                     54,
                     settings.AddSubMuxTag
                         ? CoreText.Get("Maintenance_TagsRefreshed", SubMuxMetadata.GetApplicationVersion())
@@ -811,7 +1041,7 @@ public sealed class MaintenanceProcessor(
                 ? sourcePath
                 : GetAvailablePath(preferredOutput);
             Report(
-                JobState.Verifying,
+                JobState.PreparingJob,
                 56,
                 CoreText.Get(
                     settings.MaintenanceReplaceOriginal ? "Maintenance_OutputReplace" : "Maintenance_OutputCopy",
@@ -880,11 +1110,18 @@ public sealed class MaintenanceProcessor(
                 if (lapseAppliedSummaries.Count > 0)
                 {
                     Report(
-                        JobState.Verifying,
+                        JobState.Finalizing,
                         99,
                         CoreText.Get(
                             "Maintenance_LapseSummaryApplied",
                             string.Join(" · ", lapseAppliedSummaries)));
+                }
+                foreach (var check in lapseCheckSummaries)
+                {
+                    Report(
+                        JobState.Finalizing,
+                        99,
+                        DescribeLapseCheckSummary(check));
                 }
                 if (originalBackupPath is not null && File.Exists(originalBackupPath))
                 {
@@ -898,7 +1135,7 @@ public sealed class MaintenanceProcessor(
                     try
                     {
                         RestoreOriginal(sourcePath, originalBackupPath);
-                        Report(JobState.Verifying, 99, CoreText.Get("Maintenance_SourceRestored"));
+                        Report(JobState.Finalizing, 99, CoreText.Get("Maintenance_SourceRestored"));
                     }
                     catch (Exception restoreException)
                     {
@@ -917,7 +1154,8 @@ public sealed class MaintenanceProcessor(
                 warnings.Count == 0 ? JobState.Succeeded : JobState.SucceededWithWarnings,
                 outputPath,
                 warnings,
-                LapseAdjustments: lapseAdjustments);
+                LapseAdjustments: lapseAdjustments,
+                LapseChecks: lapseCheckSummaries);
         }
         catch (JobSkippedException exception)
         {
@@ -1134,7 +1372,7 @@ public sealed class MaintenanceProcessor(
         {
             var reference = LapseReferenceSelector.Select(sourceInspection, settings, excludedSubtitleTrackIds);
             progress?.Report(new JobProgress(
-                JobState.UpdatingAssStyle,
+                JobState.AnalyzingLapse,
                 progressPercent,
                 CoreText.Get("Maintenance_LapseReferenceSelected", reference.Description)));
             var result = await _lapseSynchronizer.SynchronizeAsync(
@@ -1147,7 +1385,7 @@ public sealed class MaintenanceProcessor(
                 && string.Equals(result.Reference, "vad", StringComparison.OrdinalIgnoreCase))
             {
                 progress?.Report(new JobProgress(
-                    JobState.UpdatingAssStyle,
+                    JobState.AnalyzingLapse,
                     progressPercent,
                     CoreText.Get("Maintenance_LapseReferenceFallback", reference.Description)));
             }
@@ -1193,6 +1431,33 @@ public sealed class MaintenanceProcessor(
 
     private static string FormatLapseSeconds(double milliseconds) =>
         (milliseconds / 1000).ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string FormatSignedLapseSeconds(double milliseconds) =>
+        (milliseconds / 1000).ToString("+0.###;-0.###;0", CultureInfo.InvariantCulture);
+
+    private static bool IsShiftMode(string mode) =>
+        mode.EndsWith("/shifted", StringComparison.OrdinalIgnoreCase)
+        || mode.Equals("shifted", StringComparison.OrdinalIgnoreCase);
+
+    private static string DescribeLapseCheckSummary(LapseCheckSummary check)
+    {
+        if (check.MaximumAdjustmentMilliseconds is not { } maximumAdjustment)
+        {
+            return CoreText.Get("Lapse_CheckSummaryInconclusive", check.Target);
+        }
+
+        return IsShiftMode(check.Mode) && check.OffsetMilliseconds is { } offsetMilliseconds
+            ? CoreText.Get(
+                "Lapse_CheckSummaryShifted",
+                check.Target,
+                FormatSignedLapseSeconds(offsetMilliseconds),
+                FormatLapseSeconds(check.WarningThresholdSeconds * 1000))
+            : CoreText.Get(
+                "Lapse_CheckSummarySolid",
+                check.Target,
+                FormatLapseSeconds(maximumAdjustment),
+                FormatLapseSeconds(check.WarningThresholdSeconds * 1000));
+    }
 
     private static AssCandidate? SelectStyledTrack(IReadOnlyList<AssCandidate> candidates)
     {
@@ -1286,7 +1551,9 @@ public sealed class MaintenanceProcessor(
         string? SubtitleSource,
         bool HasSubtitleSourceMarker,
         bool HasLapseMarker,
-        string? LapseProfile);
+        bool HasLapseMetadata,
+        string? LapseProfile,
+        string? LapsePolicy);
 
     private sealed record ParsedTags(bool ProcessedBySubMux, string? Version);
 
@@ -1395,6 +1662,9 @@ public sealed class MaintenanceProcessor(
             settings.MaintenanceApplyAudioSettings,
             settings.MaintenanceRefreshTags,
             settings.MaintenanceUpdateLapseSync && settings.EnableLapseSync,
+            settings.MaintenanceUpdateLapseSync
+            && !settings.EnableLapseSync
+            && settings.EnableLapseValidationCheck,
             settings.MaintenanceUpdateAssStyle && settings.RemoveExistingSubtitles,
             settings.RemoveChapters,
             settings.CleanOutputMetadata);
@@ -1406,9 +1676,11 @@ public sealed class MaintenanceProcessor(
         string? sourceKind,
         bool hasMarker,
         string? storedProfile,
-        string currentProfile)
+        string currentProfile,
+        string? storedPolicy = null)
     {
         if (!applyCurrentLapseSettings) return false;
+        if (!force && string.Equals(storedPolicy, "DISABLED", StringComparison.OrdinalIgnoreCase)) return false;
         if (sourceKind is null && !force) return false;
         if (force || !hasMarker) return true;
         return storedProfile is not null

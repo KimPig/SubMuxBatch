@@ -123,6 +123,57 @@ public sealed class SubMuxMetadataTests
     }
 
     [Fact]
+    public void DisabledPolicyAndValidationCheckAreMetadataButNotAppliedLapseMarkers()
+    {
+        const string ass = "[Script Info]\nScriptType: v4.00+\n[Events]\n";
+
+        var marked = SubMuxMetadata.AddOrReplaceAssLapsePolicyMarker(ass, enabled: false);
+        marked = SubMuxMetadata.AddOrReplaceAssLapseCheckMarker(
+            marked,
+            "auto/shifted",
+            "solid",
+            new string('a', 64),
+            maximumAdjustmentMilliseconds: 2000,
+            profile: "AUTO|AUDIOONLY|6|8",
+            reference: "vad",
+            offsetMilliseconds: -2000,
+            ratio: 1,
+            confidence: 10,
+            sourceFormat: "SRT");
+
+        Assert.Equal("DISABLED", SubMuxMetadata.ReadAssLapsePolicy(marked));
+        Assert.True(SubMuxMetadata.HasAssLapseMetadata(marked));
+        Assert.False(SubMuxMetadata.HasAssLapseMarker(marked));
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_RESULT=solid", marked);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_MAX_ADJUSTMENT_MS=2000", marked);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_OFFSET_MS=-2000", marked);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_SYNC=", marked);
+    }
+
+    [Fact]
+    public void AppliedLapseMarkerReplacesAStaleValidationCheckForTheSameTrack()
+    {
+        const string ass = "[Script Info]\nScriptType: v4.00+\n[Events]\n";
+        var checkedAss = SubMuxMetadata.AddOrReplaceAssLapseCheckMarker(
+            ass,
+            "auto/shifted",
+            "solid",
+            new string('a', 64),
+            maximumAdjustmentMilliseconds: 2000);
+
+        var applied = SubMuxMetadata.AddOrReplaceAssLapseMarker(
+            checkedAss,
+            "auto/shifted",
+            "solid",
+            new string('b', 64));
+
+        Assert.True(SubMuxMetadata.HasAssLapseMarker(applied));
+        Assert.Contains("; SUBMUX_LAPSE_SYNC=", applied);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_CHECK=", applied);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_CHECK_RESULT=", applied);
+    }
+
+    [Fact]
     public void CopiesLapseMarkersWithoutCopyingDialogueTextThatLooksLikeAMarker()
     {
         const string source = """
@@ -135,6 +186,10 @@ public sealed class SubMuxMetadataTests
                               ; SUBMUX_LAPSE_SRT_SYNC=2026.10.04
                               ; SUBMUX_LAPSE_SRT_MODE=auto/shifted
                               ; SUBMUX_LAPSE_SRT_SOURCE_FORMAT=SMI
+                              ; SUBMUX_LAPSE_POLICY=DISABLED
+                              ; SUBMUX_LAPSE_CHECK=2026.10.08
+                              ; SUBMUX_LAPSE_CHECK_RESULT=solid
+                              ; SUBMUX_LAPSE_CHECK_MAX_ADJUSTMENT_MS=1200
                               ScriptType: v4.00+
                               [Events]
                               Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,; SUBMUX_LAPSE_RESULT=fake
@@ -151,6 +206,10 @@ public sealed class SubMuxMetadataTests
         Assert.Contains("; SUBMUX_LAPSE_SRT_SYNC=2026.10.04", copied);
         Assert.Contains("; SUBMUX_LAPSE_SRT_MODE=auto/shifted", copied);
         Assert.Contains("; SUBMUX_LAPSE_SRT_SOURCE_FORMAT=SMI", copied);
+        Assert.Contains("; SUBMUX_LAPSE_POLICY=DISABLED", copied);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK=2026.10.08", copied);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_RESULT=solid", copied);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_MAX_ADJUSTMENT_MS=1200", copied);
         Assert.DoesNotContain("SUBMUX_LAPSE_RESULT=fake", copied);
     }
 

@@ -681,7 +681,9 @@ public sealed class LapseIntegrationTests : IDisposable
             LapseMode = LapseSyncMode.Split,
             LapseConfidenceThreshold = 5,
             WarnOnLargeLapseCorrection = false,
-            LapseLargeCorrectionWarningSeconds = 2.5
+            LapseLargeCorrectionWarningSeconds = 2.5,
+            EnableLapseValidationCheck = false,
+            LapseValidationWarningSeconds = 1.5
         };
         var preset = ProcessingPresetSettings.Capture(source);
         var target = new AppSettings { Language = AppLanguage.Korean, ConcurrentJobCount = 2 };
@@ -694,6 +696,8 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.Equal(5, target.LapseConfidenceThreshold);
         Assert.False(target.WarnOnLargeLapseCorrection);
         Assert.Equal(2.5, target.LapseLargeCorrectionWarningSeconds);
+        Assert.False(target.EnableLapseValidationCheck);
+        Assert.Equal(1.5, target.LapseValidationWarningSeconds);
         Assert.Equal(AppLanguage.Korean, target.Language);
         Assert.Equal(2, target.ConcurrentJobCount);
     }
@@ -710,6 +714,8 @@ public sealed class LapseIntegrationTests : IDisposable
             LapseConfidenceThreshold = 5,
             WarnOnLargeLapseCorrection = false,
             LapseLargeCorrectionWarningSeconds = 2.5,
+            EnableLapseValidationCheck = true,
+            LapseValidationWarningSeconds = 1.5,
             MaintenanceUpdateLapseSync = true,
             MaintenanceForceLapseResync = true,
             SelectedPresetId = "preset"
@@ -724,6 +730,8 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.Equal(5, copy.LapseConfidenceThreshold);
         Assert.False(copy.WarnOnLargeLapseCorrection);
         Assert.Equal(2.5, copy.LapseLargeCorrectionWarningSeconds);
+        Assert.True(copy.EnableLapseValidationCheck);
+        Assert.Equal(1.5, copy.LapseValidationWarningSeconds);
         Assert.True(copy.MaintenanceUpdateLapseSync);
         Assert.True(copy.MaintenanceForceLapseResync);
         Assert.Equal("preset", copy.SelectedPresetId);
@@ -754,6 +762,53 @@ public sealed class LapseIntegrationTests : IDisposable
         Assert.True(settings.WarnOnLargeLapseCorrection);
         Assert.Equal(1, settings.LapseLargeCorrectionWarningSeconds);
         settings.Validate();
+    }
+
+    [Fact]
+    public void ValidationOnlyLapseDefaultsToOffWithOneSecondThreshold()
+    {
+        var settings = new AppSettings();
+
+        Assert.False(settings.EnableLapseValidationCheck);
+        Assert.Equal(1, settings.LapseValidationWarningSeconds);
+        settings.Validate();
+    }
+
+    [Fact]
+    public void ActiveLapseSynchronizationAndValidationOnlyModeAreMutuallyExclusive()
+    {
+        Assert.Throws<InvalidOperationException>(() => new AppSettings
+        {
+            EnableLapseSync = true,
+            EnableLapseValidationCheck = true
+        }.Validate());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.0009)]
+    [InlineData(3600.1)]
+    public void ValidationOnlyLapseRejectsInvalidThreshold(double value)
+    {
+        Assert.Throws<InvalidOperationException>(() => new AppSettings
+        {
+            EnableLapseValidationCheck = true,
+            LapseValidationWarningSeconds = value
+        }.Validate());
+    }
+
+    [Theory]
+    [InlineData(0.001)]
+    [InlineData(0.01)]
+    [InlineData(0.12)]
+    [InlineData(3600)]
+    public void ValidationOnlyLapseAcceptsMillisecondPrecisionThresholds(double value)
+    {
+        new AppSettings
+        {
+            EnableLapseValidationCheck = true,
+            LapseValidationWarningSeconds = value
+        }.Validate();
     }
 
     [Theory]

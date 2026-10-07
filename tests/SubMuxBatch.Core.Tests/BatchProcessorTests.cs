@@ -141,7 +141,12 @@ public sealed class BatchProcessorTests : IDisposable
         var media = new MediaSet(new MediaKey(_root, "Synced"), mkv, null, srt, null);
         var runner = new FakeProcessRunner();
         var progressMessages = new List<string>();
-        var progress = new InlineProgress<JobProgress>(update => progressMessages.Add(update.Message));
+        var progressUpdates = new List<JobProgress>();
+        var progress = new InlineProgress<JobProgress>(update =>
+        {
+            progressMessages.Add(update.Message);
+            progressUpdates.Add(update);
+        });
 
         var result = await new BatchProcessor(
             runner,
@@ -186,11 +191,195 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.Contains(progressMessages, message =>
             message.Contains("LAPSE 요약", StringComparison.Ordinal)
             && message.Contains("-2000ms", StringComparison.Ordinal));
+        Assert.Contains(progressUpdates, update => update.State == JobState.AnalyzingInput);
+        Assert.Contains(progressUpdates, update => update.State == JobState.AnalyzingLapse);
+        Assert.Contains(progressUpdates, update => update.State == JobState.PreparingJob);
+        Assert.Contains(progressUpdates, update => update.State == JobState.Muxing);
+        Assert.Contains(progressUpdates, update => update.State == JobState.Verifying);
+        Assert.Contains(progressUpdates, update =>
+            update.State == JobState.Finalizing
+            && update.Message.Contains("LAPSE 요약", StringComparison.Ordinal));
         var adjustment = Assert.Single(result.LapseAdjustments!);
         Assert.Equal("SRT", adjustment.Target);
         Assert.Equal("auto/shifted", adjustment.Mode);
         Assert.Equal(-2000, adjustment.OffsetMilliseconds);
         Assert.Equal(2000, adjustment.MaximumAdjustmentMilliseconds);
+    }
+
+    [Fact]
+    public async Task ValidationOnlyLapseWarnsWithoutChangingOrArchivingTheExternalSubtitle()
+    {
+        var mkv = Path.Combine(_root, "CheckOnly.mkv");
+        var srt = Path.Combine(_root, "CheckOnly.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string original = "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n";
+        await File.WriteAllTextAsync(srt, original);
+        var media = new MediaSet(new MediaKey(_root, "CheckOnly"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+        var progressMessages = new List<string>();
+        var progress = new InlineProgress<JobProgress>(update => progressMessages.Add(update.Message));
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: new SolidLapseSynchronizer()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = false,
+                EnableLapseValidationCheck = true,
+                LapseValidationWarningSeconds = 1,
+                LapseReference = LapseReferenceMode.AudioOnly
+            },
+            CreateDependencies(),
+            progress);
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        Assert.Equal(original, await File.ReadAllTextAsync(srt));
+        Assert.Contains("00:00:03,000 --> 00:00:04,000", runner.MuxedSrtText);
+        Assert.DoesNotContain("00:00:01,000 --> 00:00:02,000", runner.MuxedSrtText);
+        Assert.False(Directory.Exists(Path.Combine(_root, ExternalSubtitleReplacement.ArchiveDirectoryName)));
+        Assert.Empty(result.LapseAdjustments!);
+        var check = Assert.Single(result.LapseChecks!);
+        Assert.Equal("SRT", check.Target);
+        Assert.Equal("solid", check.Verdict);
+        Assert.Equal("auto/shifted", check.Mode);
+        Assert.Equal(-2000, check.OffsetMilliseconds);
+        Assert.Equal(2000, check.MaximumAdjustmentMilliseconds);
+        Assert.Equal(1, check.WarningThresholdSeconds);
+        Assert.Contains(result.Warnings, warning =>
+            warning.Contains("경고 기준 이상", StringComparison.Ordinal)
+            && warning.Contains("예상 최대 2초", StringComparison.Ordinal)
+            && warning.Contains("1초", StringComparison.Ordinal));
+        Assert.Contains("; SUBMUX_LAPSE_POLICY=DISABLED", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_RESULT=solid", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_OFFSET_MS=-2000", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_MAX_ADJUSTMENT_MS=2000", runner.MuxedAssText);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_SYNC=", runner.MuxedAssText);
+        Assert.DoesNotContain(LapseSubtitleMetadata.SrtMarkerPrefix, runner.MuxedSrtText);
+        Assert.Contains(progressMessages, message =>
+            message.Contains("LAPSE 검사 요약", StringComparison.Ordinal)
+            && message.Contains("예상 이동 -2초", StringComparison.Ordinal)
+            && message.Contains("기준 1초", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ValidationOnlyLapseBelowThresholdKeepsOriginalTimingAndCompletesNormally()
+    {
+        var mkv = Path.Combine(_root, "CheckOnlyBelow.mkv");
+        var srt = Path.Combine(_root, "CheckOnlyBelow.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string original = "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n";
+        await File.WriteAllTextAsync(srt, original);
+        var media = new MediaSet(new MediaKey(_root, "CheckOnlyBelow"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: new SolidLapseSynchronizer()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = false,
+                EnableLapseValidationCheck = true,
+                LapseValidationWarningSeconds = 3,
+                LapseReference = LapseReferenceMode.AudioOnly
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Empty(result.Warnings);
+        var check = Assert.Single(result.LapseChecks!);
+        Assert.Equal("auto/shifted", check.Mode);
+        Assert.Equal(-2000, check.OffsetMilliseconds);
+        Assert.Equal(2000, check.MaximumAdjustmentMilliseconds);
+        Assert.Equal(3, check.WarningThresholdSeconds);
+        Assert.Equal(original, await File.ReadAllTextAsync(srt));
+        Assert.Contains("00:00:03,000 --> 00:00:04,000", runner.MuxedSrtText);
+        Assert.DoesNotContain("00:00:01,000 --> 00:00:02,000", runner.MuxedSrtText);
+        Assert.Contains("; SUBMUX_LAPSE_POLICY=DISABLED", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_RESULT=solid", runner.MuxedAssText);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_SYNC=", runner.MuxedAssText);
+    }
+
+    [Fact]
+    public async Task DisabledLapseRecordsPolicyInAssWithoutRunningAValidationCheck()
+    {
+        var mkv = Path.Combine(_root, "Disabled.mkv");
+        var srt = Path.Combine(_root, "Disabled.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string original = "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n";
+        await File.WriteAllTextAsync(srt, original);
+        var media = new MediaSet(new MediaKey(_root, "Disabled"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+        var synchronizer = new SolidLapseSynchronizer();
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: synchronizer).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = false,
+                EnableLapseValidationCheck = false
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Succeeded, result.State);
+        Assert.Equal(0, synchronizer.Calls);
+        Assert.Equal(original, await File.ReadAllTextAsync(srt));
+        Assert.Contains("; SUBMUX_LAPSE_POLICY=DISABLED", runner.MuxedAssText);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_CHECK=", runner.MuxedAssText);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_SYNC=", runner.MuxedAssText);
+        Assert.DoesNotContain(LapseSubtitleMetadata.SrtMarkerPrefix, runner.MuxedSrtText);
+    }
+
+    [Fact]
+    public async Task InconclusiveValidationOnlyLapseWarnsAndLeavesSubtitleUntouched()
+    {
+        var mkv = Path.Combine(_root, "CheckOnlyUnsure.mkv");
+        var srt = Path.Combine(_root, "CheckOnlyUnsure.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        const string original = "1\r\n00:00:03,000 --> 00:00:04,000\r\nText\r\n";
+        await File.WriteAllTextAsync(srt, original);
+        var media = new MediaSet(new MediaKey(_root, "CheckOnlyUnsure"), mkv, null, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(
+            runner,
+            subtitleConverter: new RecordingSubtitleConverter(),
+            lapseSynchronizer: new UnsureLapseSynchronizer()).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings
+            {
+                AttachAssStyleFonts = false,
+                EnableLapseSync = false,
+                EnableLapseValidationCheck = true,
+                LapseReference = LapseReferenceMode.AudioOnly
+            },
+            CreateDependencies());
+
+        Assert.Equal(JobState.SucceededWithWarnings, result.State);
+        var check = Assert.Single(result.LapseChecks!);
+        Assert.Equal("unsure", check.Verdict);
+        Assert.Equal("auto/shifted", check.Mode);
+        Assert.Null(check.MaximumAdjustmentMilliseconds);
+        Assert.Equal(original, await File.ReadAllTextAsync(srt));
+        Assert.Contains("00:00:03,000 --> 00:00:04,000", runner.MuxedSrtText);
+        Assert.DoesNotContain("00:00:01,000 --> 00:00:02,000", runner.MuxedSrtText);
+        Assert.Contains(result.Warnings, warning => warning.Contains("검사 결과", StringComparison.Ordinal));
+        Assert.Contains("; SUBMUX_LAPSE_POLICY=DISABLED", runner.MuxedAssText);
+        Assert.Contains("; SUBMUX_LAPSE_CHECK_RESULT=unsure", runner.MuxedAssText);
+        Assert.DoesNotContain("; SUBMUX_LAPSE_SYNC=", runner.MuxedAssText);
     }
 
     [Fact]

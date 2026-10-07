@@ -74,7 +74,8 @@ public static partial class SubtitleConversionValidator
         var collapsedCueNumbers = new HashSet<int>();
         foreach (var adjustment in assAdjustments)
         {
-            if (adjustment.Kind != SubtitleTimestampAdjustmentKind.RemovedInvalidRange
+            if (adjustment.Kind is not (SubtitleTimestampAdjustmentKind.RemovedInvalidRange
+                    or SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart)
                 || adjustment.CueNumber is not { } cueNumber
                 || cueNumber < 1
                 || cueNumber > srtCues.Count)

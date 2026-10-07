@@ -122,7 +122,11 @@ public partial class SettingsWindow : Window
         MaintenanceLegacyAssStylesTextBox.Text = settings.MaintenanceLegacyAssStyles;
         MaintenanceOutputPrefixTextBox.Text = settings.MaintenanceOutputPrefix;
         MaintenanceReplaceOriginalCheckBox.IsChecked = settings.MaintenanceReplaceOriginal;
-        EnableLapseSyncCheckBox.IsChecked = settings.EnableLapseSync;
+        LapseAutoSyncRadioButton.IsChecked = settings.EnableLapseSync;
+        LapseValidationRadioButton.IsChecked = !settings.EnableLapseSync && settings.EnableLapseValidationCheck;
+        LapseDisabledRadioButton.IsChecked = !settings.EnableLapseSync && !settings.EnableLapseValidationCheck;
+        LapseValidationWarningSecondsTextBox.Text =
+            settings.LapseValidationWarningSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         LapseModeComboBox.SelectedValue = settings.LapseMode.ToString();
         UseEmbeddedSubtitleReferenceCheckBox.IsChecked =
             settings.LapseReference != LapseReferenceMode.AudioOnly;
@@ -133,6 +137,7 @@ public partial class SettingsWindow : Window
             settings.LapseLargeCorrectionWarningSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         MaintenanceUpdateLapseSyncCheckBox.IsChecked = settings.MaintenanceUpdateLapseSync;
         MaintenanceForceLapseResyncCheckBox.IsChecked = settings.MaintenanceForceLapseResync;
+        UpdateLapseOperationControls();
         UpdateLapseSplitPenaltyControls();
         UpdateMaintenanceOutputControls();
         _playResX = settings.PlayResX;
@@ -231,7 +236,22 @@ public partial class SettingsWindow : Window
             updated.MaintenanceLegacyAssStyles = MaintenanceLegacyAssStylesTextBox.Text.Trim();
             updated.MaintenanceOutputPrefix = MaintenanceOutputPrefixTextBox.Text.Trim();
             updated.MaintenanceReplaceOriginal = MaintenanceReplaceOriginalCheckBox.IsChecked == true;
-            updated.EnableLapseSync = EnableLapseSyncCheckBox.IsChecked == true;
+            updated.EnableLapseSync = LapseAutoSyncRadioButton.IsChecked == true;
+            updated.EnableLapseValidationCheck = LapseValidationRadioButton.IsChecked == true;
+            if (!double.TryParse(
+                    LapseValidationWarningSecondsTextBox.Text,
+                    NumberStyles.Float,
+                    CultureInfo.CurrentCulture,
+                    out var lapseValidationWarningSeconds)
+                && !double.TryParse(
+                    LapseValidationWarningSecondsTextBox.Text,
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out lapseValidationWarningSeconds))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_LapseValidationThresholdError"));
+            }
+            updated.LapseValidationWarningSeconds = lapseValidationWarningSeconds;
             updated.LapseMode = Enum.TryParse<LapseSyncMode>(LapseModeComboBox.SelectedValue as string, out var lapseMode)
                 ? lapseMode : LapseSyncMode.Auto;
             updated.LapseReference = UseEmbeddedSubtitleReferenceCheckBox.IsChecked == true
@@ -293,6 +313,34 @@ public partial class SettingsWindow : Window
 
     private void LapseModeComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
         UpdateLapseSplitPenaltyControls();
+
+    private void LapseOperationMode_Changed(object sender, RoutedEventArgs e)
+        => UpdateLapseOperationControls();
+
+    private void UpdateLapseOperationControls()
+    {
+        if (LapseDisabledRadioButton is null || LapseAutoSyncRadioButton is null
+            || LapseValidationRadioButton is null || LapseOptionsGrid is null
+            || LapseWarningSection is null || LapseLargeCorrectionWarningPanel is null
+            || LapseValidationThresholdGrid is null || LapseOperationDescriptionTextBlock is null)
+        {
+            return;
+        }
+
+        var syncEnabled = LapseAutoSyncRadioButton.IsChecked == true;
+        var validationEnabled = LapseValidationRadioButton.IsChecked == true;
+        var lapseEnabled = syncEnabled || validationEnabled;
+        LapseOptionsGrid.IsEnabled = lapseEnabled;
+        LapseWarningSection.Visibility = lapseEnabled ? Visibility.Visible : Visibility.Collapsed;
+        LapseLargeCorrectionWarningPanel.Visibility = syncEnabled ? Visibility.Visible : Visibility.Collapsed;
+        LapseValidationThresholdGrid.Visibility = validationEnabled ? Visibility.Visible : Visibility.Collapsed;
+        LapseOperationDescriptionTextBlock.Text = AppText.Get(
+            syncEnabled
+                ? "Settings_LapseOperationAutomaticHelp"
+                : validationEnabled
+                    ? "Settings_LapseOperationValidationHelp"
+                    : "Settings_LapseOperationDisabledHelp");
+    }
 
     private void UpdateLapseSplitPenaltyControls()
     {

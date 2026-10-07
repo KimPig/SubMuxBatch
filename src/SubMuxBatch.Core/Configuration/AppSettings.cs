@@ -54,6 +54,7 @@ public sealed class AppSettings
     public const int MaxConcurrentJobCount = 8;
     public const int MinLapseConfidenceThreshold = 0;
     public const int MaxLapseConfidenceThreshold = 100;
+    public const double MinLapseValidationWarningSeconds = 0.001;
     public const double MinLapseLargeCorrectionWarningSeconds = 0.1;
     public const double MaxLapseLargeCorrectionWarningSeconds = 3600;
     public const double DefaultFileColumnWeight = 2.1;
@@ -124,6 +125,8 @@ public sealed class AppSettings
     public string MaintenanceOutputPrefix { get; set; } = GetDefaultMaintenanceOutputPrefix(AppLanguage.System);
     public bool MaintenanceReplaceOriginal { get; set; }
     public bool EnableLapseSync { get; set; }
+    public bool EnableLapseValidationCheck { get; set; }
+    public double LapseValidationWarningSeconds { get; set; } = 1;
     public LapseSyncMode LapseMode { get; set; } = LapseSyncMode.Auto;
     public LapseReferenceMode LapseReference { get; set; } = LapseReferenceMode.Auto;
     public int LapseSplitPenalty { get; set; } = 6;
@@ -307,6 +310,8 @@ public sealed class AppSettings
         MaintenanceOutputPrefix = MaintenanceOutputPrefix,
         MaintenanceReplaceOriginal = MaintenanceReplaceOriginal,
         EnableLapseSync = EnableLapseSync,
+        EnableLapseValidationCheck = EnableLapseValidationCheck,
+        LapseValidationWarningSeconds = LapseValidationWarningSeconds,
         LapseMode = LapseMode,
         LapseReference = LapseReference,
         LapseSplitPenalty = LapseSplitPenalty,
@@ -346,6 +351,22 @@ public sealed class AppSettings
         if (!Enum.IsDefined(LapseMode) || !Enum.IsDefined(LapseReference))
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapseMode"));
+        }
+
+        if (EnableLapseSync && EnableLapseValidationCheck)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidLapseOperationMode"));
+        }
+
+        if (EnableLapseValidationCheck
+            && (!double.IsFinite(LapseValidationWarningSeconds)
+                || LapseValidationWarningSeconds < MinLapseValidationWarningSeconds
+                || LapseValidationWarningSeconds > MaxLapseLargeCorrectionWarningSeconds))
+        {
+            throw new InvalidOperationException(CoreText.Get(
+                "Settings_InvalidLapseValidationWarning",
+                MinLapseValidationWarningSeconds,
+                MaxLapseLargeCorrectionWarningSeconds));
         }
 
         if (LapseSplitPenalty is < 1 or > 100)

@@ -79,13 +79,19 @@ public enum JobState
     Ready,
     Invalid,
     Queued,
+    AnalyzingInput,
+    AnalyzingLapse,
     ConvertingSmiToSrt,
     ConvertingAssToSrt,
     ConvertingSrtToAss,
     UpdatingAssStyle,
+    PreparingFonts,
+    PreparingJob,
+    BackingUp,
     ConvertingAudio,
     Muxing,
     Verifying,
+    Finalizing,
     Succeeded,
     SucceededWithWarnings,
     Skipped,
@@ -102,11 +108,20 @@ public sealed record LapseAppliedAdjustment(
     long? OffsetMilliseconds,
     long? MaximumAdjustmentMilliseconds);
 
+public sealed record LapseCheckSummary(
+    string Target,
+    string Verdict,
+    string Mode,
+    long? OffsetMilliseconds,
+    long? MaximumAdjustmentMilliseconds,
+    double WarningThresholdSeconds);
+
 public sealed record JobResult(
     JobState State,
     string? OutputPath,
     IReadOnlyList<string> Warnings,
     string? Error = null,
-    IReadOnlyList<LapseAppliedAdjustment>? LapseAdjustments = null);
+    IReadOnlyList<LapseAppliedAdjustment>? LapseAdjustments = null,
+    IReadOnlyList<LapseCheckSummary>? LapseChecks = null);
 
 public sealed class JobSkippedException(string message) : InvalidOperationException(message);

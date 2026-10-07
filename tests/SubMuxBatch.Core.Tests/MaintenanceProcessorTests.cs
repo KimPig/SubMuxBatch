@@ -90,12 +90,20 @@ public sealed class MaintenanceProcessorTests
         Assert.True(policy.ApplyAudio);
         Assert.True(policy.RefreshTags);
         Assert.False(policy.ApplyLapse);
+        Assert.False(policy.CheckLapse);
+
+        settings.EnableLapseValidationCheck = true;
+        policy = MaintenanceProcessor.CreateApplicationPolicy(settings);
+        Assert.False(policy.ApplyLapse);
+        Assert.True(policy.CheckLapse);
 
         settings.AttachAssStyleFonts = true;
         settings.EnableLapseSync = true;
+        settings.EnableLapseValidationCheck = false;
         policy = MaintenanceProcessor.CreateApplicationPolicy(settings);
         Assert.True(policy.AttachFonts);
         Assert.True(policy.ApplyLapse);
+        Assert.False(policy.CheckLapse);
     }
 
     [Fact]
@@ -169,6 +177,27 @@ public sealed class MaintenanceProcessorTests
             hasMarker,
             storedProfile,
             "AUTO|AUTO|6|8"));
+    }
+
+    [Fact]
+    public void DisabledStoredPolicyRequiresForcedMaintenanceResync()
+    {
+        Assert.False(MaintenanceProcessor.ShouldRunLapse(
+            true,
+            false,
+            "SRT",
+            false,
+            null,
+            "AUTO|AUTO|6|8",
+            "DISABLED"));
+        Assert.True(MaintenanceProcessor.ShouldRunLapse(
+            true,
+            true,
+            "SRT",
+            false,
+            null,
+            "AUTO|AUTO|6|8",
+            "DISABLED"));
     }
 
     [Fact]

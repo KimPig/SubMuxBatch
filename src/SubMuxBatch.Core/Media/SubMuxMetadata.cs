@@ -13,6 +13,7 @@ public static class SubMuxMetadata
     public const string ProcessedValue = "Processed by SubMux Batch";
     public const string LegacyCommentTagName = "COMMENT";
     private const string SubtitleSourceMarkerPrefix = "; SUBMUX_SUBTITLE_SOURCE=";
+    private const string LapsePolicyMarkerPrefix = "; SUBMUX_LAPSE_POLICY=";
     private static readonly string[] LapseMarkerNames =
     [
         "SUBMUX_LAPSE_SYNC",
@@ -40,6 +41,36 @@ public static class SubMuxMetadata
         "SUBMUX_LAPSE_SRT_CONFIDENCE",
         "SUBMUX_LAPSE_SRT_SOURCE_FORMAT",
         "SUBMUX_LAPSE_SRT_SOURCE_SHA256"
+    ];
+    private static readonly string[] LapseCheckMarkerNames =
+    [
+        "SUBMUX_LAPSE_CHECK",
+        "SUBMUX_LAPSE_CHECK_VERSION",
+        "SUBMUX_LAPSE_CHECK_MODE",
+        "SUBMUX_LAPSE_CHECK_PROFILE",
+        "SUBMUX_LAPSE_CHECK_REFERENCE",
+        "SUBMUX_LAPSE_CHECK_RESULT",
+        "SUBMUX_LAPSE_CHECK_OFFSET_MS",
+        "SUBMUX_LAPSE_CHECK_MAX_ADJUSTMENT_MS",
+        "SUBMUX_LAPSE_CHECK_RATIO",
+        "SUBMUX_LAPSE_CHECK_CONFIDENCE",
+        "SUBMUX_LAPSE_CHECK_SOURCE_FORMAT",
+        "SUBMUX_LAPSE_CHECK_SOURCE_SHA256"
+    ];
+    private static readonly string[] SrtLapseCheckMarkerNames =
+    [
+        "SUBMUX_LAPSE_SRT_CHECK",
+        "SUBMUX_LAPSE_SRT_CHECK_VERSION",
+        "SUBMUX_LAPSE_SRT_CHECK_MODE",
+        "SUBMUX_LAPSE_SRT_CHECK_PROFILE",
+        "SUBMUX_LAPSE_SRT_CHECK_REFERENCE",
+        "SUBMUX_LAPSE_SRT_CHECK_RESULT",
+        "SUBMUX_LAPSE_SRT_CHECK_OFFSET_MS",
+        "SUBMUX_LAPSE_SRT_CHECK_MAX_ADJUSTMENT_MS",
+        "SUBMUX_LAPSE_SRT_CHECK_RATIO",
+        "SUBMUX_LAPSE_SRT_CHECK_CONFIDENCE",
+        "SUBMUX_LAPSE_SRT_CHECK_SOURCE_FORMAT",
+        "SUBMUX_LAPSE_SRT_CHECK_SOURCE_SHA256"
     ];
 
     private static readonly HashSet<string> ValidSubtitleSources = new(StringComparer.OrdinalIgnoreCase)
@@ -113,6 +144,34 @@ public static class SubMuxMetadata
         return values.Length == 1 ? values[0] : null;
     }
 
+    public static string? ReadAssLapsePolicy(string assText)
+    {
+        ArgumentNullException.ThrowIfNull(assText);
+        var values = ReadScriptInfoValues(assText, LapsePolicyMarkerPrefix)
+            .Select(static value => value.ToUpperInvariant())
+            .Where(static value => value is "ENABLED" or "DISABLED")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return values.Length == 1 ? values[0] : null;
+    }
+
+    public static string AddOrReplaceAssLapsePolicyMarker(string assText, bool enabled)
+    {
+        ArgumentNullException.ThrowIfNull(assText);
+        var newline = assText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var lines = assText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+        var scriptInfo = lines.FindIndex(static line =>
+            string.Equals(line.Trim(), "[Script Info]", StringComparison.OrdinalIgnoreCase));
+        if (scriptInfo < 0)
+        {
+            lines.Insert(0, "[Script Info]");
+            scriptInfo = 0;
+        }
+        RemoveScriptInfoMarkers(lines, scriptInfo, [LapsePolicyMarkerPrefix]);
+        lines.Insert(scriptInfo + 1, $"{LapsePolicyMarkerPrefix}{(enabled ? "ENABLED" : "DISABLED")}");
+        return string.Join(newline, lines);
+    }
+
     public static string AddOrReplaceSubtitleSourceMarker(string assText, string source)
     {
         ArgumentNullException.ThrowIfNull(assText);
@@ -162,6 +221,12 @@ public static class SubMuxMetadata
         ReadScriptInfoValues(assText, "; SUBMUX_LAPSE_SYNC=").Count > 0
         || ReadScriptInfoValues(assText, "; SUBMUX_LAPSE_SRT_SYNC=").Count > 0;
 
+    public static bool HasAssLapseMetadata(string assText) =>
+        HasAssLapseMarker(assText)
+        || ReadScriptInfoValues(assText, LapsePolicyMarkerPrefix).Count > 0
+        || ReadScriptInfoValues(assText, "; SUBMUX_LAPSE_CHECK=").Count > 0
+        || ReadScriptInfoValues(assText, "; SUBMUX_LAPSE_SRT_CHECK=").Count > 0;
+
     public static string AddOrReplaceAssLapseMarker(
         string assText,
         string mode,
@@ -188,7 +253,10 @@ public static class SubMuxMetadata
         RemoveScriptInfoMarkers(
             lines,
             scriptInfo,
-            LapseMarkerNames.Select(static name => $"; {name}=").ToArray());
+            LapseMarkerNames
+                .Concat(LapseCheckMarkerNames)
+                .Select(static name => $"; {name}=")
+                .ToArray());
         var markers = new[]
         {
             $"; SUBMUX_LAPSE_SYNC={applicationVersion ?? GetApplicationVersion()}",
@@ -233,7 +301,10 @@ public static class SubMuxMetadata
         RemoveScriptInfoMarkers(
             lines,
             scriptInfo,
-            SrtLapseMarkerNames.Select(static name => $"; {name}=").ToArray());
+            SrtLapseMarkerNames
+                .Concat(SrtLapseCheckMarkerNames)
+                .Select(static name => $"; {name}=")
+                .ToArray());
         var markers = new[]
         {
             $"; SUBMUX_LAPSE_SRT_SYNC={applicationVersion ?? GetApplicationVersion()}",
@@ -252,13 +323,118 @@ public static class SubMuxMetadata
         return string.Join(newline, lines);
     }
 
+    public static string AddOrReplaceAssLapseCheckMarker(
+        string assText,
+        string mode,
+        string result,
+        string sourceSha256,
+        long? maximumAdjustmentMilliseconds,
+        string? profile = null,
+        string? reference = null,
+        long? offsetMilliseconds = null,
+        double? ratio = null,
+        double? confidence = null,
+        string? sourceFormat = null) =>
+        AddOrReplaceAssLapseCheckMarkerCore(
+            assText,
+            LapseCheckMarkerNames,
+            "SUBMUX_LAPSE_CHECK",
+            mode,
+            result,
+            sourceSha256,
+            maximumAdjustmentMilliseconds,
+            profile,
+            reference,
+            offsetMilliseconds,
+            ratio,
+            confidence,
+            sourceFormat);
+
+    public static string AddOrReplaceAssSrtLapseCheckMarker(
+        string assText,
+        string mode,
+        string result,
+        string sourceSha256,
+        long? maximumAdjustmentMilliseconds,
+        string? profile = null,
+        string? reference = null,
+        long? offsetMilliseconds = null,
+        double? ratio = null,
+        double? confidence = null,
+        string? sourceFormat = null) =>
+        AddOrReplaceAssLapseCheckMarkerCore(
+            assText,
+            SrtLapseCheckMarkerNames,
+            "SUBMUX_LAPSE_SRT_CHECK",
+            mode,
+            result,
+            sourceSha256,
+            maximumAdjustmentMilliseconds,
+            profile,
+            reference,
+            offsetMilliseconds,
+            ratio,
+            confidence,
+            sourceFormat);
+
+    private static string AddOrReplaceAssLapseCheckMarkerCore(
+        string assText,
+        IReadOnlyCollection<string> markerNames,
+        string markerRoot,
+        string mode,
+        string result,
+        string sourceSha256,
+        long? maximumAdjustmentMilliseconds,
+        string? profile,
+        string? reference,
+        long? offsetMilliseconds,
+        double? ratio,
+        double? confidence,
+        string? sourceFormat)
+    {
+        ArgumentNullException.ThrowIfNull(assText);
+        var newline = assText.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var lines = assText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+        var scriptInfo = lines.FindIndex(static line =>
+            string.Equals(line.Trim(), "[Script Info]", StringComparison.OrdinalIgnoreCase));
+        if (scriptInfo < 0)
+        {
+            lines.Insert(0, "[Script Info]");
+            scriptInfo = 0;
+        }
+        RemoveScriptInfoMarkers(
+            lines,
+            scriptInfo,
+            markerNames.Select(static name => $"; {name}=").ToArray());
+        var markers = new[]
+        {
+            $"; {markerRoot}={GetApplicationVersion()}",
+            $"; {markerRoot}_VERSION={Dependencies.BundledLapseProvider.Version}",
+            $"; {markerRoot}_MODE={mode}",
+            profile is null ? null : $"; {markerRoot}_PROFILE={profile}",
+            reference is null ? null : $"; {markerRoot}_REFERENCE={SubMuxBatch.Core.External.LapseSubtitleMetadata.NormalizeReference(reference)}",
+            $"; {markerRoot}_RESULT={result}",
+            offsetMilliseconds is null ? null : $"; {markerRoot}_OFFSET_MS={offsetMilliseconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            maximumAdjustmentMilliseconds is null ? null : $"; {markerRoot}_MAX_ADJUSTMENT_MS={maximumAdjustmentMilliseconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            ratio is null ? null : $"; {markerRoot}_RATIO={ratio.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}",
+            confidence is null ? null : $"; {markerRoot}_CONFIDENCE={confidence.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}",
+            sourceFormat is null ? null : $"; {markerRoot}_SOURCE_FORMAT={sourceFormat.Trim().ToUpperInvariant()}",
+            $"; {markerRoot}_SOURCE_SHA256={sourceSha256}"
+        }.Where(static marker => marker is not null).Select(static marker => marker!).ToArray();
+        lines.InsertRange(scriptInfo + 1, markers);
+        return string.Join(newline, lines);
+    }
+
     public static string CopyAssLapseMarkers(string sourceAssText, string targetAssText)
     {
         ArgumentNullException.ThrowIfNull(sourceAssText);
         ArgumentNullException.ThrowIfNull(targetAssText);
         var markerPrefixes = LapseMarkerNames
             .Concat(SrtLapseMarkerNames)
+            .Concat(LapseCheckMarkerNames)
+            .Concat(SrtLapseCheckMarkerNames)
             .Select(static name => $"; {name}=")
+            .Append(LapsePolicyMarkerPrefix)
             .ToArray();
         var sourceLines = sourceAssText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var sourceMarkers = markerPrefixes

@@ -42,6 +42,8 @@ public sealed class ProcessingPresetSettings
     public string MaintenanceOutputPrefix { get; set; } = AppSettings.GetDefaultMaintenanceOutputPrefix(AppLanguage.System);
     public bool MaintenanceReplaceOriginal { get; set; }
     public bool EnableLapseSync { get; set; }
+    public bool EnableLapseValidationCheck { get; set; }
+    public double LapseValidationWarningSeconds { get; set; } = 1;
     public LapseSyncMode LapseMode { get; set; } = LapseSyncMode.Auto;
     public LapseReferenceMode LapseReference { get; set; } = LapseReferenceMode.Auto;
     public int LapseSplitPenalty { get; set; } = 6;
@@ -83,6 +85,8 @@ public sealed class ProcessingPresetSettings
         MaintenanceOutputPrefix = value.MaintenanceOutputPrefix,
         MaintenanceReplaceOriginal = value.MaintenanceReplaceOriginal,
         EnableLapseSync = value.EnableLapseSync,
+        EnableLapseValidationCheck = value.EnableLapseValidationCheck,
+        LapseValidationWarningSeconds = value.LapseValidationWarningSeconds,
         LapseMode = value.LapseMode,
         LapseReference = value.LapseReference,
         LapseSplitPenalty = value.LapseSplitPenalty,
@@ -125,6 +129,8 @@ public sealed class ProcessingPresetSettings
         value.MaintenanceOutputPrefix = MaintenanceOutputPrefix;
         value.MaintenanceReplaceOriginal = MaintenanceReplaceOriginal;
         value.EnableLapseSync = EnableLapseSync;
+        value.EnableLapseValidationCheck = EnableLapseValidationCheck;
+        value.LapseValidationWarningSeconds = LapseValidationWarningSeconds;
         value.LapseMode = LapseMode;
         value.LapseReference = LapseReference;
         value.LapseSplitPenalty = LapseSplitPenalty;

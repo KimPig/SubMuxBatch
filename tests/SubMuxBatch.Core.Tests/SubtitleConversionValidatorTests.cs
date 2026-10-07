@@ -280,6 +280,36 @@ public sealed class SubtitleConversionValidatorTests : IDisposable
     }
 
     [Fact]
+    public void AcceptsAStartOfVideoCueThatCollapsesAtAssTimestampPrecision()
+    {
+        const string srt = "1\n"
+                           + "00:00:00,000 --> 00:00:00,001\n"
+                           + "Transient\n\n"
+                           + "2\n"
+                           + "00:00:01,000 --> 00:00:02,000\n"
+                           + "Visible\n";
+        const string ass = "[Events]\n"
+                           + "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                           + "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Visible\n";
+        NegativeSubtitleTimestampAdjustment[] adjustments =
+        [
+            new(
+                3,
+                "0:00:00.00 --> 0:00:00.00",
+                string.Empty,
+                SubtitleTimestampAdjustmentKind.RemovedBeforeVideoStart,
+                CueNumber: 1)
+        ];
+
+        var collapsed = SubtitleConversionValidator.FindAssPrecisionCollapsedSrtCues(
+            srt,
+            adjustments);
+
+        Assert.Contains(1, collapsed);
+        SubtitleConversionValidator.ValidateSrtToAss(srt, ass, collapsed);
+    }
+
+    [Fact]
     public async Task ReportsUnrecognizedFontColourWithoutBlockingConversion()
     {
         var source = Path.Combine(_root, "invalid-colour.srt");
