@@ -779,6 +779,8 @@
                                             <Border Grid.Column="6"
                                                     Padding="12,5"
                                                     Background="{Binding StatusBackground}"
+                                                    ToolTip="{Binding StatusToolTipText}"
+                                                    ToolTipService.ShowDuration="60000"
                                                     Visibility="{Binding DataContext.StatusColumnVisibility, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding StatusText}"
@@ -1072,7 +1074,7 @@
                                 <TextBlock Grid.Row="1"
                                            Margin="0,2,0,0"
                                            Text="{Binding IssuesText}"
-                                           ToolTip="{Binding IssuesText}"
+                                           ToolTip="{Binding IssuesToolTipText}"
                                            ToolTipService.ShowDuration="60000"
                                            Foreground="{Binding StatusForeground}"
                                            FontSize="11"

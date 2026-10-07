@@ -1222,6 +1222,8 @@ public sealed class BatchProcessor(
         }
 
         var attachments = new List<FontAttachmentFile>();
+        var missingFontFamilies = new List<string>();
+        var missingFontFamilySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var requirement in requirements)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1252,9 +1254,12 @@ public sealed class BatchProcessor(
                 }
                 else
                 {
-                    var warning = CoreText.Get("Batch_FontNotFound", requirement.FamilyName);
-                    warnings.Add(warning);
-                    throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
+                    var familyName = requirement.FamilyName.Trim();
+                    if (missingFontFamilySet.Add(familyName))
+                    {
+                        missingFontFamilies.Add(familyName);
+                    }
+                    continue;
                 }
             }
 
@@ -1267,6 +1272,16 @@ public sealed class BatchProcessor(
             }
 
             attachments.Add(match.File);
+        }
+
+        if (missingFontFamilies.Count > 0)
+        {
+            var warning = CoreText.Get(
+                "Batch_FontsNotFound",
+                missingFontFamilies.Count,
+                string.Join(", ", missingFontFamilies));
+            warnings.Add(warning);
+            throw new JobSkippedException(CoreText.Get("Batch_SkipNoOutput", warning));
         }
 
         return await DeduplicateAndNameFontAttachmentsAsync(attachments, cancellationToken)

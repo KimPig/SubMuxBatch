@@ -944,6 +944,8 @@ public sealed class MaintenanceProcessor(
 
         var attachments = new List<FontAttachmentFile>();
         var allResolved = true;
+        var missingRequiredFontFamilies = new List<string>();
+        var missingRequiredFontFamilySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var requirement in requirements)
         {
             var match = _fontResolver.Resolve(requirement);
@@ -956,7 +958,12 @@ public sealed class MaintenanceProcessor(
             {
                 if (string.Equals(requirement.FamilyName, style.FontName, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new JobSkippedException(CoreText.Get("Maintenance_FontNotFound", requirement.FamilyName));
+                    var familyName = requirement.FamilyName.Trim();
+                    if (missingRequiredFontFamilySet.Add(familyName))
+                    {
+                        missingRequiredFontFamilies.Add(familyName);
+                    }
+                    continue;
                 }
                 allResolved = false;
                 continue;
@@ -964,6 +971,13 @@ public sealed class MaintenanceProcessor(
             var bundled = await BatchProcessor.ExtractBundledSubMuxFontAsync(workspace, cancellationToken)
                 .ConfigureAwait(false);
             attachments.Add(new FontAttachmentFile(bundled, "font/otf", "SubMuxSans-Medium.otf"));
+        }
+        if (missingRequiredFontFamilies.Count > 0)
+        {
+            throw new JobSkippedException(CoreText.Get(
+                "Maintenance_FontsNotFound",
+                missingRequiredFontFamilies.Count,
+                string.Join(", ", missingRequiredFontFamilies)));
         }
         var deduplicated = await BatchProcessor.DeduplicateAndNameFontAttachmentsAsync(attachments, cancellationToken)
             .ConfigureAwait(false);

@@ -1093,6 +1093,46 @@ public sealed class BatchProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task AllMissingAssFontsAreReportedBeforeJobIsSkipped()
+    {
+        var mkv = Path.Combine(_root, "FontsMissing.mkv");
+        var ass = Path.Combine(_root, "FontsMissing.ass");
+        var srt = Path.Combine(_root, "FontsMissing.srt");
+        await File.WriteAllBytesAsync(mkv, [1, 2, 3]);
+        await File.WriteAllTextAsync(srt, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+        await File.WriteAllTextAsync(ass, """
+            [Script Info]
+            ScriptType: v4.00+
+            [V4+ Styles]
+            Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+            Style: Default,Missing Alpha,75,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,4,0,2,0,0,80,1
+            [Events]
+            Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+            Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Alpha {\fnMissing Beta}Beta{\fn} Alpha
+            Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Repeated Alpha
+            """);
+        var media = new MediaSet(new MediaKey(_root, "FontsMissing"), mkv, ass, srt, null);
+        var runner = new FakeProcessRunner();
+
+        var result = await new BatchProcessor(runner, new StaticFontResolver([])).ProcessAsync(
+            media,
+            ConversionPlanFactory.Create(media),
+            new AppSettings { OutputPrefix = "result_" },
+            CreateDependencies());
+
+        Assert.Equal(JobState.Skipped, result.State);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Contains("2개", warning);
+        Assert.Contains("Missing Alpha", warning);
+        Assert.Contains("Missing Beta", warning);
+        Assert.Equal(warning.IndexOf("Missing Alpha", StringComparison.Ordinal), warning.LastIndexOf("Missing Alpha", StringComparison.Ordinal));
+        Assert.Equal(warning.IndexOf("Missing Beta", StringComparison.Ordinal), warning.LastIndexOf("Missing Beta", StringComparison.Ordinal));
+        Assert.Contains(warning, result.Error);
+        Assert.Empty(runner.MuxCalls);
+        Assert.Null(result.OutputPath);
+    }
+
+    [Fact]
     public async Task FontAttachmentsAreContentDeduplicatedAndFilenameCollisionsAreRenamed()
     {
         var firstFolder = Path.Combine(_root, "first-font");

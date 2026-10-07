@@ -19,6 +19,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private JobState _state;
     private int _progress;
     private string? _error;
+    private IReadOnlyList<string> _runtimeWarnings = [];
     private string? _outputPath;
     private string _plannedOutputFile = string.Empty;
     private MkvInspection? _mediaInspection;
@@ -621,10 +622,37 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var issues = new List<string>();
             if (_plan.Error is not null) issues.Add(_plan.Error);
             issues.AddRange(_plan.Warnings);
-            if (!string.IsNullOrWhiteSpace(Error)) issues.Add(AppText.Get("Queue_RuntimeError", Error));
+            var terminalReason = GetTerminalReasonText();
+            if (!string.IsNullOrWhiteSpace(terminalReason)) issues.Add(terminalReason);
+            var visibleWarnings = GetVisibleRuntimeWarnings();
+            if (visibleWarnings.Count == 1)
+            {
+                issues.Add(AppText.Get("Common_WarningValue", visibleWarnings[0]));
+            }
+            else if (visibleWarnings.Count > 1)
+            {
+                issues.Add(AppText.Get("Queue_RuntimeWarningSummary", visibleWarnings.Count, visibleWarnings[0]));
+            }
             return string.Join(" · ", issues);
         }
     }
+    public string IssuesToolTipText
+    {
+        get
+        {
+            var issues = new List<string>();
+            if (_plan.Error is not null) issues.Add(_plan.Error);
+            issues.AddRange(_plan.Warnings.Select(static warning => AppText.Get("Common_WarningValue", warning)));
+            var terminalReason = GetTerminalReasonText();
+            if (!string.IsNullOrWhiteSpace(terminalReason)) issues.Add(terminalReason);
+            issues.AddRange(GetVisibleRuntimeWarnings().Select(static warning => AppText.Get("Common_WarningValue", warning)));
+            return string.Join(Environment.NewLine, issues);
+        }
+    }
+    public string? StatusToolTipText => string.IsNullOrWhiteSpace(IssuesToolTipText)
+        ? null
+        : IssuesToolTipText;
+    public IReadOnlyList<string> RuntimeWarnings => _runtimeWarnings;
     public bool IsValid => _plan.IsValid;
     public bool IsMaintenanceMode => _maintenanceMode;
 
@@ -637,6 +665,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
 
         _maintenanceMode = maintenanceMode;
         Error = null;
+        SetRuntimeWarnings([]);
         OutputPath = null;
         Progress = 0;
         ResetElapsedTime();
@@ -691,6 +720,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(PlanDescription));
         OnPropertyChanged(nameof(IsValid));
         OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(IssuesToolTipText));
+        OnPropertyChanged(nameof(StatusToolTipText));
         OnPropertyChanged(nameof(Details));
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusForeground));
@@ -707,6 +738,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(StatusText));
                 OnPropertyChanged(nameof(StatusForeground));
                 OnPropertyChanged(nameof(StatusBackground));
+                OnPropertyChanged(nameof(IssuesText));
+                OnPropertyChanged(nameof(IssuesToolTipText));
+                OnPropertyChanged(nameof(StatusToolTipText));
             }
         }
     }
@@ -732,8 +766,24 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(Details));
                 OnPropertyChanged(nameof(IssuesText));
+                OnPropertyChanged(nameof(IssuesToolTipText));
+                OnPropertyChanged(nameof(StatusToolTipText));
             }
         }
+    }
+
+    public void SetRuntimeWarnings(IEnumerable<string> warnings)
+    {
+        _runtimeWarnings = warnings
+            .Where(static warning => !string.IsNullOrWhiteSpace(warning))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        OnPropertyChanged(nameof(RuntimeWarnings));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(IssuesToolTipText));
+        OnPropertyChanged(nameof(StatusToolTipText));
+        OnPropertyChanged(nameof(Details));
     }
 
     public string? OutputPath
@@ -763,7 +813,9 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         JobState.Muxing => AppText.Get("Status_Muxing", Progress),
         JobState.Verifying => AppText.Get("Status_Verifying"),
         JobState.Succeeded => AppText.Get("Status_Succeeded"),
-        JobState.SucceededWithWarnings => AppText.Get("Status_SucceededWarning"),
+        JobState.SucceededWithWarnings => _runtimeWarnings.Count > 0
+            ? AppText.Get("Status_SucceededWarnings", _runtimeWarnings.Count)
+            : AppText.Get("Status_SucceededWarning"),
         JobState.Skipped => AppText.Get("Status_Skipped"),
         JobState.Failed => AppText.Get("Status_Failed"),
         JobState.Cancelling => AppText.Get("Status_Cancelling"),
@@ -817,13 +869,42 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             }
 
             lines.AddRange(_plan.Warnings.Select(static warning => AppText.Get("Common_WarningValue", warning)));
-            if (!string.IsNullOrWhiteSpace(Error))
+            var terminalReason = GetTerminalReasonText();
+            if (!string.IsNullOrWhiteSpace(terminalReason))
             {
-                lines.Add(AppText.Get("Queue_RuntimeError", Error));
+                lines.Add(terminalReason);
             }
+            lines.AddRange(GetVisibleRuntimeWarnings().Select(static warning => AppText.Get("Common_WarningValue", warning)));
 
             return string.Join(Environment.NewLine, lines);
         }
+    }
+
+    private string? GetTerminalReasonText()
+    {
+        if (string.IsNullOrWhiteSpace(Error))
+        {
+            return null;
+        }
+
+        return State switch
+        {
+            JobState.Skipped => AppText.Get("Queue_SkippedReason", Error),
+            JobState.Failed => AppText.Get("Queue_FailedReason", Error),
+            _ => AppText.Get("Queue_RuntimeError", Error)
+        };
+    }
+
+    private IReadOnlyList<string> GetVisibleRuntimeWarnings()
+    {
+        if (string.IsNullOrWhiteSpace(Error))
+        {
+            return _runtimeWarnings;
+        }
+
+        return _runtimeWarnings
+            .Where(warning => !Error.Contains(warning, StringComparison.Ordinal))
+            .ToArray();
     }
 
     public void SetMediaInspection(MkvInspection inspection)
@@ -907,6 +988,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(PlanDescription));
         OnPropertyChanged(nameof(IsValid));
         OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(IssuesToolTipText));
+        OnPropertyChanged(nameof(StatusToolTipText));
         OnPropertyChanged(nameof(Details));
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusForeground));
