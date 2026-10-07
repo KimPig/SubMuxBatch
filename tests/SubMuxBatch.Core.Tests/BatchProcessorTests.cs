@@ -183,6 +183,14 @@ public sealed class BatchProcessorTests : IDisposable
         Assert.True(startIndex >= 0, string.Join(Environment.NewLine, progressMessages));
         Assert.True(appliedIndex > startIndex, string.Join(Environment.NewLine, progressMessages));
         Assert.True(summaryIndex > appliedIndex, string.Join(Environment.NewLine, progressMessages));
+        Assert.Contains(progressMessages, message =>
+            message.Contains("LAPSE 요약", StringComparison.Ordinal)
+            && message.Contains("-2000ms", StringComparison.Ordinal));
+        var adjustment = Assert.Single(result.LapseAdjustments!);
+        Assert.Equal("SRT", adjustment.Target);
+        Assert.Equal("auto/shifted", adjustment.Mode);
+        Assert.Equal(-2000, adjustment.OffsetMilliseconds);
+        Assert.Equal(2000, adjustment.MaximumAdjustmentMilliseconds);
     }
 
     [Fact]
@@ -358,6 +366,13 @@ public sealed class BatchProcessorTests : IDisposable
 
         Assert.Equal(JobState.Succeeded, result.State);
         Assert.Equal(2, synchronizer.Calls);
+        Assert.Equal(2, result.LapseAdjustments!.Count);
+        Assert.All(result.LapseAdjustments, adjustment =>
+        {
+            Assert.Equal("auto/shifted", adjustment.Mode);
+            Assert.Equal(-2000, adjustment.OffsetMilliseconds);
+            Assert.Equal(2000, adjustment.MaximumAdjustmentMilliseconds);
+        });
         Assert.Contains("Dialogue: 0,0:00:01.00,0:00:02.00", await File.ReadAllTextAsync(ass));
         Assert.Contains($"; SUBMUX_SUBTITLE_SOURCE=ASS+{expectedSourceFormat}", await File.ReadAllTextAsync(ass));
         Assert.Contains("; SUBMUX_LAPSE_RESULT=solid", await File.ReadAllTextAsync(ass));

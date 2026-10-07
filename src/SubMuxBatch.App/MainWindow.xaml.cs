@@ -2102,6 +2102,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             target.OutputPath = null;
             target.Error = null;
             target.SetRuntimeWarnings([]);
+            target.SetLapseAdjustments([]);
             target.ResetElapsedTime();
         }
         SetOverallProgress(0);
@@ -2223,6 +2224,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 target.OutputPath = result.OutputPath;
                 target.Error = result.Error;
                 target.SetRuntimeWarnings(result.Warnings);
+                target.SetLapseAdjustments(result.LapseAdjustments ?? []);
                 if (result.State is JobState.Succeeded or JobState.SucceededWithWarnings or JobState.Skipped)
                 {
                     target.Progress = 100;

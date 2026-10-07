@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.IO;
 using SubMuxBatch.App.Localization;
@@ -20,6 +21,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
     private int _progress;
     private string? _error;
     private IReadOnlyList<string> _runtimeWarnings = [];
+    private IReadOnlyList<LapseAppliedAdjustment> _lapseAdjustments = [];
     private string? _outputPath;
     private string _plannedOutputFile = string.Empty;
     private MkvInspection? _mediaInspection;
@@ -622,6 +624,10 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var issues = new List<string>();
             if (_plan.Error is not null) issues.Add(_plan.Error);
             issues.AddRange(_plan.Warnings);
+            if (State == JobState.Succeeded)
+            {
+                issues.Add(GetCompletionDetailText());
+            }
             var terminalReason = GetTerminalReasonText();
             if (!string.IsNullOrWhiteSpace(terminalReason)) issues.Add(terminalReason);
             var visibleWarnings = GetVisibleRuntimeWarnings();
@@ -643,6 +649,8 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             var issues = new List<string>();
             if (_plan.Error is not null) issues.Add(_plan.Error);
             issues.AddRange(_plan.Warnings.Select(static warning => AppText.Get("Common_WarningValue", warning)));
+            var completionDetail = GetCompletionDetailText(includeGenericSuccess: State == JobState.Succeeded);
+            if (!string.IsNullOrWhiteSpace(completionDetail)) issues.Add(completionDetail);
             var terminalReason = GetTerminalReasonText();
             if (!string.IsNullOrWhiteSpace(terminalReason)) issues.Add(terminalReason);
             issues.AddRange(GetVisibleRuntimeWarnings().Select(static warning => AppText.Get("Common_WarningValue", warning)));
@@ -653,6 +661,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         ? null
         : IssuesToolTipText;
     public IReadOnlyList<string> RuntimeWarnings => _runtimeWarnings;
+    public IReadOnlyList<LapseAppliedAdjustment> LapseAdjustments => _lapseAdjustments;
     public bool IsValid => _plan.IsValid;
     public bool IsMaintenanceMode => _maintenanceMode;
 
@@ -666,6 +675,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         _maintenanceMode = maintenanceMode;
         Error = null;
         SetRuntimeWarnings([]);
+        SetLapseAdjustments([]);
         OutputPath = null;
         Progress = 0;
         ResetElapsedTime();
@@ -741,6 +751,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(IssuesText));
                 OnPropertyChanged(nameof(IssuesToolTipText));
                 OnPropertyChanged(nameof(StatusToolTipText));
+                OnPropertyChanged(nameof(Details));
             }
         }
     }
@@ -786,6 +797,17 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(Details));
     }
 
+    public void SetLapseAdjustments(IEnumerable<LapseAppliedAdjustment> adjustments)
+    {
+        _lapseAdjustments = adjustments.ToArray();
+        OnPropertyChanged(nameof(LapseAdjustments));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(IssuesText));
+        OnPropertyChanged(nameof(IssuesToolTipText));
+        OnPropertyChanged(nameof(StatusToolTipText));
+        OnPropertyChanged(nameof(Details));
+    }
+
     public string? OutputPath
     {
         get => _outputPath;
@@ -812,7 +834,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         JobState.ConvertingAudio => AppText.Get("Status_ConvertingAudio", Progress),
         JobState.Muxing => AppText.Get("Status_Muxing", Progress),
         JobState.Verifying => AppText.Get("Status_Verifying"),
-        JobState.Succeeded => AppText.Get("Status_Succeeded"),
+        JobState.Succeeded => GetSucceededStatusText(),
         JobState.SucceededWithWarnings => _runtimeWarnings.Count > 0
             ? AppText.Get("Status_SucceededWarnings", _runtimeWarnings.Count)
             : AppText.Get("Status_SucceededWarning"),
@@ -869,6 +891,11 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             }
 
             lines.AddRange(_plan.Warnings.Select(static warning => AppText.Get("Common_WarningValue", warning)));
+            var completionDetail = GetCompletionDetailText(includeGenericSuccess: State == JobState.Succeeded);
+            if (!string.IsNullOrWhiteSpace(completionDetail))
+            {
+                lines.Add(completionDetail);
+            }
             var terminalReason = GetTerminalReasonText();
             if (!string.IsNullOrWhiteSpace(terminalReason))
             {
@@ -906,6 +933,102 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             .Where(warning => !Error.Contains(warning, StringComparison.Ordinal))
             .ToArray();
     }
+
+    private string GetSucceededStatusText()
+    {
+        if (_lapseAdjustments.Count == 0)
+        {
+            return AppText.Get("Status_Succeeded");
+        }
+
+        if (TryGetSharedShiftOffset(out var offsetMilliseconds))
+        {
+            return AppText.Get(
+                "Status_SucceededLapse",
+                FormatSignedSeconds(offsetMilliseconds));
+        }
+
+        return TryGetMaximumAdjustment(out var maximumAdjustmentMilliseconds)
+            ? AppText.Get(
+                "Status_SucceededLapseMaximum",
+                FormatUnsignedSeconds(maximumAdjustmentMilliseconds))
+            : AppText.Get("Status_Succeeded");
+    }
+
+    private string GetCompletionDetailText(bool includeGenericSuccess = true)
+    {
+        if (_lapseAdjustments.Count == 0)
+        {
+            return includeGenericSuccess ? AppText.Get("Queue_Completed") : string.Empty;
+        }
+
+        if (_lapseAdjustments.All(IsShiftResult))
+        {
+            var details = _lapseAdjustments
+                .Select(adjustment => adjustment.OffsetMilliseconds is { } offset
+                    ? $"{adjustment.Target} {FormatSecondsWithUnit(offset)}"
+                    : adjustment.Target)
+                .ToArray();
+            if (TryGetSharedShiftOffset(out var sharedOffset))
+            {
+                return AppText.Get("Queue_CompletedLapse", FormatSecondsWithUnit(sharedOffset));
+            }
+
+            return AppText.Get("Queue_CompletedLapse", string.Join(" · ", details));
+        }
+
+        return TryGetMaximumAdjustment(out var maximumAdjustmentMilliseconds)
+            ? AppText.Get(
+                "Queue_CompletedLapseMaximum",
+                FormatUnsignedSeconds(maximumAdjustmentMilliseconds))
+            : AppText.Get("Queue_Completed");
+    }
+
+    private bool TryGetSharedShiftOffset(out long offsetMilliseconds)
+    {
+        offsetMilliseconds = 0;
+        if (_lapseAdjustments.Count == 0
+            || !_lapseAdjustments.All(IsShiftResult)
+            || _lapseAdjustments[0].OffsetMilliseconds is not { } firstOffset
+            || _lapseAdjustments.Any(adjustment => adjustment.OffsetMilliseconds != firstOffset))
+        {
+            return false;
+        }
+
+        offsetMilliseconds = firstOffset;
+        return true;
+    }
+
+    private bool TryGetMaximumAdjustment(out long maximumAdjustmentMilliseconds)
+    {
+        var values = _lapseAdjustments
+            .Select(adjustment => adjustment.MaximumAdjustmentMilliseconds
+                ?? (adjustment.OffsetMilliseconds is { } offset ? Math.Abs(offset) : (long?)null))
+            .Where(static value => value.HasValue)
+            .Select(static value => value!.Value)
+            .ToArray();
+        if (values.Length == 0)
+        {
+            maximumAdjustmentMilliseconds = 0;
+            return false;
+        }
+
+        maximumAdjustmentMilliseconds = values.Max();
+        return true;
+    }
+
+    private static bool IsShiftResult(LapseAppliedAdjustment adjustment) =>
+        adjustment.Mode.EndsWith("/shifted", StringComparison.OrdinalIgnoreCase)
+        || adjustment.Mode.Equals("shifted", StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatSecondsWithUnit(long milliseconds) =>
+        AppText.Get("Queue_LapseSeconds", FormatSignedSeconds(milliseconds));
+
+    private static string FormatSignedSeconds(long milliseconds) =>
+        (milliseconds / 1000d).ToString("+0.###;-0.###;0", CultureInfo.CurrentCulture);
+
+    private static string FormatUnsignedSeconds(long milliseconds) =>
+        (milliseconds / 1000d).ToString("0.###", CultureInfo.CurrentCulture);
 
     public void SetMediaInspection(MkvInspection inspection)
     {

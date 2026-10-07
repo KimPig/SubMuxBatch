@@ -96,10 +96,17 @@ public enum JobState
 
 public sealed record JobProgress(JobState State, int Percent, string Message);
 
+public sealed record LapseAppliedAdjustment(
+    string Target,
+    string Mode,
+    long? OffsetMilliseconds,
+    long? MaximumAdjustmentMilliseconds);
+
 public sealed record JobResult(
     JobState State,
     string? OutputPath,
     IReadOnlyList<string> Warnings,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyList<LapseAppliedAdjustment>? LapseAdjustments = null);
 
 public sealed class JobSkippedException(string message) : InvalidOperationException(message);

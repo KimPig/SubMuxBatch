@@ -47,6 +47,7 @@ public sealed class BatchProcessor(
 
         var warnings = plan.Warnings.ToList();
         var lapseAppliedSummaries = new List<string>();
+        var lapseAdjustments = new List<LapseAppliedAdjustment>();
         var currentState = JobState.Ready;
         var currentPercent = 0;
         BackupArtifactTransaction? backupTransaction = null;
@@ -134,6 +135,11 @@ public sealed class BatchProcessor(
         {
             Report(JobState.Verifying, percent, DescribeLapseApplied(target, result));
             lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+            lapseAdjustments.Add(new LapseAppliedAdjustment(
+                target,
+                result.Mode,
+                result.OffsetMilliseconds,
+                result.MaximumAdjustmentMilliseconds));
             if (result.ShouldWarnAboutAutoStrategy(settings.LapseMode))
             {
                 var strategyWarning = CoreText.Get(
@@ -1018,7 +1024,11 @@ public sealed class BatchProcessor(
 
             var finalState = warnings.Count > 0 ? JobState.SucceededWithWarnings : JobState.Succeeded;
             Report(finalState, 100, CoreText.Get("Batch_Completed", outputPath));
-            return new JobResult(finalState, outputPath, warnings);
+            return new JobResult(
+                finalState,
+                outputPath,
+                warnings,
+                LapseAdjustments: lapseAdjustments);
         }
         catch (OperationCanceledException)
         {

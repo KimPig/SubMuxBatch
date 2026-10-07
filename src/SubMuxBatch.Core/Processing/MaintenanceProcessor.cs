@@ -43,6 +43,7 @@ public sealed class MaintenanceProcessor(
     {
         var warnings = new List<string>();
         var lapseAppliedSummaries = new List<string>();
+        var lapseAdjustments = new List<LapseAppliedAdjustment>();
         settings.Validate();
         var policy = CreateApplicationPolicy(settings);
         var updateLapseFromCurrentPreset = policy.ApplyLapse;
@@ -78,6 +79,11 @@ public sealed class MaintenanceProcessor(
             {
                 Report(JobState.UpdatingAssStyle, percent, DescribeLapseApplied(target, result));
                 lapseAppliedSummaries.Add($"{target} {result.OffsetMilliseconds ?? 0:+#;-#;0}ms");
+                lapseAdjustments.Add(new LapseAppliedAdjustment(
+                    target,
+                    result.Mode,
+                    result.OffsetMilliseconds,
+                    result.MaximumAdjustmentMilliseconds));
                 if (result.ShouldWarnAboutAutoStrategy(settings.LapseMode))
                 {
                     var strategyWarning = CoreText.Get(
@@ -907,8 +913,11 @@ public sealed class MaintenanceProcessor(
                 }
                 throw;
             }
-            return new JobResult(warnings.Count == 0 ? JobState.Succeeded : JobState.SucceededWithWarnings,
-                outputPath, warnings);
+            return new JobResult(
+                warnings.Count == 0 ? JobState.Succeeded : JobState.SucceededWithWarnings,
+                outputPath,
+                warnings,
+                LapseAdjustments: lapseAdjustments);
         }
         catch (JobSkippedException exception)
         {

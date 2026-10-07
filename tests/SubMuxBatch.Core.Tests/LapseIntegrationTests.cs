@@ -11,6 +11,32 @@ public sealed class LapseIntegrationTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"SubMuxBatch-Lapse-{Guid.NewGuid():N}");
 
+    [Theory]
+    [InlineData(LapseSyncMode.Auto, "auto/restart", true)]
+    [InlineData(LapseSyncMode.Auto, "auto/shifted", false)]
+    [InlineData(LapseSyncMode.NoSplit, "nosplit/shifted", false)]
+    [InlineData(LapseSyncMode.Ols, "ols/drifted", false)]
+    [InlineData(LapseSyncMode.Split, "split", false)]
+    public void StrategyWarningOnlyAppliesToUnexpectedAutoResults(
+        LapseSyncMode requestedMode,
+        string resultMode,
+        bool expected)
+    {
+        var result = new LapseSyncResult(
+            LapseVerdict.Solid,
+            resultMode,
+            "audio",
+            0,
+            1,
+            10,
+            1,
+            [],
+            "output.srt",
+            null);
+
+        Assert.Equal(expected, result.ShouldWarnAboutAutoStrategy(requestedMode));
+    }
+
     [Fact]
     public void ReferenceSelectorUsesDefaultSubtitleRegardlessOfConfiguredAudioLanguage()
     {
