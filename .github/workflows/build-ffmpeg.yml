@@ -3,6 +3,8 @@ name: Build SubMux FFmpeg
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - '.github/workflows/build-ffmpeg.yml'
       - 'build/ffmpeg/**'
