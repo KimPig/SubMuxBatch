@@ -67,6 +67,19 @@ make install
 popd >/dev/null
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+
+# FFmpeg switches the final link step to the C++ compiler when libx265 is
+# enabled.  Some MinGW toolchains append their default shared libgcc choice
+# after FFmpeg's extra linker flags, which leaves ffmpeg.exe dependent on
+# libgcc_s_seh-1.dll.  Keep the static-runtime options at the very end of every
+# C++ compiler/linker invocation so the resulting executable works on a clean
+# Windows installation.
+cat > "$WORK_DIR/mingw64-g++-static" <<'EOF'
+#!/usr/bin/env bash
+exec x86_64-w64-mingw32-g++ "$@" -static -static-libgcc -static-libstdc++
+EOF
+chmod +x "$WORK_DIR/mingw64-g++-static"
+
 pushd "$FFMPEG_SOURCE" >/dev/null
 ./configure \
   --pkg-config=pkg-config \
@@ -74,6 +87,7 @@ pushd "$FFMPEG_SOURCE" >/dev/null
   --target-os=mingw32 \
   --arch=x86_64 \
   --cross-prefix=x86_64-w64-mingw32- \
+  --cxx="$WORK_DIR/mingw64-g++-static" \
   --prefix="$PREFIX" \
   --enable-cross-compile \
   --enable-gpl \
@@ -95,7 +109,7 @@ pushd "$FFMPEG_SOURCE" >/dev/null
   --extra-ldflags="-L$PREFIX/lib -static -static-libgcc -static-libstdc++" \
   --extra-ldexeflags="-static -static-libgcc -static-libstdc++" \
   --extra-libs="-lstdc++ -lpthread"
-make -j"$JOBS" ffmpeg.exe
+make V=1 -j"$JOBS" ffmpeg.exe
 popd >/dev/null
 
 cp "$FFMPEG_SOURCE/ffmpeg.exe" "$OUTPUT_DIR/ffmpeg.exe"
