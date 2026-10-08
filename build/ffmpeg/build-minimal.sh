@@ -54,6 +54,12 @@ cmake -S "$X265_SOURCE/source" -B "$WORK_DIR/x265-build" -G Ninja \
 cmake --build "$WORK_DIR/x265-build" --parallel "$JOBS"
 cmake --install "$WORK_DIR/x265-build"
 
+# x265's MinGW CMake probe records -lgcc_s in x265.pc even for a static-only
+# build.  That explicit shared-runtime dependency wins over FFmpeg's static
+# linker settings and makes the final executable require libgcc_s_seh-1.dll.
+# The C++ linker wrapper below supplies the matching static libgcc runtime.
+sed -i 's/[[:space:]]-lgcc_s\b//g' "$PREFIX/lib/pkgconfig/x265.pc"
+
 pushd "$OPUS_SOURCE" >/dev/null
 ./configure \
   --host=x86_64-w64-mingw32 \
