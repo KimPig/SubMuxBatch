@@ -193,6 +193,62 @@ public sealed class AudioLanguageFilterTests
     }
 
     [Fact]
+    public async Task VideoMuxPlanReplacesSourceVideoAndPlacesGeneratedVideoFirst()
+    {
+        using var fixture = new MuxFixture();
+        var generated = Path.Combine(fixture.Root, "video-01.mkv");
+        await File.WriteAllBytesAsync(generated, [1, 2, 3]);
+        const string inspection = """
+            {"tracks":[
+              {"id":0,"type":"video","properties":{"codec_id":"V_MPEG4/ISO/AVC","default_track":true,"pixel_dimensions":"1920x1080","default_duration":41708333}},
+              {"id":1,"type":"audio","properties":{"codec_id":"A_AAC","default_track":true,"language":"jpn"}}
+            ],"attachments":[],"chapters":[]}
+            """;
+        var sourceTrack = new MkvTrackInfo(
+            "video", "V_MPEG4/ISO/AVC", true, false, null, null, "Video", 0,
+            PixelDimensions: "1920x1080", DefaultDurationNanoseconds: 41_708_333);
+        var runner = new MuxArgumentRunner(fixture.Output, inspection);
+
+        await new MkvMergeClient("fake-mkvmerge.exe", runner).MuxAsync(
+            fixture.Source,
+            fixture.Ass,
+            fixture.Srt,
+            fixture.Output,
+            videoMuxPlan: new VideoMuxPlan(new GeneratedVideoTrack(generated, sourceTrack)));
+
+        var arguments = Assert.IsType<List<string>>(runner.MuxArguments);
+        Assert.True(arguments.IndexOf("--no-video") < arguments.IndexOf(fixture.Source));
+        Assert.True(arguments.IndexOf(fixture.Source) < arguments.IndexOf(generated));
+        var trackOrder = arguments.IndexOf("--track-order");
+        Assert.True(trackOrder >= 0);
+        Assert.Equal("1:0", arguments[trackOrder + 1]);
+    }
+
+    [Fact]
+    public void ValidationAcceptsPlannedHevcVideoReplacement()
+    {
+        var sourceVideo = new MkvTrackInfo(
+            "video", "V_MPEG4/ISO/AVC", true, false, null, null, "Video", 0,
+            PixelDimensions: "1920x1080", DefaultDurationNanoseconds: 41_708_333);
+        var source = new MkvInspection([sourceVideo], [], 0);
+        var output = new MkvInspection(
+            [
+                sourceVideo with { CodecId = "V_MPEGH/ISO/HEVC" },
+                Track("subtitles", "S_TEXT/ASS", true, "kor", id: 2),
+                Track("subtitles", "S_TEXT/UTF8", false, "kor", id: 3)
+            ],
+            [],
+            0);
+
+        var errors = MkvMergeClient.ValidateOutput(
+            source,
+            output,
+            videoMuxPlan: new VideoMuxPlan(new GeneratedVideoTrack("video.mkv", sourceVideo)));
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task FilterSkipsInsteadOfCreatingSilentOutputWhenNoLanguageMatches()
     {
         using var fixture = new MuxFixture();

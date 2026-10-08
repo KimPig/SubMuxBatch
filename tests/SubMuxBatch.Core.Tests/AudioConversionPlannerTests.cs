@@ -7,6 +7,44 @@ namespace SubMuxBatch.Core.Tests;
 public sealed class AudioConversionPlannerTests
 {
     [Fact]
+    public void SelectedOpusBitrateIsUsedAndMatchingTrackIsCopied()
+    {
+        var source = Inspection(
+            Audio(1, "A_OPUS", 2, "jpn", true),
+            Audio(2, "A_AAC", 2, "jpn", false));
+        var settings = new AppSettings
+        {
+            AudioProcessingMode = AudioProcessingMode.ConvertWhenNeeded,
+            AudioCodec = AudioCodec.Opus,
+            AudioBitrateKbps = 160,
+            AudioChannelMode = AudioChannelMode.PreserveChannels
+        };
+
+        var plan = AudioConversionPlanner.Create(source, settings);
+
+        Assert.Equal([1], plan.RetainedSourceTrackIds);
+        var transcode = Assert.Single(plan.Transcodes);
+        Assert.Equal(AudioCodec.Opus, transcode.Codec);
+        Assert.Equal(160, transcode.BitrateKbps);
+    }
+
+    [Fact]
+    public void ReencodeAllDoesNotCopyMatchingAudio()
+    {
+        var source = Inspection(Audio(1, "A_AAC", 2, "jpn", true));
+        var settings = new AppSettings
+        {
+            AudioProcessingMode = AudioProcessingMode.ReencodeAll,
+            AudioCodec = AudioCodec.AacLc,
+            AudioBitrateKbps = 128
+        };
+
+        var plan = AudioConversionPlanner.Create(source, settings);
+
+        Assert.Empty(plan.RetainedSourceTrackIds);
+        Assert.Equal(128, Assert.Single(plan.Transcodes).BitrateKbps);
+    }
+    [Fact]
     public void DisabledConversionKeepsSelectedSourceTracks()
     {
         var source = Inspection(

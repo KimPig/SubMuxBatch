@@ -5,6 +5,10 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 $expectedFiles = [ordered]@{
+    'third-party-sources\ffmpeg\8.1\btbn-ffmpeg-builds-9acad4a9ef1583096af7836cc1e9c8cbcb4d3950.tar.gz' = 'F9BD160A794173DB7E838AD5E8841EBBA845CE6D012E830951946AA85B2967AF'
+    'third-party-sources\ffmpeg\8.1\ffmpeg-330caae0c1.tar.gz' = '67B5876EE973A26F267280B2C1EB851A0AC7A502382D20E41B7A819111886AF9'
+    'third-party-sources\ffmpeg\8.1\x265-020d7054dbecfd3be8e62efe33ff8a305d41856e.tar.gz' = 'ADE2FD082D1A3D7ADF89BB38EB54A5CBF6AAD6C1C7ED130C89C7BF2CD626484D'
+    'third-party-sources\ffmpeg\8.1\opus-1.5.2.tar.gz' = '65C1D2F78B9F2FB20082C38CBE47C951AD5839345876E46941612EE87F9A7CE1'
     'third-party-sources\mkvtoolnix\102.0\mkvtoolnix-102.0.tar.xz' = '9F0A810F17C7DF8ADB9064A3A41D5784399BE412D19704CF080745AD7D45DA30'
     'third-party-sources\lapse\2.2.4\lapse-2.2.4.tar.gz' = 'D1AB0BDAAC81F1C038AC64FDF2578FA3DEACA1CE31980F0C9D8C0024800C8BE1'
     'third-party-sources\lapse\2.2.4\dependencies\ffmpeg-7.1.tar.xz' = '40973D44970DBC83EF302B0609F2E74982BE2D85916DD2EE7472D30678A7ABE6'
@@ -14,6 +18,9 @@ $expectedFiles = [ordered]@{
 }
 
 $requiredNotices = @(
+    'licenses\ffmpeg\8.1\FFmpeg-GPL-3.0.txt',
+    'licenses\ffmpeg\8.1\x265-GPL-2.0-or-later.txt',
+    'licenses\ffmpeg\8.1\Opus-BSD-3-Clause.txt',
     'licenses\mkvtoolnix\102.0\COPYING.txt',
     'licenses\mkvtoolnix\102.0\README.txt',
     'licenses\mkvtoolnix\102.0\licenses\pugixml-MIT.txt',

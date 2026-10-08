@@ -76,11 +76,23 @@ public partial class OpenSourceLicensesWindow : Window
     private static IReadOnlyList<LicenseEntry> CreateEntries() =>
     [
         new(
-            "FFmpeg 8.1 — LGPL-3.0-or-later",
-            ReadResource(
+            "FFmpeg 8.1 GPL build — GPL-3.0-or-later",
+            WithSourceNotice(ReadResource(
                 typeof(OpenSourceLicensesWindow).Assembly,
-                "SubMuxBatch.App.Resources.FFmpeg-LGPL-3.0.txt"),
+                "SubMuxBatch.App.Resources.FFmpeg-GPL-3.0.txt")),
             "https://ffmpeg.org/"),
+        new(
+            "x265 — GPL-2.0-or-later",
+            WithSourceNotice(ReadResource(
+                typeof(OpenSourceLicensesWindow).Assembly,
+                "SubMuxBatch.App.Resources.x265-GPL-2.0-or-later.txt")),
+            "https://github.com/videolan/x265"),
+        new(
+            "Opus — BSD-3-Clause",
+            WithSourceNotice(ReadResource(
+                typeof(OpenSourceLicensesWindow).Assembly,
+                "SubMuxBatch.App.Resources.Opus-BSD-3-Clause.txt")),
+            "https://opus-codec.org/"),
         new(
             "MKVToolNix 102.0 — GPL-2.0-only",
             WithSourceNotice(ReadResource(

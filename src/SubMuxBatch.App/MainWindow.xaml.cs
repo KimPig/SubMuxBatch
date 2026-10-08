@@ -1740,8 +1740,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (PresetComboBox is null || _presetStore is null) return;
         var selected = _presetStore.Selected(_settings);
         var current = ProcessingPresetSettings.Capture(_settings);
+        var normalizedSettings = _settings.Copy();
+        selected.Settings.ApplyTo(normalizedSettings);
+        var normalizedPreset = ProcessingPresetSettings.Capture(normalizedSettings);
         var modified = !string.Equals(
-            JsonSerializer.Serialize(selected.Settings),
+            JsonSerializer.Serialize(normalizedPreset),
             JsonSerializer.Serialize(current),
             StringComparison.Ordinal);
         _presetHasUnsavedChanges = modified;
@@ -2645,6 +2648,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                      or JobState.PreparingFonts
                      or JobState.PreparingJob
                      or JobState.BackingUp
+                     or JobState.ConvertingVideo
                      or JobState.ConvertingAudio
                      or JobState.Verifying
                      or JobState.Finalizing))

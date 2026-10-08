@@ -88,6 +88,7 @@ public enum JobState
     PreparingFonts,
     PreparingJob,
     BackingUp,
+    ConvertingVideo,
     ConvertingAudio,
     Muxing,
     Verifying,

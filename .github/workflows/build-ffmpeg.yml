@@ -1,0 +1,48 @@
+name: Build SubMux FFmpeg
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ffmpeg.yml'
+      - 'build/ffmpeg/**'
+      - 'third-party-sources/ffmpeg/8.1/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake ninja-build nasm yasm mingw-w64 \
+            pkg-config autoconf automake libtool zip
+      - name: Build minimal Windows x64 FFmpeg
+        run: bash build/ffmpeg/build-minimal.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: submux-ffmpeg-8.1-win-x64
+          path: artifacts/ffmpeg-custom/win-x64/*
+          if-no-files-found: error
+          retention-days: 30
+
+  verify:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: submux-ffmpeg-8.1-win-x64
+          path: artifacts/ffmpeg-custom/win-x64
+      - name: Verify codecs, license and smoke encodes
+        shell: pwsh
+        run: ./build/ffmpeg/verify-build.ps1 -FfmpegPath ./artifacts/ffmpeg-custom/win-x64/ffmpeg.exe
+

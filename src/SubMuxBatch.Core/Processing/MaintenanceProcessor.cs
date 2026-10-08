@@ -16,6 +16,7 @@ internal sealed record MaintenanceApplicationPolicy(
     bool AttachFonts,
     bool RemoveFonts,
     bool ApplyAudio,
+    bool ApplyVideo,
     bool RefreshTags,
     bool ApplyLapse,
     bool CheckLapse,
@@ -28,10 +29,12 @@ public sealed class MaintenanceProcessor(
     IInstalledFontResolver? fontResolver = null,
     IAudioTranscoder? audioTranscoder = null,
     ISubtitleConverter? subtitleConverter = null,
-    ILapseSynchronizer? lapseSynchronizer = null)
+    ILapseSynchronizer? lapseSynchronizer = null,
+    IVideoTranscoder? videoTranscoder = null)
 {
     private readonly IInstalledFontResolver _fontResolver = fontResolver ?? InstalledFontResolver.System;
     private readonly IAudioTranscoder _audioTranscoder = audioTranscoder ?? new BundledFfmpegAudioTranscoder(processRunner);
+    private readonly IVideoTranscoder _videoTranscoder = videoTranscoder ?? new BundledFfmpegVideoTranscoder(processRunner);
     private readonly ISubtitleConverter _subtitleConverter = subtitleConverter ?? new LibSeSubtitleConverter();
     private readonly ILapseSynchronizer _lapseSynchronizer = lapseSynchronizer ?? new BundledLapseSynchronizer(processRunner);
 
@@ -965,10 +968,59 @@ public sealed class MaintenanceProcessor(
                 }
             }
 
+            VideoMuxPlan? videoMuxPlan = null;
+            if (policy.ApplyVideo)
+            {
+                var videoPlan = VideoConversionPlanner.Create(sourceInspection, settings);
+                if (videoPlan is not null)
+                {
+                    var videoPath = Path.Combine(workspace, "video-01.mkv");
+                    Report(JobState.ConvertingVideo, 28,
+                        ProcessingDecisionFormatter.DescribeVideoPlan(videoPlan.SourceTrack, settings));
+                    Report(JobState.ConvertingVideo, 28, CoreText.Get("Maintenance_ConvertVideo"));
+                    var result = await _videoTranscoder.TranscodeAsync(
+                        new VideoTranscodeRequest(
+                            sourcePath,
+                            videoPlan.SourceVideoIndex,
+                            videoPath,
+                            settings.VideoQualityProfile,
+                            settings.CustomX265Preset,
+                            settings.CustomVideoRateControl,
+                            settings.CustomX265Crf,
+                            settings.CustomVideoBitrateKbps,
+                            settings.CustomX265Tune,
+                            settings.VideoCpuUsage,
+                            settings.CustomVideoThreadCount,
+                            settings.VideoQualityProfile == VideoQualityProfile.Custom
+                                ? settings.CustomX265Parameters
+                                : string.Empty,
+                            sourceInspection.DurationNanoseconds),
+                        onProgress: percent => Report(
+                            JobState.ConvertingVideo,
+                            28 + percent * 22 / 100,
+                            CoreText.Get("Maintenance_ConvertVideoProgress", percent)),
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                    warnings.AddRange(result.Warnings.Select(static warning => $"FFmpeg: {warning}"));
+                    var inspection = await mkvMerge.InspectAsync(videoPath, cancellationToken: cancellationToken)
+                        .ConfigureAwait(false);
+                    var generatedVideos = inspection.Tracks
+                        .Where(static track => string.Equals(track.Type, "video", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    if (generatedVideos.Length != 1
+                        || !VideoConversionPlanner.IsHevc(generatedVideos[0])
+                        || !MkvMergeClient.VideoTechnicalMetadataPreserved(videoPlan.SourceTrack, generatedVideos[0]))
+                    {
+                        throw new InvalidOperationException(CoreText.Get("Ffmpeg_VideoOutputValidationFailed"));
+                    }
+                    videoMuxPlan = new VideoMuxPlan(new GeneratedVideoTrack(videoPath, videoPlan.SourceTrack));
+                }
+            }
+
             AudioMuxPlan? audioMuxPlan = null;
             AudioConversionPlan? conversionPlan = null;
             if (policy.ApplyAudio
-                && (settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage))
+                && (settings.AudioProcessingMode != AudioProcessingMode.KeepOriginal
+                    || settings.FilterAudioTracksByLanguage))
             {
                 conversionPlan = AudioConversionPlanner.Create(sourceInspection, settings);
                 foreach (var message in ProcessingDecisionFormatter.DescribeAudioPlan(sourceInspection, conversionPlan))
@@ -985,19 +1037,22 @@ public sealed class MaintenanceProcessor(
                         index + 1,
                         conversionPlan.Transcodes.Count);
                     var transcodeCount = Math.Max(1, conversionPlan.Transcodes.Count);
-                    Report(JobState.ConvertingAudio, 28 + index * 24 / transcodeCount, audioProgressMessage);
+                    var audioStart = videoMuxPlan is null ? 28 : 50;
+                    var audioRange = videoMuxPlan is null ? 24 : 12;
+                    Report(JobState.ConvertingAudio, audioStart + index * audioRange / transcodeCount, audioProgressMessage);
                     var result = await _audioTranscoder.TranscodeAsync(
                         new AudioTranscodeRequest(sourcePath, transcode.SourceAudioIndex, audioPath,
-                            transcode.OutputChannels, transcode.BitrateKbps, sourceInspection.DurationNanoseconds),
+                            transcode.OutputChannels, transcode.BitrateKbps, sourceInspection.DurationNanoseconds,
+                            transcode.Codec),
                         onProgress: percent => Report(
                             JobState.ConvertingAudio,
-                            28 + (index * 100 + percent) * 24 / (transcodeCount * 100),
+                            audioStart + (index * 100 + percent) * audioRange / (transcodeCount * 100),
                             audioProgressMessage),
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                     warnings.AddRange(result.Warnings.Select(static warning => $"FFmpeg: {warning}"));
                     generated.Add(new GeneratedAudioTrack(audioPath, transcode.SourceTrack,
                         transcode.OutputChannels, transcode.BitrateKbps, transcode.DefaultTrack,
-                        transcode.ForcedTrack, transcode.TrackName));
+                        transcode.ForcedTrack, transcode.TrackName, transcode.Codec));
                 }
                 audioMuxPlan = new AudioMuxPlan(conversionPlan.RetainedSourceTrackIds, generated,
                     conversionPlan.SourceDefaultTrackOverrides);
@@ -1026,9 +1081,10 @@ public sealed class MaintenanceProcessor(
                                       && audioMuxPlan.RetainedSourceTrackIds.Count
                                       != sourceInspection.Tracks.Count(static track =>
                                           string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase)));
+            var hasVideoChanges = videoMuxPlan is not null;
             var hasFontChanges = fontAttachments.Count > 0 || removeExistingStyleFonts;
             if (replacementAssPath is null && replacementSrtPath is null
-                && !hasAudioChanges && !hasFontChanges && updatedTagsPath is null
+                && !hasAudioChanges && !hasVideoChanges && !hasFontChanges && updatedTagsPath is null
                 && !policy.RemoveChapters && !policy.CleanMetadata)
             {
                 return new JobResult(JobState.Skipped, null, warnings, CoreText.Get("Maintenance_NoChanges"));
@@ -1061,7 +1117,8 @@ public sealed class MaintenanceProcessor(
                 policy.RemoveChapters,
                 policy.CleanMetadata,
                 percent => Report(JobState.Muxing, 58 + percent * 35 / 100, CoreText.Get("Maintenance_MuxProgress", percent)),
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken,
+                videoMuxPlan: videoMuxPlan).ConfigureAwait(false);
             warnings.AddRange(muxResult.Warnings.Select(static warning => $"mkvmerge: {warning}"));
             var partialLength = new FileInfo(partialPath).Length;
 
@@ -1069,7 +1126,7 @@ public sealed class MaintenanceProcessor(
             var outputInspection = await mkvMerge.InspectAsync(partialPath, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             ValidateOutput(
-                sourceInspection, outputInspection, subtitleReplacements, audioMuxPlan,
+                sourceInspection, outputInspection, subtitleReplacements, audioMuxPlan, videoMuxPlan,
                 retainedSubtitleTrackIds, policy.RemoveChapters, policy.CleanMetadata,
                 removeExistingStyleFonts, fontAttachments);
             await ValidateReplacementPayloadsAsync(
@@ -1660,6 +1717,7 @@ public sealed class MaintenanceProcessor(
             settings.MaintenanceUpdateFonts && settings.AttachAssStyleFonts,
             settings.MaintenanceUpdateFonts && settings.RemoveExistingFontAttachments,
             settings.MaintenanceApplyAudioSettings,
+            settings.MaintenanceApplyVideoSettings,
             settings.MaintenanceRefreshTags,
             settings.MaintenanceUpdateLapseSync && settings.EnableLapseSync,
             settings.MaintenanceUpdateLapseSync
@@ -1725,13 +1783,36 @@ public sealed class MaintenanceProcessor(
         bool removeChapters,
         bool cleanMetadata,
         bool removeExistingFonts,
+        IReadOnlyList<FontAttachmentFile> addedFonts) =>
+        ValidateOutput(source, output, subtitleReplacements, audioMuxPlan, null,
+            retainedSubtitleTrackIds, removeChapters, cleanMetadata, removeExistingFonts, addedFonts);
+
+    internal static void ValidateOutput(
+        MkvInspection source,
+        MkvInspection output,
+        IReadOnlyList<SubtitleTrackReplacement> subtitleReplacements,
+        AudioMuxPlan? audioMuxPlan,
+        VideoMuxPlan? videoMuxPlan,
+        IReadOnlySet<int>? retainedSubtitleTrackIds,
+        bool removeChapters,
+        bool cleanMetadata,
+        bool removeExistingFonts,
         IReadOnlyList<FontAttachmentFile> addedFonts)
     {
         var sourceVideos = source.Tracks.Where(static track => IsTrackType(track, "video")).ToArray();
         var outputVideos = output.Tracks.Where(static track => IsTrackType(track, "video")).ToArray();
         if (sourceVideos.Length == 0
             || sourceVideos.Length != outputVideos.Length
-            || sourceVideos.Where((track, index) => !VideoTrackMatches(track, outputVideos[index], cleanMetadata)).Any())
+            || sourceVideos.Where((track, index) => videoMuxPlan is not null
+                ? !VideoConversionPlanner.IsHevc(outputVideos[index])
+                  || !MkvMergeClient.VideoTechnicalMetadataPreserved(track, outputVideos[index])
+                  || !MkvMergeClient.LanguageMetadataPreserved(track, outputVideos[index])
+                  || track.DefaultTrack != outputVideos[index].DefaultTrack
+                  || track.ForcedTrack != outputVideos[index].ForcedTrack
+                  || !MkvMergeClient.AudioFlagsPreserved(track, outputVideos[index])
+                  || !string.Equals(cleanMetadata ? null : track.TrackName,
+                      outputVideos[index].TrackName, StringComparison.Ordinal)
+                : !VideoTrackMatches(track, outputVideos[index], cleanMetadata)).Any())
         {
             throw new InvalidOperationException(CoreText.Get("Maintenance_VideoValidationFailed"));
         }
@@ -1897,7 +1978,9 @@ public sealed class MaintenanceProcessor(
         GeneratedAudioTrack expected,
         MkvTrackInfo actual,
         bool clearTrackName) =>
-        actual.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
+        (expected.Codec == AudioCodec.AacLc
+            ? actual.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
+            : actual.CodecId.Contains("OPUS", StringComparison.OrdinalIgnoreCase))
         && MkvMergeClient.LanguageMetadataPreserved(expected.SourceTrack, actual)
         && expected.DefaultTrack == actual.DefaultTrack
         && expected.ForcedTrack == actual.ForcedTrack

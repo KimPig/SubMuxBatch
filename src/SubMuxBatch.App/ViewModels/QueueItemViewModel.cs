@@ -763,9 +763,16 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
             hasOperation = true;
         }
         if (settings.MaintenanceApplyAudioSettings
-            && (settings.ConvertAudioToAac || settings.FilterAudioTracksByLanguage))
+            && (settings.AudioProcessingMode != AudioProcessingMode.KeepOriginal
+                || settings.FilterAudioTracksByLanguage))
         {
             actions.Add(AppText.Get("Maintenance_PlanApplyAudio"));
+            hasOperation = true;
+        }
+        if (settings.MaintenanceApplyVideoSettings
+            && settings.VideoProcessingMode != VideoProcessingMode.KeepOriginal)
+        {
+            actions.Add(AppText.Get("Maintenance_PlanApplyVideo"));
             hasOperation = true;
         }
         if (settings.MaintenanceRefreshTags)
@@ -902,6 +909,7 @@ public sealed class QueueItemViewModel : INotifyPropertyChanged
         JobState.PreparingFonts => AppText.Get("Status_PreparingFonts"),
         JobState.PreparingJob => AppText.Get("Status_PreparingJob"),
         JobState.BackingUp => AppText.Get("Status_BackingUp"),
+        JobState.ConvertingVideo => AppText.Get("Status_ConvertingVideo", Progress),
         JobState.ConvertingAudio => AppText.Get("Status_ConvertingAudio", Progress),
         JobState.Muxing => AppText.Get("Status_Muxing", Progress),
         JobState.Verifying => AppText.Get("Status_Verifying"),

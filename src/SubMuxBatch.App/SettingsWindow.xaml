@@ -421,6 +421,147 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="{loc:Loc Settings_TabVideo}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,12,4,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_VideoConversion}" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,6,0,0" MaxWidth="560" HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_VideoConversionHelp}" />
+                                <Grid Margin="0,14,0,0" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="320" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_VideoProcessingMode}" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" Margin="0,0,14,0" />
+                                    <ComboBox Grid.Column="1" x:Name="VideoProcessingModeComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag"
+                                              SelectionChanged="VideoSettings_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_ProcessingKeepOriginal}" Tag="KeepOriginal" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoConvertNonHevc}" Tag="ConvertNonHevc" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_ProcessingReencodeAll}" Tag="ReencodeAll" />
+                                    </ComboBox>
+                                </Grid>
+                                <Grid x:Name="VideoEncodingOptionsPanel" Margin="0,10,0,0" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="320" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_VideoQuality}" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" Margin="0,0,14,0" />
+                                    <ComboBox Grid.Column="1" x:Name="VideoQualityProfileComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag"
+                                              SelectionChanged="VideoSettings_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoQualityFast}" Tag="Fast" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoQualityBalanced}" Tag="Balanced" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoQualityHigh}" Tag="HighQuality" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoQualityCustom}" Tag="Custom" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
+                                               Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                               Text="{loc:Loc Settings_VideoQualityHelp}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="CustomVideoOptionsCard" Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_VideoCustom}" FontSize="18" FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="320" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_X265Preset}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Column="1" x:Name="CustomX265PresetComboBox" Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag">
+                                        <ComboBoxItem Content="faster" Tag="Faster" />
+                                        <ComboBoxItem Content="fast" Tag="Fast" />
+                                        <ComboBoxItem Content="medium" Tag="Medium" />
+                                        <ComboBoxItem Content="slow" Tag="Slow" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="{loc:Loc Settings_VideoRateControl}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="CustomVideoRateControlComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag" Margin="0,10,0,0"
+                                              SelectionChanged="VideoSettings_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoRateControlCrf}" Tag="ConstantQuality" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoRateControlAbr}" Tag="AverageBitrate" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoRateControlTwoPass}" Tag="TwoPassAverageBitrate" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="2" Text="CRF" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="CustomX265CrfTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0,10,0,0" />
+                                    <TextBlock Grid.Row="3" Text="{loc:Loc Settings_VideoBitrate}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="CustomVideoBitrateComboBox" Style="{StaticResource SettingsComboBoxStyle}"
+                                              IsEditable="True" Margin="0,10,0,0">
+                                        <ComboBoxItem Content="1500" /><ComboBoxItem Content="2000" />
+                                        <ComboBoxItem Content="2500" /><ComboBoxItem Content="3000" />
+                                        <ComboBoxItem Content="4000" /><ComboBoxItem Content="6000" />
+                                        <ComboBoxItem Content="8000" /><ComboBoxItem Content="12000" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="4" Text="Tune" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <ComboBox Grid.Row="4" Grid.Column="1" x:Name="CustomX265TuneComboBox" Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag" Margin="0,10,0,0">
+                                        <ComboBoxItem Content="{loc:Loc Settings_X265TuneNone}" Tag="None" />
+                                        <ComboBoxItem Content="animation" Tag="Animation" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="5" Text="{loc:Loc Settings_X265Parameters}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <TextBox Grid.Row="5" Grid.Column="1" x:Name="CustomX265ParametersTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0,10,0,0" />
+                                </Grid>
+                                <TextBlock Margin="0,8,0,0" MaxWidth="560" HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_X265ParametersHelp}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="VideoCpuOptionsCard" Style="{StaticResource SectionCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Settings_VideoCpuHeading}" FontSize="18" FontWeight="SemiBold" />
+                                <Grid Margin="0,14,0,0" MaxWidth="520" HorizontalAlignment="Left">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="320" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{loc:Loc Settings_VideoCpuUsage}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Column="1" x:Name="VideoCpuUsageComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag"
+                                              SelectionChanged="VideoSettings_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoCpuAuto}" Tag="Auto" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoCpuLow}" Tag="Low" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoCpuNormal}" Tag="Normal" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoCpuMaximum}" Tag="Maximum" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_VideoCpuCustom}" Tag="Custom" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="{loc:Loc Settings_VideoThreadCount}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,0,0" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="CustomVideoThreadCountTextBox" Style="{StaticResource FieldTextBoxStyle}" Margin="0,10,0,0" />
+                                </Grid>
+                                <TextBlock Margin="0,8,0,0" MaxWidth="560" HorizontalAlignment="Left"
+                                           Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                           Text="{loc:Loc Settings_VideoCpuHelp}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="{loc:Loc Settings_TabAudio}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
@@ -480,53 +621,67 @@
                                 <TextBlock Text="{loc:Loc Settings_AudioConversion}"
                                            FontSize="18"
                                            FontWeight="SemiBold" />
-                                <CheckBox x:Name="ConvertAudioToAacCheckBox"
-                                          Margin="0,14,0,0">
-                                    <TextBlock Text="{loc:Loc Settings_ConvertAudioToAac}"
-                                               TextWrapping="Wrap" />
-                                </CheckBox>
-                                <TextBlock Margin="24,5,0,0"
+                                <TextBlock Margin="0,6,0,0"
                                            MaxWidth="520"
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
                                            Text="{loc:Loc Settings_ConvertAudioToAacHelp}" />
-                                <Grid Margin="24,10,0,0"
+                                <Grid Margin="0,14,0,0"
                                       MaxWidth="520"
-                                      HorizontalAlignment="Left"
-                                      IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}">
+                                      HorizontalAlignment="Left">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="130" />
                                         <ColumnDefinition Width="320" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{loc:Loc Settings_AudioChannelMode}"
+                                    <TextBlock Text="{loc:Loc Settings_AudioProcessingMode}"
                                                FontWeight="SemiBold"
                                                VerticalAlignment="Center"
                                                Margin="0,0,14,0" />
                                     <ComboBox Grid.Column="1"
+                                              x:Name="AudioProcessingModeComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}"
+                                              SelectedValuePath="Tag"
+                                              SelectionChanged="AudioSettings_SelectionChanged">
+                                        <ComboBoxItem Content="{loc:Loc Settings_ProcessingKeepOriginal}" Tag="KeepOriginal" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_AudioConvertWhenNeeded}" Tag="ConvertWhenNeeded" />
+                                        <ComboBoxItem Content="{loc:Loc Settings_ProcessingReencodeAll}" Tag="ReencodeAll" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="{loc:Loc Settings_AudioCodec}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,14,0" />
+                                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="AudioCodecComboBox" Style="{StaticResource SettingsComboBoxStyle}" SelectedValuePath="Tag" Margin="0,10,0,0">
+                                        <ComboBoxItem Content="AAC-LC" Tag="AacLc" />
+                                        <ComboBoxItem Content="Opus" Tag="Opus" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="2" Text="{loc:Loc Settings_AudioChannelMode}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,14,0" />
+                                    <ComboBox Grid.Row="2" Grid.Column="1"
                                               x:Name="AudioChannelModeComboBox"
                                               Style="{StaticResource SettingsComboBoxStyle}"
                                               SelectedValuePath="Tag"
-                                              VerticalAlignment="Center">
+                                              VerticalAlignment="Center" Margin="0,10,0,0">
                                         <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsPreserve}" Tag="PreserveChannels" />
                                         <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsStereo}" Tag="ConvertToStereo" />
                                         <ComboBoxItem Content="{loc:Loc Settings_AudioChannelsKeepAndStereo}" Tag="KeepMultichannelAndAddStereo" />
                                     </ComboBox>
+                                    <TextBlock Grid.Row="3" Text="{loc:Loc Settings_AudioBitrate}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,10,14,0" />
+                                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="AudioBitrateComboBox"
+                                              Style="{StaticResource SettingsComboBoxStyle}" IsEditable="True" Margin="0,10,0,0">
+                                        <ComboBoxItem Content="96" /><ComboBoxItem Content="128" /><ComboBoxItem Content="160" />
+                                        <ComboBoxItem Content="192" /><ComboBoxItem Content="256" /><ComboBoxItem Content="320" />
+                                        <ComboBoxItem Content="384" /><ComboBoxItem Content="448" /><ComboBoxItem Content="512" />
+                                    </ComboBox>
                                 </Grid>
-                                <TextBlock Margin="24,7,0,0"
+                                <TextBlock Margin="0,7,0,0"
                                            MaxWidth="520"
                                            HorizontalAlignment="Left"
                                            Foreground="{StaticResource SecondaryTextBrush}"
                                            TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_AudioChannelsStereoHelp}"
-                                           IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}" />
-                                <TextBlock Margin="24,5,0,0"
-                                           MaxWidth="520"
-                                           HorizontalAlignment="Left"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Text="{loc:Loc Settings_AudioBitrateHelp}"
-                                           IsEnabled="{Binding IsChecked, ElementName=ConvertAudioToAacCheckBox}" />
+                                           Text="{loc:Loc Settings_AudioBitrateHelp}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1004,6 +1159,7 @@
                                 <CheckBox x:Name="MaintenanceUpdateAssStyleCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateAssStyle}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceUpdateFontsCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateFonts}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceApplyAudioSettingsCheckBox" Content="{loc:Loc Settings_MaintenanceApplyAudio}" Margin="0,4" />
+                                <CheckBox x:Name="MaintenanceApplyVideoSettingsCheckBox" Content="{loc:Loc Settings_MaintenanceApplyVideo}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceRefreshTagsCheckBox" Content="{loc:Loc Settings_MaintenanceRefreshTags}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceUpdateLapseSyncCheckBox" Content="{loc:Loc Settings_MaintenanceUpdateLapse}" Margin="0,4" />
                                 <CheckBox x:Name="MaintenanceForceLapseResyncCheckBox"

@@ -3,7 +3,8 @@ param(
     [ValidateSet('win-x64', 'win-arm64')]
     [string] $Runtime = 'win-x64',
     [switch] $SkipTests,
-    [switch] $CreateArchive
+    [switch] $CreateArchive,
+    [string] $BundledFfmpegPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,9 +14,10 @@ $testPath = Join-Path $projectRoot 'tests\SubMuxBatch.Core.Tests\SubMuxBatch.Cor
 $outputPath = Join-Path $projectRoot "artifacts\publish\$Runtime"
 $version = Get-Date -Format 'yyyy.MM.dd'
 $assemblyVersion = Get-Date -Format 'yyyy.M.d.0'
+$ffmpegReleaseTag = 'autobuild-2026-10-07-13-07'
 $ffmpegAssetPattern = switch ($Runtime) {
-    'win-x64' { '^ffmpeg-n8\.1(?:(?:\.\d+)?-\d+-g[0-9a-f]+|-latest)-win64-lgpl-8\.1\.zip$' }
-    'win-arm64' { '^ffmpeg-n8\.1(?:(?:\.\d+)?-\d+-g[0-9a-f]+|-latest)-winarm64-lgpl-8\.1\.zip$' }
+    'win-x64' { '^ffmpeg-n8\.1\.3-14-g330caae0c1-win64-gpl-8\.1\.zip$' }
+    'win-arm64' { '^ffmpeg-n8\.1\.3-14-g330caae0c1-winarm64-gpl-8\.1\.zip$' }
 }
 $ffmpegCache = Join-Path $projectRoot "artifacts\dependencies\ffmpeg\$Runtime"
 $ffmpegExecutable = Join-Path $ffmpegCache 'ffmpeg.exe'
@@ -66,13 +68,27 @@ function Remove-VerifiedCacheDirectory([string] $Path, [string] $CacheRoot) {
 
 function Get-BundledFfmpeg {
     [System.IO.Directory]::CreateDirectory($ffmpegCache) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($BundledFfmpegPath)) {
+        $customFfmpeg = [System.IO.Path]::GetFullPath($BundledFfmpegPath)
+        if (-not (Test-Path -LiteralPath $customFfmpeg -PathType Leaf)) {
+            throw "Custom FFmpeg executable not found: $customFfmpeg"
+        }
+        if (-not [string]::Equals($customFfmpeg, $ffmpegExecutable, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Copy-Item -LiteralPath $customFfmpeg -Destination $ffmpegExecutable -Force
+        }
+        Set-Content -LiteralPath $ffmpegDigestPath `
+            -Value (Get-FileHash -LiteralPath $ffmpegExecutable -Algorithm SHA256).Hash.ToUpperInvariant() `
+            -Encoding ascii
+        & (Join-Path $projectRoot 'build\ffmpeg\verify-build.ps1') -FfmpegPath $ffmpegExecutable
+        return
+    }
     $headers = @{ 'User-Agent' = 'SubMuxBatch-Publish' }
     $release = Invoke-RestMethod `
         -Headers $headers `
-        -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest'
+        -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$ffmpegReleaseTag"
     $asset = @($release.assets | Where-Object { $_.name -match $ffmpegAssetPattern })
     if ($asset.Count -ne 1) {
-        throw "Could not resolve exactly one FFmpeg 8.1 LGPL asset for $Runtime."
+        throw "Could not resolve exactly one FFmpeg 8.1 GPL asset for $Runtime."
     }
 
     $expectedDigest = [string]$asset[0].digest
@@ -138,10 +154,13 @@ function Get-BundledFfmpeg {
     $invalidFfmpeg = $versionExitCode -ne 0 `
         -or $licenseExitCode -ne 0 `
         -or $versionText -notmatch 'ffmpeg version n?8\.1' `
-        -or $versionText -match '--enable-(gpl|nonfree)' `
-        -or $licenseText -notmatch 'GNU Lesser General Public License'
+        -or $versionText -notmatch '--enable-gpl' `
+        -or $versionText -notmatch '--enable-libx265' `
+        -or $versionText -notmatch '--enable-libopus' `
+        -or $versionText -match '--enable-nonfree' `
+        -or $licenseText -notmatch 'GNU General Public License'
     if ($invalidFfmpeg) {
-        throw 'The downloaded FFmpeg executable did not pass the LGPL build validation.'
+        throw 'The downloaded FFmpeg executable did not pass the GPL/libx265/libopus build validation.'
     }
 }
 

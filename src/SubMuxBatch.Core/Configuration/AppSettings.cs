@@ -23,6 +23,72 @@ public enum AudioChannelMode
     KeepMultichannelAndAddStereo
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<AudioProcessingMode>))]
+public enum AudioProcessingMode
+{
+    KeepOriginal,
+    ConvertWhenNeeded,
+    ReencodeAll
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<AudioCodec>))]
+public enum AudioCodec
+{
+    AacLc,
+    Opus
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<VideoProcessingMode>))]
+public enum VideoProcessingMode
+{
+    KeepOriginal,
+    ConvertNonHevc,
+    ReencodeAll
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<VideoQualityProfile>))]
+public enum VideoQualityProfile
+{
+    Fast,
+    Balanced,
+    HighQuality,
+    Custom
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<VideoRateControlMode>))]
+public enum VideoRateControlMode
+{
+    ConstantQuality,
+    AverageBitrate,
+    TwoPassAverageBitrate
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<VideoCpuUsageMode>))]
+public enum VideoCpuUsageMode
+{
+    Auto,
+    Low,
+    Normal,
+    Maximum,
+    Custom
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<X265Preset>))]
+public enum X265Preset
+{
+    Faster,
+    Fast,
+    Medium,
+    Slow
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<X265Tune>))]
+public enum X265Tune
+{
+    None,
+    Animation
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter<AppLanguage>))]
 public enum AppLanguage
 {
@@ -93,8 +159,22 @@ public sealed class AppSettings
     public bool CleanOutputMetadata { get; set; } = false;
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ConvertAudioToAac { get; set; } = false;
+    public AudioProcessingMode AudioProcessingMode { get; set; } = AudioProcessingMode.KeepOriginal;
+    public AudioCodec AudioCodec { get; set; } = AudioCodec.AacLc;
     public AudioChannelMode AudioChannelMode { get; set; } = AudioChannelMode.PreserveChannels;
+    public int AudioBitrateKbps { get; set; } = 192;
+    public VideoProcessingMode VideoProcessingMode { get; set; } = VideoProcessingMode.KeepOriginal;
+    public VideoQualityProfile VideoQualityProfile { get; set; } = VideoQualityProfile.Balanced;
+    public X265Preset CustomX265Preset { get; set; } = X265Preset.Medium;
+    public VideoRateControlMode CustomVideoRateControl { get; set; } = VideoRateControlMode.ConstantQuality;
+    public int CustomX265Crf { get; set; } = 23;
+    public int CustomVideoBitrateKbps { get; set; } = 3000;
+    public X265Tune CustomX265Tune { get; set; } = X265Tune.None;
+    public VideoCpuUsageMode VideoCpuUsage { get; set; } = VideoCpuUsageMode.Auto;
+    public int CustomVideoThreadCount { get; set; } = Math.Max(1, Environment.ProcessorCount / 2);
+    public string CustomX265Parameters { get; set; } = string.Empty;
     public int ConcurrentJobCount { get; set; } = MinConcurrentJobCount;
     public bool ShowFileColumn { get; set; } = true;
     public bool ShowCompositionColumn { get; set; } = true;
@@ -119,6 +199,7 @@ public sealed class AppSettings
     public bool MaintenanceUpdateAssStyle { get; set; } = true;
     public bool MaintenanceUpdateFonts { get; set; } = true;
     public bool MaintenanceApplyAudioSettings { get; set; } = true;
+    public bool MaintenanceApplyVideoSettings { get; set; } = true;
     public bool MaintenanceRefreshTags { get; set; } = true;
     public bool MaintenanceDetectLegacyAss { get; set; } = true;
     public string MaintenanceLegacyAssStyles { get; set; } = DefaultMaintenanceLegacyAssStyles;
@@ -183,7 +264,19 @@ public sealed class AppSettings
                 property.Name,
                 nameof(MaintenanceOutputPrefix),
                 StringComparison.OrdinalIgnoreCase));
+        var hasAudioProcessingMode = document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Any(property => string.Equals(
+                property.Name,
+                nameof(AudioProcessingMode),
+                StringComparison.OrdinalIgnoreCase));
         var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        if (!hasAudioProcessingMode)
+        {
+            settings.AudioProcessingMode = settings.ConvertAudioToAac
+                ? AudioProcessingMode.ConvertWhenNeeded
+                : AudioProcessingMode.KeepOriginal;
+        }
+        settings.ConvertAudioToAac = false;
         if (!settings.ShowFileColumn && !settings.ShowCompositionColumn && !settings.ShowMediaFormatColumn && !settings.ShowDurationColumn
             && !settings.ShowVideoCodecColumn && !settings.ShowWorkColumn && !settings.ShowStatusColumn)
         {
@@ -279,7 +372,20 @@ public sealed class AppSettings
         FilterAudioTracksByLanguage = FilterAudioTracksByLanguage,
         SelectedAudioLanguage = SelectedAudioLanguage,
         ConvertAudioToAac = ConvertAudioToAac,
+        AudioProcessingMode = AudioProcessingMode,
+        AudioCodec = AudioCodec,
         AudioChannelMode = AudioChannelMode,
+        AudioBitrateKbps = AudioBitrateKbps,
+        VideoProcessingMode = VideoProcessingMode,
+        VideoQualityProfile = VideoQualityProfile,
+        CustomX265Preset = CustomX265Preset,
+        CustomVideoRateControl = CustomVideoRateControl,
+        CustomX265Crf = CustomX265Crf,
+        CustomVideoBitrateKbps = CustomVideoBitrateKbps,
+        CustomX265Tune = CustomX265Tune,
+        VideoCpuUsage = VideoCpuUsage,
+        CustomVideoThreadCount = CustomVideoThreadCount,
+        CustomX265Parameters = CustomX265Parameters,
         ConcurrentJobCount = ConcurrentJobCount,
         ShowFileColumn = ShowFileColumn,
         ShowCompositionColumn = ShowCompositionColumn,
@@ -304,6 +410,7 @@ public sealed class AppSettings
         MaintenanceUpdateAssStyle = MaintenanceUpdateAssStyle,
         MaintenanceUpdateFonts = MaintenanceUpdateFonts,
         MaintenanceApplyAudioSettings = MaintenanceApplyAudioSettings,
+        MaintenanceApplyVideoSettings = MaintenanceApplyVideoSettings,
         MaintenanceRefreshTags = MaintenanceRefreshTags,
         MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAss,
         MaintenanceLegacyAssStyles = MaintenanceLegacyAssStyles,
@@ -343,9 +450,61 @@ public sealed class AppSettings
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioLanguage"));
         }
 
-        if (ConvertAudioToAac && !Enum.IsDefined(AudioChannelMode))
+        if (!Enum.IsDefined(AudioProcessingMode)
+            || !Enum.IsDefined(AudioCodec)
+            || !Enum.IsDefined(AudioChannelMode))
         {
             throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioChannelMode"));
+        }
+
+        if (AudioBitrateKbps is < 16 or > 1024
+            || AudioCodec == AudioCodec.Opus && AudioBitrateKbps > 510)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidAudioBitrate"));
+        }
+
+        if (!Enum.IsDefined(VideoProcessingMode)
+            || !Enum.IsDefined(VideoQualityProfile)
+            || !Enum.IsDefined(CustomX265Preset)
+            || !Enum.IsDefined(CustomVideoRateControl)
+            || !Enum.IsDefined(VideoCpuUsage)
+            || !Enum.IsDefined(CustomX265Tune))
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoEncoding"));
+        }
+
+        if (CustomX265Crf is < 0 or > 51)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoCrf"));
+        }
+
+        if (CustomVideoBitrateKbps is < 100 or > 200_000)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoBitrate"));
+        }
+
+        if (CustomVideoThreadCount is < 1 or > 256)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoThreadCount"));
+        }
+
+        if (CustomX265Parameters.IndexOfAny(['\r', '\n', '\0']) >= 0)
+        {
+            throw new InvalidOperationException(CoreText.Get("Settings_InvalidX265Parameters"));
+        }
+
+        var reservedX265Parameters = CustomX265Parameters
+            .Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static parameter => parameter.Split('=', 2)[0].Trim())
+            .Where(static name => name.Equals("pass", StringComparison.OrdinalIgnoreCase)
+                                  || name.Equals("stats", StringComparison.OrdinalIgnoreCase)
+                                  || name.Equals("pools", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (reservedX265Parameters.Length > 0)
+        {
+            throw new InvalidOperationException(CoreText.Get(
+                "Settings_ReservedX265Parameters",
+                string.Join(", ", reservedX265Parameters.Distinct(StringComparer.OrdinalIgnoreCase))));
         }
 
         if (!Enum.IsDefined(LapseMode) || !Enum.IsDefined(LapseReference))

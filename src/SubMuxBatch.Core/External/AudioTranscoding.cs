@@ -13,7 +13,8 @@ public sealed record AudioTranscodeRequest(
     string OutputPath,
     int? OutputChannels,
     int BitrateKbps,
-    long? SourceDurationNanoseconds);
+    long? SourceDurationNanoseconds,
+    AudioCodec Codec = AudioCodec.AacLc);
 
 public sealed record AudioTranscodeResult(IReadOnlyList<string> Warnings);
 
@@ -33,7 +34,8 @@ public sealed record GeneratedAudioTrack(
     int BitrateKbps,
     bool DefaultTrack,
     bool ForcedTrack,
-    string? TrackName);
+    string? TrackName,
+    AudioCodec Codec = AudioCodec.AacLc);
 
 public sealed record AudioMuxPlan(
     IReadOnlySet<int> RetainedSourceTrackIds,
@@ -47,7 +49,8 @@ public sealed record PlannedAudioTranscode(
     int BitrateKbps,
     bool DefaultTrack,
     bool ForcedTrack,
-    string? TrackName);
+    string? TrackName,
+    AudioCodec Codec = AudioCodec.AacLc);
 
 public sealed record AudioConversionPlan(
     IReadOnlyList<MkvTrackInfo> SelectedSourceTracks,
@@ -67,7 +70,8 @@ public static class AudioConversionPlanner
             .Select((track, audioIndex) => new IndexedAudioTrack(track, audioIndex))
             .ToArray();
         var selected = SelectByLanguage(indexedAudio, settings).ToArray();
-        if (!settings.ConvertAudioToAac)
+        var processingMode = GetProcessingMode(settings);
+        if (processingMode == AudioProcessingMode.KeepOriginal)
         {
             return new AudioConversionPlan(
                 selected.Select(static item => item.Track).ToArray(),
@@ -85,13 +89,13 @@ public static class AudioConversionPlanner
             case AudioChannelMode.PreserveChannels:
                 foreach (var item in selected)
                 {
-                    if (IsAac(item.Track))
+                    if (!NeedsTranscode(item.Track, item.Track.AudioChannels, settings, processingMode))
                     {
                         retainedIds.Add(RequiredId(item.Track));
                     }
                     else
                     {
-                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels));
+                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels, settings));
                     }
                 }
                 break;
@@ -100,13 +104,13 @@ public static class AudioConversionPlanner
                 foreach (var item in selected)
                 {
                     var channels = item.Track.AudioChannels is > 2 ? 2 : item.Track.AudioChannels;
-                    if (IsAac(item.Track) && item.Track.AudioChannels is <= 2)
+                    if (!NeedsTranscode(item.Track, channels, settings, processingMode))
                     {
                         retainedIds.Add(RequiredId(item.Track));
                     }
                     else
                     {
-                        transcodes.Add(CreateTranscode(item, channels));
+                        transcodes.Add(CreateTranscode(item, channels, settings));
                     }
                 }
                 break;
@@ -114,13 +118,13 @@ public static class AudioConversionPlanner
             case AudioChannelMode.KeepMultichannelAndAddStereo:
                 foreach (var item in selected.Where(static item => item.Track.AudioChannels is <= 2 or null))
                 {
-                    if (IsAac(item.Track))
+                    if (!NeedsTranscode(item.Track, item.Track.AudioChannels, settings, processingMode))
                     {
                         retainedIds.Add(RequiredId(item.Track));
                     }
                     else
                     {
-                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels));
+                        transcodes.Add(CreateTranscode(item, item.Track.AudioChannels, settings));
                     }
                 }
 
@@ -136,7 +140,8 @@ public static class AudioConversionPlanner
 
                     var existingStereoTracks = selected.Where(item =>
                             item.Track.AudioChannels == 2
-                            && IsAac(item.Track)
+                            && MatchesCodec(item.Track, settings.AudioCodec)
+                            && processingMode != AudioProcessingMode.ReencodeAll
                             && string.Equals(GetLanguageKey(item.Track), group.Key, StringComparison.OrdinalIgnoreCase))
                         .ToArray();
                     var plannedStereoIndices = transcodes
@@ -190,11 +195,11 @@ public static class AudioConversionPlanner
                             continue;
                         }
 
-                        if (multichannel.Track.DefaultTrack)
+                        if (multichannel.Track.DefaultTrack && retainedIds.Contains(RequiredId(multichannel.Track)))
                         {
                             defaultOverrides[RequiredId(multichannel.Track)] = false;
                         }
-                        transcodes.Add(CreateTranscode(multichannel, 2, multichannel.Track.DefaultTrack));
+                        transcodes.Add(CreateTranscode(multichannel, 2, settings, multichannel.Track.DefaultTrack));
                     }
                 }
                 break;
@@ -209,6 +214,11 @@ public static class AudioConversionPlanner
             transcodes,
             defaultOverrides);
     }
+
+    public static AudioProcessingMode GetProcessingMode(AppSettings settings) =>
+        settings.AudioProcessingMode == AudioProcessingMode.KeepOriginal && settings.ConvertAudioToAac
+            ? AudioProcessingMode.ConvertWhenNeeded
+            : settings.AudioProcessingMode;
 
     public static int GetBitrateKbps(int? channels) => channels switch
     {
@@ -241,21 +251,39 @@ public static class AudioConversionPlanner
     private static PlannedAudioTranscode CreateTranscode(
         IndexedAudioTrack item,
         int? channels,
+        AppSettings settings,
         bool? isDefault = null) => new(
         item.Track,
         item.AudioIndex,
         channels,
-        GetBitrateKbps(channels),
+        settings.ConvertAudioToAac && settings.AudioProcessingMode == AudioProcessingMode.KeepOriginal
+            ? GetBitrateKbps(channels)
+            : settings.AudioBitrateKbps,
         isDefault ?? item.Track.DefaultTrack,
         item.Track.ForcedTrack,
-        item.Track.TrackName);
+        item.Track.TrackName,
+        settings.AudioCodec);
 
     private static bool IsAudio(MkvTrackInfo track) =>
         string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsAac(MkvTrackInfo track) =>
-        track.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
-        || track.CodecName?.Contains("AAC", StringComparison.OrdinalIgnoreCase) == true;
+    private static bool NeedsTranscode(
+        MkvTrackInfo track,
+        int? outputChannels,
+        AppSettings settings,
+        AudioProcessingMode processingMode) =>
+        processingMode == AudioProcessingMode.ReencodeAll
+        || !MatchesCodec(track, settings.AudioCodec)
+        || outputChannels.HasValue && track.AudioChannels != outputChannels;
+
+    private static bool MatchesCodec(MkvTrackInfo track, AudioCodec codec) => codec switch
+    {
+        AudioCodec.AacLc => track.CodecId.Contains("AAC", StringComparison.OrdinalIgnoreCase)
+                            || track.CodecName?.Contains("AAC", StringComparison.OrdinalIgnoreCase) == true,
+        AudioCodec.Opus => track.CodecId.Contains("OPUS", StringComparison.OrdinalIgnoreCase)
+                          || track.CodecName?.Contains("OPUS", StringComparison.OrdinalIgnoreCase) == true,
+        _ => false
+    };
 
     private static int RequiredId(MkvTrackInfo track) =>
         track.Id ?? throw new InvalidOperationException(CoreText.Get("Mkv_AudioTrackIdMissing"));
@@ -367,7 +395,8 @@ public sealed class BundledFfmpegAudioTranscoder(
             "-map", $"0:a:{request.SourceAudioIndex}",
             "-vn", "-sn", "-dn",
             "-map_metadata", "-1", "-map_chapters", "-1",
-            "-c:a", "aac", "-b:a", $"{request.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k"
+            "-c:a", request.Codec == AudioCodec.Opus ? "libopus" : "aac",
+            "-b:a", $"{request.BitrateKbps.ToString(CultureInfo.InvariantCulture)}k"
         };
         if (request.OutputChannels.HasValue)
         {

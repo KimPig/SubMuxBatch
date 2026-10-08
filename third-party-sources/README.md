@@ -4,6 +4,7 @@ This directory stores the exact or corresponding upstream source archives for GP
 
 | Component | Bundled version | License | Source details |
 | --- | --- | --- | --- |
+| FFmpeg + x265 + Opus | 8.1 / 4.3+49 / 1.5.2 | GPL-3.0-or-later / GPL-2.0-or-later / BSD-3-Clause | [`ffmpeg/8.1/README.md`](ffmpeg/8.1/README.md) |
 | MKVToolNix | 102.0 | GPL-2.0-only | [`mkvtoolnix/102.0/README.md`](mkvtoolnix/102.0/README.md) |
 | LAPSE | 2.2.4 | GPL-3.0-or-later | [`lapse/2.2.4/README.md`](lapse/2.2.4/README.md) |
 

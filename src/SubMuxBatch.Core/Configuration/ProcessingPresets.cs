@@ -28,7 +28,20 @@ public sealed class ProcessingPresetSettings
     public bool FilterAudioTracksByLanguage { get; set; }
     public AudioTrackLanguage SelectedAudioLanguage { get; set; } = AudioTrackLanguage.Japanese;
     public bool ConvertAudioToAac { get; set; }
+    public AudioProcessingMode? AudioProcessingMode { get; set; }
+    public AudioCodec AudioCodec { get; set; } = AudioCodec.AacLc;
     public AudioChannelMode AudioChannelMode { get; set; } = AudioChannelMode.PreserveChannels;
+    public int AudioBitrateKbps { get; set; } = 192;
+    public VideoProcessingMode VideoProcessingMode { get; set; } = VideoProcessingMode.KeepOriginal;
+    public VideoQualityProfile VideoQualityProfile { get; set; } = VideoQualityProfile.Balanced;
+    public X265Preset CustomX265Preset { get; set; } = X265Preset.Medium;
+    public VideoRateControlMode CustomVideoRateControl { get; set; } = VideoRateControlMode.ConstantQuality;
+    public int CustomX265Crf { get; set; } = 23;
+    public int CustomVideoBitrateKbps { get; set; } = 3000;
+    public X265Tune CustomX265Tune { get; set; } = X265Tune.None;
+    public VideoCpuUsageMode VideoCpuUsage { get; set; } = VideoCpuUsageMode.Auto;
+    public int CustomVideoThreadCount { get; set; } = Math.Max(1, Environment.ProcessorCount / 2);
+    public string CustomX265Parameters { get; set; } = string.Empty;
     public bool UseCustomAssStyle { get; set; } = true;
     public int PlayResX { get; set; } = 1920;
     public int PlayResY { get; set; } = 1080;
@@ -36,6 +49,7 @@ public sealed class ProcessingPresetSettings
     public bool MaintenanceUpdateAssStyle { get; set; } = true;
     public bool MaintenanceUpdateFonts { get; set; } = true;
     public bool MaintenanceApplyAudioSettings { get; set; } = true;
+    public bool MaintenanceApplyVideoSettings { get; set; } = true;
     public bool MaintenanceRefreshTags { get; set; } = true;
     public bool MaintenanceDetectLegacyAss { get; set; } = true;
     public string MaintenanceLegacyAssStyles { get; set; } = AppSettings.DefaultMaintenanceLegacyAssStyles;
@@ -52,6 +66,14 @@ public sealed class ProcessingPresetSettings
     public double LapseLargeCorrectionWarningSeconds { get; set; } = 1;
     public bool MaintenanceUpdateLapseSync { get; set; } = true;
     public bool MaintenanceForceLapseResync { get; set; }
+
+    public void NormalizeLegacyValues()
+    {
+        AudioProcessingMode ??= ConvertAudioToAac
+            ? SubMuxBatch.Core.Configuration.AudioProcessingMode.ConvertWhenNeeded
+            : SubMuxBatch.Core.Configuration.AudioProcessingMode.KeepOriginal;
+        ConvertAudioToAac = false;
+    }
 
     public static ProcessingPresetSettings Capture(AppSettings value) => new()
     {
@@ -70,8 +92,20 @@ public sealed class ProcessingPresetSettings
         CleanOutputMetadata = value.CleanOutputMetadata,
         FilterAudioTracksByLanguage = value.FilterAudioTracksByLanguage,
         SelectedAudioLanguage = value.SelectedAudioLanguage,
-        ConvertAudioToAac = value.ConvertAudioToAac,
+        AudioProcessingMode = value.AudioProcessingMode,
+        AudioCodec = value.AudioCodec,
         AudioChannelMode = value.AudioChannelMode,
+        AudioBitrateKbps = value.AudioBitrateKbps,
+        VideoProcessingMode = value.VideoProcessingMode,
+        VideoQualityProfile = value.VideoQualityProfile,
+        CustomX265Preset = value.CustomX265Preset,
+        CustomVideoRateControl = value.CustomVideoRateControl,
+        CustomX265Crf = value.CustomX265Crf,
+        CustomVideoBitrateKbps = value.CustomVideoBitrateKbps,
+        CustomX265Tune = value.CustomX265Tune,
+        VideoCpuUsage = value.VideoCpuUsage,
+        CustomVideoThreadCount = value.CustomVideoThreadCount,
+        CustomX265Parameters = value.CustomX265Parameters,
         UseCustomAssStyle = value.UseCustomAssStyle,
         PlayResX = value.PlayResX,
         PlayResY = value.PlayResY,
@@ -79,6 +113,7 @@ public sealed class ProcessingPresetSettings
         MaintenanceUpdateAssStyle = value.MaintenanceUpdateAssStyle,
         MaintenanceUpdateFonts = value.MaintenanceUpdateFonts,
         MaintenanceApplyAudioSettings = value.MaintenanceApplyAudioSettings,
+        MaintenanceApplyVideoSettings = value.MaintenanceApplyVideoSettings,
         MaintenanceRefreshTags = value.MaintenanceRefreshTags,
         MaintenanceDetectLegacyAss = value.MaintenanceDetectLegacyAss,
         MaintenanceLegacyAssStyles = value.MaintenanceLegacyAssStyles,
@@ -114,8 +149,24 @@ public sealed class ProcessingPresetSettings
         value.CleanOutputMetadata = CleanOutputMetadata;
         value.FilterAudioTracksByLanguage = FilterAudioTracksByLanguage;
         value.SelectedAudioLanguage = SelectedAudioLanguage;
-        value.ConvertAudioToAac = ConvertAudioToAac;
+        value.AudioProcessingMode = AudioProcessingMode
+            ?? (ConvertAudioToAac
+                ? SubMuxBatch.Core.Configuration.AudioProcessingMode.ConvertWhenNeeded
+                : SubMuxBatch.Core.Configuration.AudioProcessingMode.KeepOriginal);
+        value.ConvertAudioToAac = false;
+        value.AudioCodec = AudioCodec;
         value.AudioChannelMode = AudioChannelMode;
+        value.AudioBitrateKbps = AudioBitrateKbps;
+        value.VideoProcessingMode = VideoProcessingMode;
+        value.VideoQualityProfile = VideoQualityProfile;
+        value.CustomX265Preset = CustomX265Preset;
+        value.CustomVideoRateControl = CustomVideoRateControl;
+        value.CustomX265Crf = CustomX265Crf;
+        value.CustomVideoBitrateKbps = CustomVideoBitrateKbps;
+        value.CustomX265Tune = CustomX265Tune;
+        value.VideoCpuUsage = VideoCpuUsage;
+        value.CustomVideoThreadCount = CustomVideoThreadCount;
+        value.CustomX265Parameters = CustomX265Parameters;
         value.UseCustomAssStyle = UseCustomAssStyle;
         value.PlayResX = PlayResX;
         value.PlayResY = PlayResY;
@@ -123,6 +174,7 @@ public sealed class ProcessingPresetSettings
         value.MaintenanceUpdateAssStyle = MaintenanceUpdateAssStyle;
         value.MaintenanceUpdateFonts = MaintenanceUpdateFonts;
         value.MaintenanceApplyAudioSettings = MaintenanceApplyAudioSettings;
+        value.MaintenanceApplyVideoSettings = MaintenanceApplyVideoSettings;
         value.MaintenanceRefreshTags = MaintenanceRefreshTags;
         value.MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAss;
         value.MaintenanceLegacyAssStyles = MaintenanceLegacyAssStyles;
@@ -193,6 +245,7 @@ public sealed class ProcessingPresetStore
                 }
 
                 ValidateFileName(document.Name);
+                document.Settings.NormalizeLegacyValues();
                 if (items.Any(item => string.Equals(item.Id, document.Id, StringComparison.Ordinal)))
                 {
                     throw new InvalidDataException($"Duplicate preset ID: {document.Id}");

@@ -1,3 +1,4 @@
+using SubMuxBatch.Core.Configuration;
 using SubMuxBatch.Core.External;
 using SubMuxBatch.Core.Fonts;
 using SubMuxBatch.Core.Localization;
@@ -31,6 +32,7 @@ internal static class ProcessingDecisionFormatter
                 messages.Add(CoreText.Get(
                     "Decision_AudioConverted",
                     DescribeTrack(track),
+                    transcode.Codec == AudioCodec.Opus ? "Opus" : "AAC-LC",
                     transcode.OutputChannels?.ToString() ?? track.AudioChannels?.ToString() ?? "?",
                     transcode.BitrateKbps));
             }
@@ -44,6 +46,38 @@ internal static class ProcessingDecisionFormatter
             .Where(static track => string.Equals(track.Type, "audio", StringComparison.OrdinalIgnoreCase))
             .Select(track => CoreText.Get("Decision_AudioRetained", DescribeTrack(track)))
             .ToArray();
+
+    public static string DescribeVideoPlan(MkvTrackInfo source, AppSettings settings)
+    {
+        var codec = string.IsNullOrWhiteSpace(source.CodecName) ? source.CodecId : source.CodecName;
+        var profile = settings.VideoQualityProfile switch
+        {
+            VideoQualityProfile.Fast => "faster / CRF 24",
+            VideoQualityProfile.Balanced => "medium / CRF 23",
+            VideoQualityProfile.HighQuality => "medium / CRF 21",
+            VideoQualityProfile.Custom => settings.CustomVideoRateControl switch
+            {
+                VideoRateControlMode.ConstantQuality =>
+                    $"{settings.CustomX265Preset.ToString().ToLowerInvariant()} / CRF {settings.CustomX265Crf}",
+                VideoRateControlMode.AverageBitrate =>
+                    $"{settings.CustomX265Preset.ToString().ToLowerInvariant()} / {settings.CustomVideoBitrateKbps} kbps / 1-pass",
+                VideoRateControlMode.TwoPassAverageBitrate =>
+                    $"{settings.CustomX265Preset.ToString().ToLowerInvariant()} / {settings.CustomVideoBitrateKbps} kbps / 2-pass",
+                _ => throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoEncoding"))
+            },
+            _ => throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoEncoding"))
+        };
+        var cpu = settings.VideoCpuUsage switch
+        {
+            VideoCpuUsageMode.Auto => CoreText.Get("Decision_VideoCpuAuto"),
+            VideoCpuUsageMode.Low => CoreText.Get("Decision_VideoCpuLow"),
+            VideoCpuUsageMode.Normal => CoreText.Get("Decision_VideoCpuNormal"),
+            VideoCpuUsageMode.Maximum => CoreText.Get("Decision_VideoCpuMaximum"),
+            VideoCpuUsageMode.Custom => CoreText.Get("Decision_VideoCpuThreads", settings.CustomVideoThreadCount),
+            _ => throw new InvalidOperationException(CoreText.Get("Settings_InvalidVideoEncoding"))
+        };
+        return CoreText.Get("Decision_VideoConverted", source.Id ?? 0, codec, profile, cpu);
+    }
 
     public static string DescribeFontAttachments(IReadOnlyList<FontAttachmentFile> attachments) =>
         attachments.Count == 0

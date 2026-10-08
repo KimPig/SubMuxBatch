@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Navigation;
 using SubMuxBatch.App.Localization;
 using SubMuxBatch.App.Services;
@@ -100,12 +101,26 @@ public partial class SettingsWindow : Window
         {
             AudioLanguageComboBox.SelectedValue = AudioTrackLanguage.Japanese.ToString();
         }
-        ConvertAudioToAacCheckBox.IsChecked = settings.ConvertAudioToAac;
+        AudioProcessingModeComboBox.SelectedValue = settings.AudioProcessingMode.ToString();
+        AudioCodecComboBox.SelectedValue = settings.AudioCodec.ToString();
         AudioChannelModeComboBox.SelectedValue = settings.AudioChannelMode.ToString();
         if (AudioChannelModeComboBox.SelectedIndex < 0)
         {
             AudioChannelModeComboBox.SelectedValue = AudioChannelMode.PreserveChannels.ToString();
         }
+        AudioBitrateComboBox.Text = settings.AudioBitrateKbps.ToString(CultureInfo.InvariantCulture);
+        VideoProcessingModeComboBox.SelectedValue = settings.VideoProcessingMode.ToString();
+        VideoQualityProfileComboBox.SelectedValue = settings.VideoQualityProfile.ToString();
+        CustomX265PresetComboBox.SelectedValue = settings.CustomX265Preset.ToString();
+        CustomVideoRateControlComboBox.SelectedValue = settings.CustomVideoRateControl.ToString();
+        CustomX265CrfTextBox.Text = settings.CustomX265Crf.ToString(CultureInfo.InvariantCulture);
+        CustomVideoBitrateComboBox.Text = settings.CustomVideoBitrateKbps.ToString(CultureInfo.InvariantCulture);
+        CustomX265TuneComboBox.SelectedValue = settings.CustomX265Tune.ToString();
+        VideoCpuUsageComboBox.SelectedValue = settings.VideoCpuUsage.ToString();
+        CustomVideoThreadCountTextBox.Text = settings.CustomVideoThreadCount.ToString(CultureInfo.InvariantCulture);
+        CustomX265ParametersTextBox.Text = settings.CustomX265Parameters;
+        UpdateAudioEncodingControls();
+        UpdateVideoEncodingControls();
         ConcurrentJobCountComboBox.SelectedValue = settings.ConcurrentJobCount.ToString();
         if (ConcurrentJobCountComboBox.SelectedIndex < 0)
         {
@@ -117,6 +132,7 @@ public partial class SettingsWindow : Window
         MaintenanceUpdateAssStyleCheckBox.IsChecked = settings.MaintenanceUpdateAssStyle;
         MaintenanceUpdateFontsCheckBox.IsChecked = settings.MaintenanceUpdateFonts;
         MaintenanceApplyAudioSettingsCheckBox.IsChecked = settings.MaintenanceApplyAudioSettings;
+        MaintenanceApplyVideoSettingsCheckBox.IsChecked = settings.MaintenanceApplyVideoSettings;
         MaintenanceRefreshTagsCheckBox.IsChecked = settings.MaintenanceRefreshTags;
         MaintenanceDetectLegacyAssCheckBox.IsChecked = settings.MaintenanceDetectLegacyAss;
         MaintenanceLegacyAssStylesTextBox.Text = settings.MaintenanceLegacyAssStyles;
@@ -204,7 +220,9 @@ public partial class SettingsWindow : Window
                 throw new InvalidOperationException(AppText.Get("Settings_SelectAudioLanguageError"));
             }
             updated.SelectedAudioLanguage = audioLanguage;
-            updated.ConvertAudioToAac = ConvertAudioToAacCheckBox.IsChecked == true;
+            updated.AudioProcessingMode = ParseSelectedEnum<AudioProcessingMode>(
+                AudioProcessingModeComboBox, "Settings_SelectAudioProcessingModeError");
+            updated.AudioCodec = ParseSelectedEnum<AudioCodec>(AudioCodecComboBox, "Settings_SelectAudioCodecError");
             if (AudioChannelModeComboBox.SelectedValue is not string selectedAudioChannelMode
                 || !Enum.TryParse(selectedAudioChannelMode, out AudioChannelMode audioChannelMode)
                 || !Enum.IsDefined(audioChannelMode))
@@ -212,6 +230,43 @@ public partial class SettingsWindow : Window
                 throw new InvalidOperationException(AppText.Get("Settings_SelectAudioChannelModeError"));
             }
             updated.AudioChannelMode = audioChannelMode;
+            if (!int.TryParse(AudioBitrateComboBox.Text.Trim(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var audioBitrateKbps))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_InvalidAudioBitrate"));
+            }
+            updated.AudioBitrateKbps = audioBitrateKbps;
+            updated.VideoProcessingMode = ParseSelectedEnum<VideoProcessingMode>(
+                VideoProcessingModeComboBox, "Settings_SelectVideoProcessingModeError");
+            updated.VideoQualityProfile = ParseSelectedEnum<VideoQualityProfile>(
+                VideoQualityProfileComboBox, "Settings_SelectVideoQualityError");
+            updated.CustomX265Preset = ParseSelectedEnum<X265Preset>(
+                CustomX265PresetComboBox, "Settings_SelectX265PresetError");
+            updated.CustomVideoRateControl = ParseSelectedEnum<VideoRateControlMode>(
+                CustomVideoRateControlComboBox, "Settings_SelectVideoRateControlError");
+            if (!int.TryParse(CustomX265CrfTextBox.Text.Trim(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var customX265Crf))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_InvalidVideoCrf"));
+            }
+            updated.CustomX265Crf = customX265Crf;
+            if (!int.TryParse(CustomVideoBitrateComboBox.Text.Trim(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var customVideoBitrateKbps))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_InvalidVideoBitrate"));
+            }
+            updated.CustomVideoBitrateKbps = customVideoBitrateKbps;
+            updated.CustomX265Tune = ParseSelectedEnum<X265Tune>(
+                CustomX265TuneComboBox, "Settings_SelectX265TuneError");
+            updated.VideoCpuUsage = ParseSelectedEnum<VideoCpuUsageMode>(
+                VideoCpuUsageComboBox, "Settings_SelectVideoCpuUsageError");
+            if (!int.TryParse(CustomVideoThreadCountTextBox.Text.Trim(), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var customVideoThreadCount))
+            {
+                throw new InvalidOperationException(AppText.Get("Settings_InvalidVideoThreadCount"));
+            }
+            updated.CustomVideoThreadCount = customVideoThreadCount;
+            updated.CustomX265Parameters = CustomX265ParametersTextBox.Text.Trim();
             if (ConcurrentJobCountComboBox.SelectedValue is not string concurrentJobCountText
                 || !int.TryParse(concurrentJobCountText, out var concurrentJobCount))
             {
@@ -231,6 +286,7 @@ public partial class SettingsWindow : Window
             updated.MaintenanceUpdateAssStyle = MaintenanceUpdateAssStyleCheckBox.IsChecked == true;
             updated.MaintenanceUpdateFonts = MaintenanceUpdateFontsCheckBox.IsChecked == true;
             updated.MaintenanceApplyAudioSettings = MaintenanceApplyAudioSettingsCheckBox.IsChecked == true;
+            updated.MaintenanceApplyVideoSettings = MaintenanceApplyVideoSettingsCheckBox.IsChecked == true;
             updated.MaintenanceRefreshTags = MaintenanceRefreshTagsCheckBox.IsChecked == true;
             updated.MaintenanceDetectLegacyAss = MaintenanceDetectLegacyAssCheckBox.IsChecked == true;
             updated.MaintenanceLegacyAssStyles = MaintenanceLegacyAssStylesTextBox.Text.Trim();
@@ -677,6 +733,76 @@ public partial class SettingsWindow : Window
     private static bool TryParseResolution(string value, out int resolution) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.CurrentCulture, out resolution)
         && resolution is >= 16 and <= 16384;
+
+    private void AudioSettings_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateAudioEncodingControls();
+
+    private void VideoSettings_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateVideoEncodingControls();
+
+    private void UpdateAudioEncodingControls()
+    {
+        if (AudioProcessingModeComboBox is null || AudioCodecComboBox is null)
+        {
+            return;
+        }
+        var enabled = !string.Equals(
+            AudioProcessingModeComboBox.SelectedValue as string,
+            AudioProcessingMode.KeepOriginal.ToString(),
+            StringComparison.Ordinal);
+        AudioCodecComboBox.IsEnabled = enabled;
+        AudioChannelModeComboBox.IsEnabled = enabled;
+        AudioBitrateComboBox.IsEnabled = enabled;
+    }
+
+    private void UpdateVideoEncodingControls()
+    {
+        if (VideoProcessingModeComboBox is null || VideoEncodingOptionsPanel is null)
+        {
+            return;
+        }
+        var enabled = !string.Equals(
+            VideoProcessingModeComboBox.SelectedValue as string,
+            VideoProcessingMode.KeepOriginal.ToString(),
+            StringComparison.Ordinal);
+        VideoEncodingOptionsPanel.IsEnabled = enabled;
+        VideoCpuOptionsCard.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        CustomVideoOptionsCard.Visibility = enabled
+            && string.Equals(
+                VideoQualityProfileComboBox.SelectedValue as string,
+                VideoQualityProfile.Custom.ToString(),
+                StringComparison.Ordinal)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (CustomVideoRateControlComboBox is not null)
+        {
+            var constantQuality = string.Equals(
+                CustomVideoRateControlComboBox.SelectedValue as string,
+                VideoRateControlMode.ConstantQuality.ToString(),
+                StringComparison.Ordinal);
+            CustomX265CrfTextBox.IsEnabled = constantQuality;
+            CustomVideoBitrateComboBox.IsEnabled = !constantQuality;
+        }
+        if (VideoCpuUsageComboBox is not null)
+        {
+            CustomVideoThreadCountTextBox.IsEnabled = string.Equals(
+                VideoCpuUsageComboBox.SelectedValue as string,
+                VideoCpuUsageMode.Custom.ToString(),
+                StringComparison.Ordinal);
+        }
+    }
+
+    private static TEnum ParseSelectedEnum<TEnum>(ComboBox comboBox, string errorKey)
+        where TEnum : struct, Enum
+    {
+        if (comboBox.SelectedValue is string selected
+            && Enum.TryParse<TEnum>(selected, out var value)
+            && Enum.IsDefined(value))
+        {
+            return value;
+        }
+        throw new InvalidOperationException(AppText.Get(errorKey));
+    }
 
     private static AssStyleDefinition ParseStyleOrDefault(string? styleLine) =>
         AssStyleDefinition.TryParse(styleLine, out var definition)

@@ -36,7 +36,11 @@
   <ItemGroup>
     <EmbeddedResource Include="Localization\AppStrings.en.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.en.json" WithCulture="false" />
     <EmbeddedResource Include="Localization\AppStrings.ko.json" LogicalName="SubMuxBatch.App.Localization.AppStrings.ko.json" WithCulture="false" />
-    <EmbeddedResource Include="..\..\licenses\FFmpeg-LGPL-3.0.txt"
-                      LogicalName="SubMuxBatch.App.Resources.FFmpeg-LGPL-3.0.txt" />
+    <EmbeddedResource Include="..\..\licenses\ffmpeg\8.1\FFmpeg-GPL-3.0.txt"
+                      LogicalName="SubMuxBatch.App.Resources.FFmpeg-GPL-3.0.txt" />
+    <EmbeddedResource Include="..\..\licenses\ffmpeg\8.1\x265-GPL-2.0-or-later.txt"
+                      LogicalName="SubMuxBatch.App.Resources.x265-GPL-2.0-or-later.txt" />
+    <EmbeddedResource Include="..\..\licenses\ffmpeg\8.1\Opus-BSD-3-Clause.txt"
+                      LogicalName="SubMuxBatch.App.Resources.Opus-BSD-3-Clause.txt" />
   </ItemGroup>
 </Project>
