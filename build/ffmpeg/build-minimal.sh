@@ -93,6 +93,7 @@ pushd "$FFMPEG_SOURCE" >/dev/null
   --enable-indev=lavfi \
   --extra-cflags="-I$PREFIX/include" \
   --extra-ldflags="-L$PREFIX/lib -static -static-libgcc -static-libstdc++" \
+  --extra-ldexeflags="-static -static-libgcc -static-libstdc++" \
   --extra-libs="-lstdc++ -lpthread"
 make -j"$JOBS" ffmpeg.exe
 popd >/dev/null

@@ -12,12 +12,18 @@ if (-not (Test-Path -LiteralPath $FfmpegPath -PathType Leaf)) {
 
 function Invoke-FfmpegText([string[]] $Arguments) {
     $previous = $ErrorActionPreference
+    $previousPath = $env:PATH
     try {
         $ErrorActionPreference = 'Continue'
+        # Validate that the executable does not accidentally depend on MinGW
+        # runtime DLLs installed on the runner. Windows system DLLs remain
+        # available through System32.
+        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
         $output = & $FfmpegPath @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
+        $env:PATH = $previousPath
     }
     if ($exitCode -ne 0) {
         throw "FFmpeg command failed ($exitCode): $($Arguments -join ' ')`n$($output -join "`n")"
