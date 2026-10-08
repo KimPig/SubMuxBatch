@@ -164,9 +164,9 @@ Create a self-contained Windows build:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Publish.ps1
 ```
 
-The default output is written to `artifacts\publish\win-x64`. The publish script first verifies the checked-in corresponding source archives and license notices, then embeds FFmpeg 8.1, pinned official MKVToolNix 102.0 portable tools, official LAPSE 2.2.4, MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE. A validated custom FFmpeg artifact can be selected with `-BundledFfmpegPath`; until its first CI build is pinned, publishing falls back to the documented BtbN build.
+The default output is written to `artifacts\publish\win-x64`. The publish script first verifies the checked-in corresponding source archives and license notices, then embeds the repository-pinned SubMux FFmpeg 8.1 build, official MKVToolNix 102.0 portable tools, official LAPSE 2.2.4, MediaInfoLib, libse, and SubMux Sans in the self-contained single EXE. A separately validated FFmpeg artifact can still be selected explicitly with `-BundledFfmpegPath`.
 
-The reproducible SubMux FFmpeg workflow is `.github/workflows/build-ffmpeg.yml`. It cross-compiles a static Windows x64 GPL build from the checked-in FFmpeg, x265, and Opus source archives, then verifies codecs, license configuration, HEVC Main10 output, and Opus output on a Windows runner.
+The reproducible SubMux FFmpeg workflow is `.github/workflows/build-ffmpeg.yml`. It cross-compiles a static Windows x64 GPL build from the checked-in FFmpeg, x265, and Opus source archives, then verifies the absence of external MinGW runtime dependencies, codec and license configuration, HEVC Main10 output, and Opus output on a clean Windows runner. The validated executable used by normal publishing is pinned under `third-party-binaries/ffmpeg/8.1`.
 
 GitHub releases use `build\Publish-GitHubRelease.ps1`, which validates that the ZIP contains exactly one root `SubMuxBatch.exe` and always formats the description with a single `## What's changed` section.
 

@@ -14,14 +14,12 @@ $testPath = Join-Path $projectRoot 'tests\SubMuxBatch.Core.Tests\SubMuxBatch.Cor
 $outputPath = Join-Path $projectRoot "artifacts\publish\$Runtime"
 $version = Get-Date -Format 'yyyy.MM.dd'
 $assemblyVersion = Get-Date -Format 'yyyy.M.d.0'
-$ffmpegReleaseTag = 'autobuild-2026-10-07-13-07'
-$ffmpegAssetPattern = switch ($Runtime) {
-    'win-x64' { '^ffmpeg-n8\.1\.3-14-g330caae0c1-win64-gpl-8\.1\.zip$' }
-    'win-arm64' { '^ffmpeg-n8\.1\.3-14-g330caae0c1-winarm64-gpl-8\.1\.zip$' }
-}
+$ffmpegBinaryArchive = Join-Path $projectRoot 'third-party-binaries\ffmpeg\8.1\submux-ffmpeg-8.1-win-x64.zip'
+$ffmpegBinaryArchiveHash = '222CE5F119932B1004E62D696DD7CB494895A1DF7EED015B4FA02F7FE07C0522'
+$ffmpegExecutableHash = 'E65635765731D860FE2D250D51F6846AE4C751E0DC6E0691DA362554851B147E'
 $ffmpegCache = Join-Path $projectRoot "artifacts\dependencies\ffmpeg\$Runtime"
 $ffmpegExecutable = Join-Path $ffmpegCache 'ffmpeg.exe'
-$ffmpegDigestPath = Join-Path $ffmpegCache 'archive.sha256'
+$ffmpegDigestPath = Join-Path $ffmpegCache 'executable.sha256'
 $mkvToolNixVersion = '102.0'
 $mkvToolNixArchiveUrl = "https://mkvtoolnix.download/windows/releases/$mkvToolNixVersion/mkvtoolnix-64-bit-$mkvToolNixVersion.zip"
 $mkvToolNixArchiveHash = 'C02E918900F6D945D9307B426237E456378B79A200589AC6928DE39064409A44'
@@ -82,86 +80,33 @@ function Get-BundledFfmpeg {
         & (Join-Path $projectRoot 'build\ffmpeg\verify-build.ps1') -FfmpegPath $ffmpegExecutable
         return
     }
-    $headers = @{ 'User-Agent' = 'SubMuxBatch-Publish' }
-    $release = Invoke-RestMethod `
-        -Headers $headers `
-        -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$ffmpegReleaseTag"
-    $asset = @($release.assets | Where-Object { $_.name -match $ffmpegAssetPattern })
-    if ($asset.Count -ne 1) {
-        throw "Could not resolve exactly one FFmpeg 8.1 GPL asset for $Runtime."
+    if ($Runtime -ne 'win-x64') {
+        throw 'The repository-pinned SubMux FFmpeg build supports win-x64 only. Supply -BundledFfmpegPath for another runtime.'
+    }
+    if (-not (Test-FileHash $ffmpegBinaryArchive $ffmpegBinaryArchiveHash)) {
+        throw 'The repository-pinned SubMux FFmpeg archive is missing or failed its SHA-256 check.'
     }
 
-    $expectedDigest = [string]$asset[0].digest
-    if (-not $expectedDigest.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "The FFmpeg release did not provide a SHA-256 digest: $($asset[0].name)"
-    }
-    $expectedHash = $expectedDigest.Substring(7).ToUpperInvariant()
     $cachedHash = if (Test-Path -LiteralPath $ffmpegDigestPath) {
         (Get-Content -LiteralPath $ffmpegDigestPath -Raw).Trim().ToUpperInvariant()
     } else {
         ''
     }
-    if ((Test-Path -LiteralPath $ffmpegExecutable) -and $cachedHash -eq $expectedHash) {
-        return
-    }
-
-    $archivePath = Join-Path $ffmpegCache 'ffmpeg.zip'
-    $extractPath = Join-Path $ffmpegCache 'extract'
-    Invoke-WebRequest `
-        -Headers $headers `
-        -Uri ([string]$asset[0].browser_download_url) `
-        -OutFile $archivePath
-    $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToUpperInvariant()
-    if ($actualHash -ne $expectedHash) {
-        throw "FFmpeg archive hash mismatch. Expected $expectedHash but received $actualHash."
-    }
-
-    if (Test-Path -LiteralPath $extractPath) {
-        $resolvedExtract = [System.IO.Path]::GetFullPath($extractPath)
-        $resolvedCache = ([System.IO.Path]::GetFullPath($ffmpegCache)).TrimEnd(
-            [System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-        if (-not $resolvedExtract.StartsWith($resolvedCache, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to clean unexpected FFmpeg extraction path: $resolvedExtract"
+    if (-not (Test-FileHash $ffmpegExecutable $ffmpegExecutableHash) -or $cachedHash -ne $ffmpegExecutableHash) {
+        $extractPath = Join-Path $ffmpegCache 'extract'
+        Remove-VerifiedCacheDirectory $extractPath $ffmpegCache
+        Expand-Archive -LiteralPath $ffmpegBinaryArchive -DestinationPath $extractPath -Force
+        $extractedExecutable = @(Get-ChildItem -LiteralPath $extractPath -Filter 'ffmpeg.exe' -File -Recurse)
+        if ($extractedExecutable.Count -ne 1 `
+            -or -not (Test-FileHash $extractedExecutable[0].FullName $ffmpegExecutableHash)) {
+            throw 'The repository-pinned SubMux FFmpeg executable failed its SHA-256 check.'
         }
-        Remove-Item -LiteralPath $extractPath -Recurse -Force
+        Copy-Item -LiteralPath $extractedExecutable[0].FullName -Destination $ffmpegExecutable -Force
+        Set-Content -LiteralPath $ffmpegDigestPath -Value $ffmpegExecutableHash -Encoding ascii
+        Remove-VerifiedCacheDirectory $extractPath $ffmpegCache
     }
-    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
-    $extractedExecutable = @(Get-ChildItem -LiteralPath $extractPath -Filter 'ffmpeg.exe' -File -Recurse)
-    if ($extractedExecutable.Count -ne 1) {
-        throw 'The downloaded FFmpeg archive did not contain exactly one ffmpeg.exe.'
-    }
-    Copy-Item -LiteralPath $extractedExecutable[0].FullName -Destination $ffmpegExecutable -Force
-    Set-Content -LiteralPath $ffmpegDigestPath -Value $expectedHash -Encoding ascii
-    Remove-Item -LiteralPath $archivePath -Force
-    Remove-Item -LiteralPath $extractPath -Recurse -Force
 
-    # FFmpeg writes its banner to stderr even on success. Windows PowerShell
-    # converts those lines to NativeCommandError records when the script-wide
-    # error preference is Stop, so collect them under Continue and validate the
-    # native exit code explicitly below.
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $versionOutput = & $ffmpegExecutable -version 2>&1
-        $versionExitCode = $LASTEXITCODE
-        $licenseOutput = & $ffmpegExecutable -L 2>&1
-        $licenseExitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    $versionText = $versionOutput -join "`n"
-    $licenseText = $licenseOutput -join "`n"
-    $invalidFfmpeg = $versionExitCode -ne 0 `
-        -or $licenseExitCode -ne 0 `
-        -or $versionText -notmatch 'ffmpeg version n?8\.1' `
-        -or $versionText -notmatch '--enable-gpl' `
-        -or $versionText -notmatch '--enable-libx265' `
-        -or $versionText -notmatch '--enable-libopus' `
-        -or $versionText -match '--enable-nonfree' `
-        -or $licenseText -notmatch 'GNU General Public License'
-    if ($invalidFfmpeg) {
-        throw 'The downloaded FFmpeg executable did not pass the GPL/libx265/libopus build validation.'
-    }
+    & (Join-Path $projectRoot 'build\ffmpeg\verify-build.ps1') -FfmpegPath $ffmpegExecutable
 }
 
 function Get-BundledMkvToolNix {

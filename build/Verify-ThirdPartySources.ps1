@@ -5,7 +5,6 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 $expectedFiles = [ordered]@{
-    'third-party-sources\ffmpeg\8.1\btbn-ffmpeg-builds-9acad4a9ef1583096af7836cc1e9c8cbcb4d3950.tar.gz' = 'F9BD160A794173DB7E838AD5E8841EBBA845CE6D012E830951946AA85B2967AF'
     'third-party-sources\ffmpeg\8.1\ffmpeg-330caae0c1.tar.gz' = '67B5876EE973A26F267280B2C1EB851A0AC7A502382D20E41B7A819111886AF9'
     'third-party-sources\ffmpeg\8.1\x265-020d7054dbecfd3be8e62efe33ff8a305d41856e.tar.gz' = 'ADE2FD082D1A3D7ADF89BB38EB54A5CBF6AAD6C1C7ED130C89C7BF2CD626484D'
     'third-party-sources\ffmpeg\8.1\opus-1.5.2.tar.gz' = '65C1D2F78B9F2FB20082C38CBE47C951AD5839345876E46941612EE87F9A7CE1'
